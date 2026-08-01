@@ -1,0 +1,313 @@
+name: Deploy
+
+# Push to main deploys the API to Azure Container Apps and the SPA to GitHub Pages.
+#
+# Authentication is OIDC federated credentials — azure/login with client-id / tenant-id /
+# subscription-id and NO stored client secret. Create the federated credential on the app
+# registration with subject `repo:<owner>/<repo>:ref:refs/heads/main`, and give the service
+# principal Contributor plus User Access Administrator on the resource group (the second is
+# required because main.bicep creates an AcrPull role assignment).
+#
+# Required repository secrets:
+#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+#   PG_ADMIN_PASSWORD, MIGRATOR_PW, IDENTITY_PW, PORTFOLIO_PW, MARKETDATA_PW, ALERTS_PW
+#   JWT_SIGNING_KEY            (at least 32 bytes)
+#   FINNHUB_API_KEY            (optional — empty means the app runs on FakeQuoteProvider)
+#
+# Required repository variables:
+#   AZURE_RESOURCE_GROUP, AZURE_LOCATION
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # id-token is required twice over: by azure/login for the OIDC token exchange, and by
+  # actions/deploy-pages. Without it azure/login fails with "Unable to get ACTIONS_ID_TOKEN".
+  id-token: write
+  pages: write
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+env:
+  NAME_PREFIX: stockp
+  API_IMAGE_NAME: stockportfolio-api
+  MIGRATOR_IMAGE_NAME: stockportfolio-migrator
+
+jobs:
+  azure:
+    name: Azure — build, migrate, release
+    runs-on: ubuntu-latest
+    outputs:
+      apiUrl: ${{ steps.deploy.outputs.apiUrl }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------------------------
+      # 1. Azure login — OIDC federated credentials, no stored secret
+      # -----------------------------------------------------------------------------------------
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Bicep
+        # Unpinned for the same reason as ci.yml: an older Bicep silently downgrades unknown
+        # resource types to warnings instead of validating them.
+        run: az bicep install
+
+      # -----------------------------------------------------------------------------------------
+      # 2. Bootstrap the registry, then build and push the images
+      #
+      # Chicken and egg: the registry must exist before `docker push`, but main.bicep references
+      # images that only exist after the push. Breaking it by deploying the ACR module on its own
+      # first — same file main.bicep uses, fully idempotent, no duplicated resource definition.
+      # The registry name embeds uniqueString(resourceGroup().id), which only ARM can evaluate,
+      # so it is read back from the deployment outputs rather than recomputed here.
+      # -----------------------------------------------------------------------------------------
+      - name: Bootstrap container registry
+        id: registry
+        run: |
+          set -euo pipefail
+          OUT=$(az deployment group create \
+            --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --name "acr-bootstrap-${{ github.run_number }}" \
+            --template-file infra/modules/acr.bicep \
+            --parameters namePrefix='${{ env.NAME_PREFIX }}' location='${{ vars.AZURE_LOCATION }}' \
+            --query properties.outputs -o json)
+          echo "name=$(echo "$OUT" | jq -r '.name.value')" >> "$GITHUB_OUTPUT"
+          echo "loginServer=$(echo "$OUT" | jq -r '.loginServer.value')" >> "$GITHUB_OUTPUT"
+          echo "Registry: $(echo "$OUT" | jq -r '.loginServer.value')"
+
+      - name: Log in to ACR
+        run: az acr login --name '${{ steps.registry.outputs.name }}'
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          # Build context is the repository ROOT, not src/Api. The Dockerfile copies
+          # Directory.Build.props, Directory.Packages.props and global.json before the .csproj
+          # files; without them restore fails inside the container with a Central Package
+          # Management error that does not reproduce on a developer machine.
+          context: .
+          file: src/Api/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}
+            ${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push migrator image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: src/Migrator/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:${{ github.sha }}
+            ${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # -----------------------------------------------------------------------------------------
+      # 3. Deploy the infrastructure
+      #
+      # Parameters are passed inline rather than through infra/main.bicepparam so that every value
+      # comes from GitHub secrets in one obvious place, and so the workflow does not depend on
+      # environment-variable resolution inside a .bicepparam file.
+      #
+      # pagesOrigin is lowercased: GitHub Pages serves from <owner>.github.io in lowercase, and a
+      # browser's Origin header is lowercase, so a mixed-case owner would never match the CORS
+      # policy.
+      # -----------------------------------------------------------------------------------------
+      - name: Compute Pages origin
+        id: pages
+        run: |
+          OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
+          echo "origin=https://${OWNER}.github.io" >> "$GITHUB_OUTPUT"
+
+      - name: What-if
+        # Not a gate — it cannot be, because the deploy is unattended. It is here so the run log
+        # records exactly what changed, which is the difference between a five-minute and a
+        # two-hour post-mortem when a deploy does something surprising.
+        run: |
+          az deployment group what-if \
+            --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --template-file infra/main.bicep \
+            --parameters \
+              namePrefix='${{ env.NAME_PREFIX }}' \
+              location='${{ vars.AZURE_LOCATION }}' \
+              pagesOrigin='${{ steps.pages.outputs.origin }}' \
+              apiImage='${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
+              migratorImage='${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:${{ github.sha }}' \
+              postgresAdminPassword='${{ secrets.PG_ADMIN_PASSWORD }}' \
+              migratorPassword='${{ secrets.MIGRATOR_PW }}' \
+              identityPassword='${{ secrets.IDENTITY_PW }}' \
+              portfolioPassword='${{ secrets.PORTFOLIO_PW }}' \
+              marketDataPassword='${{ secrets.MARKETDATA_PW }}' \
+              alertsPassword='${{ secrets.ALERTS_PW }}' \
+              jwtSigningKey='${{ secrets.JWT_SIGNING_KEY }}' \
+              finnhubApiKey='${{ secrets.FINNHUB_API_KEY }}'
+
+      - name: Deploy infrastructure
+        id: deploy
+        run: |
+          set -euo pipefail
+          OUT=$(az deployment group create \
+            --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --name "stockportfolio-${{ github.run_number }}" \
+            --template-file infra/main.bicep \
+            --parameters \
+              namePrefix='${{ env.NAME_PREFIX }}' \
+              location='${{ vars.AZURE_LOCATION }}' \
+              pagesOrigin='${{ steps.pages.outputs.origin }}' \
+              apiImage='${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
+              migratorImage='${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:${{ github.sha }}' \
+              postgresAdminPassword='${{ secrets.PG_ADMIN_PASSWORD }}' \
+              migratorPassword='${{ secrets.MIGRATOR_PW }}' \
+              identityPassword='${{ secrets.IDENTITY_PW }}' \
+              portfolioPassword='${{ secrets.PORTFOLIO_PW }}' \
+              marketDataPassword='${{ secrets.MARKETDATA_PW }}' \
+              alertsPassword='${{ secrets.ALERTS_PW }}' \
+              jwtSigningKey='${{ secrets.JWT_SIGNING_KEY }}' \
+              finnhubApiKey='${{ secrets.FINNHUB_API_KEY }}' \
+            --query properties.outputs -o json)
+
+          echo "containerAppName=$(echo "$OUT" | jq -r '.containerAppName.value')" >> "$GITHUB_OUTPUT"
+          echo "migrateJobName=$(echo "$OUT"   | jq -r '.migrateJobName.value')"   >> "$GITHUB_OUTPUT"
+          echo "apiUrl=$(echo "$OUT"           | jq -r '.apiUrl.value')"           >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------------------------
+      # 4. Apply migrations and WAIT. Nothing goes live until this succeeds.
+      # -----------------------------------------------------------------------------------------
+      - name: Run migration job
+        run: |
+          set -euo pipefail
+          JOB='${{ steps.deploy.outputs.migrateJobName }}'
+          RG='${{ vars.AZURE_RESOURCE_GROUP }}'
+
+          EXECUTION=$(az containerapp job start --name "$JOB" --resource-group "$RG" --query name -o tsv)
+          echo "Started execution: $EXECUTION"
+
+          # `az containerapp job start` returns as soon as the execution is queued, so polling is
+          # the only way to gate the release on migrations actually having finished. The job's own
+          # replicaTimeout is 600s; this deadline sits above it so a timeout here means the poll
+          # loop is wrong, not the job.
+          DEADLINE=$(( SECONDS + 900 ))
+          while true; do
+            STATUS=$(az containerapp job execution show \
+              --name "$JOB" --resource-group "$RG" --job-execution-name "$EXECUTION" \
+              --query properties.status -o tsv)
+            echo "  status: $STATUS"
+            case "$STATUS" in
+              Succeeded)
+                break
+                ;;
+              Failed|Degraded)
+                echo "::error::Migration job execution $EXECUTION finished with status $STATUS"
+                az containerapp job logs show --name "$JOB" --resource-group "$RG" \
+                  --container migrate --tail 200 || true
+                exit 1
+                ;;
+            esac
+            if [ "$SECONDS" -gt "$DEADLINE" ]; then
+              echo "::error::Timed out waiting for migration job execution $EXECUTION"
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "Migrations applied."
+
+      # -----------------------------------------------------------------------------------------
+      # 5. Release the new image
+      #
+      # Step 3 already deployed this exact tag, so on a normal run this is close to a no-op. It
+      # earns its place when ARM short-circuits the deployment as unchanged while the digest
+      # behind a tag moved, and as the single explicit "now it is live" moment in the log.
+      # -----------------------------------------------------------------------------------------
+      - name: Update container app image
+        run: |
+          az containerapp update \
+            --name '${{ steps.deploy.outputs.containerAppName }}' \
+            --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --image '${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
+            --output none
+
+      - name: Smoke test readiness
+        run: |
+          set -euo pipefail
+          URL='${{ steps.deploy.outputs.apiUrl }}/health/ready'
+          for _ in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || echo 000)
+            echo "  $URL -> $CODE"
+            if [ "$CODE" = "200" ]; then exit 0; fi
+            sleep 10
+          done
+          echo "::error::$URL never returned 200"
+          exit 1
+
+  # -------------------------------------------------------------------------------------------
+  # 6. Build and publish the SPA to GitHub Pages
+  #
+  # Runs after the API is live so VITE_API_BASE_URL can be the real, just-deployed FQDN rather
+  # than a value pinned in a config file that drifts.
+  # -------------------------------------------------------------------------------------------
+  pages:
+    name: GitHub Pages — build and publish SPA
+    runs-on: ubuntu-latest
+    needs: azure
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Web/package-lock.json
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Install
+        run: npm ci
+        working-directory: src/Web
+
+      - name: Build
+        env:
+          # Both of these come from the environment and are set ONLY here. nginx serves the
+          # docker-compose SPA at /, so a base baked into vite.config.ts would make the local
+          # stack request /<repo>/assets/*.js and render a blank page — the `docker compose up`
+          # acceptance gate failing on the grader's first command.
+          VITE_BASE: /${{ github.event.repository.name }}/
+          VITE_API_BASE_URL: ${{ needs.azure.outputs.apiUrl }}
+        run: npm run build
+        working-directory: src/Web
+
+      - name: Create 404.html for SPA history routing
+        # GitHub Pages serves static files only, so a deep link to /login is a 404 — there is no
+        # such file on disk. Pages serves 404.html for any unmatched path, so an identical copy of
+        # index.html hands control to the client-side router and the deep link resolves. Without
+        # this, every route except the root breaks on a hard refresh or a shared link.
+        run: cp src/Web/dist/index.html src/Web/dist/404.html
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: src/Web/dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

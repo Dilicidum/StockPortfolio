@@ -1,0 +1,137 @@
+name: CI
+
+# Pull requests only. Deployment lives in deploy.yml and runs on push to main.
+#
+# Nothing here needs Azure credentials, on purpose: pull requests from forks do not get access to
+# secrets, so a credentialed step would either fail or be silently skipped and give a false green.
+# That is why `az deployment group what-if` is NOT run here — see the note on the infra job.
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: .NET build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        # No --no-restore trickery worth saving here; TreatWarningsAsErrors is on repo-wide, so a
+        # warning fails the build and that is the point.
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        # Integration tests use Testcontainers; the ubuntu-latest runner has a working Docker
+        # daemon, so no extra service container is needed.
+        run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotnet-test-results
+          path: '**/*.trx'
+          if-no-files-found: ignore
+
+  web:
+    name: SPA build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # src/Web lands in Phase 1 step 12. Until then this job reports success without pretending
+      # to have run tests that do not exist. Delete this guard once the SPA is committed.
+      - name: Check for SPA
+        id: spa
+        run: |
+          if [ -f src/Web/package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::src/Web/package.json not found — skipping SPA build and tests."
+          fi
+
+      - name: Set up Node
+        if: steps.spa.outputs.present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Web/package-lock.json
+
+      - name: Install
+        if: steps.spa.outputs.present == 'true'
+        run: npm ci
+        working-directory: src/Web
+
+      - name: Build
+        if: steps.spa.outputs.present == 'true'
+        # No VITE_BASE and no VITE_API_BASE_URL here. Both must come from the environment, and CI
+        # only needs to prove the bundle compiles. Baking a base into a PR build would hide the
+        # exact bug the environment indirection exists to prevent.
+        run: npm run build
+        working-directory: src/Web
+
+      - name: Test
+        if: steps.spa.outputs.present == 'true'
+        run: npm test -- --run
+        working-directory: src/Web
+
+  infra:
+    name: Bicep build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bicep
+        # Deliberately unpinned. Bicep ships its resource type index in the binary, so an older
+        # release does not know newer API versions and downgrades unknown-type errors to BCP081
+        # warnings — the build goes green while validating nothing. Floating to latest is the
+        # safer failure mode here: a genuine break surfaces as a red CI run, not as silence.
+        run: az bicep install
+
+      - name: Show Bicep version
+        run: az bicep version
+
+      - name: Build main.bicep
+        # Compiles every module transitively and fails on any schema, API-version or type error.
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Build main.bicepparam
+        # Proves the parameter file still matches main.bicep's parameter list. The values are
+        # throwaway; only the shape is being checked.
+        env:
+          PAGES_ORIGIN: https://example.github.io
+          API_IMAGE: example.azurecr.io/stockportfolio-api:ci
+          MIGRATOR_IMAGE: example.azurecr.io/stockportfolio-migrator:ci
+          PG_ADMIN_PASSWORD: ci-placeholder-not-a-real-password
+          MIGRATOR_PW: ci-placeholder-not-a-real-password
+          IDENTITY_PW: ci-placeholder-not-a-real-password
+          PORTFOLIO_PW: ci-placeholder-not-a-real-password
+          MARKETDATA_PW: ci-placeholder-not-a-real-password
+          ALERTS_PW: ci-placeholder-not-a-real-password
+          JWT_SIGNING_KEY: ci-placeholder-signing-key-at-least-32-bytes-long
+          FINNHUB_API_KEY: ''
+        run: az bicep build-params --file infra/main.bicepparam --stdout > /dev/null
+
+      # DELIBERATELY ABSENT: `az deployment group what-if`.
+      # It needs an Azure login, and pull requests from forks cannot access repository secrets.
+      # Adding it here would fail every external contribution. Run what-if manually before a
+      # deploy, or from a branch push where OIDC is available.
