@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="OneOf" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\StockPortfolio.Modules.Identity.Domain\StockPortfolio.Modules.Identity.Domain.csproj" />
+    <ProjectReference Include="..\StockPortfolio.Modules.Identity.Contracts\StockPortfolio.Modules.Identity.Contracts.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,22 @@
+## .NET
+artifacts/
+bin/
+obj/
+*.user
+*.suo
+.vs/
+.idea/
+
+## Node
+node_modules/
+dist/
+.vite/
+
+## Env & secrets — never commit these
+.env
+.env.local
+*.pfx
+
+## OS
+Thumbs.db
+.DS_Store

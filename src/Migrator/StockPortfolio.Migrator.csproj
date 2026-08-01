@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Modules\Identity\StockPortfolio.Modules.Identity.Infrastructure\StockPortfolio.Modules.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Infrastructure\StockPortfolio.Modules.Portfolio.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\MarketData\StockPortfolio.Modules.MarketData.Infrastructure\StockPortfolio.Modules.MarketData.Infrastructure.csproj" />
+    <ProjectReference Include="..\Modules\Alerts\StockPortfolio.Modules.Alerts.Infrastructure\StockPortfolio.Modules.Alerts.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>

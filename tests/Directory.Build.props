@@ -1,0 +1,26 @@
+<Project>
+
+  <!-- Chain to the repo-root Directory.Build.props. MSBuild only auto-imports the FIRST
+       Directory.Build.props it finds walking up, so without this explicit import the root
+       one (TFM, nullable, warnings-as-errors) would be skipped for every test project.
+
+       The path is hoisted into a property first: putting GetPathOfFileAbove inline in an
+       Exists(...) condition nests single quotes and fails to parse with MSB4092. -->
+  <PropertyGroup>
+    <_RootBuildProps>$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))</_RootBuildProps>
+  </PropertyGroup>
+
+  <Import Project="$(_RootBuildProps)" Condition="'$(_RootBuildProps)' != ''" />
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Test naming is Method_Scenario_Expectation. CA1707 bans underscores in member
+         names and, under TreatWarningsAsErrors, would make every test a build error.
+         The rule targets public API surface; test assemblies have none. -->
+    <NoWarn>$(NoWarn);CA1707;CA1861;CA2007;CA1515</NoWarn>
+  </PropertyGroup>
+
+</Project>

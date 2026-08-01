@@ -1,0 +1,27 @@
+<Project>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>14.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+
+    <!-- Exhaustiveness of OneOf .Match is enforced by CS8509 being an error.
+         TreatWarningsAsErrors already does that; do NOT try to relax it by editing
+         WarningsAsErrors - the only escape is WarningsNotAsErrors. See docs/plan §3. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NuGet audit advisories must not break a build mid-phase. -->
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <!-- Pinned, not `latest-`: a floating value lets a new SDK break the build with no repo change. -->
+    <AnalysisLevel>10.0-recommended</AnalysisLevel>
+
+    <ArtifactsPath>$(MSBuildThisFileDirectory)artifacts</ArtifactsPath>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

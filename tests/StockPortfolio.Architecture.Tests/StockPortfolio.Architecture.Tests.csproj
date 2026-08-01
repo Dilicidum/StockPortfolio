@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Contracts\StockPortfolio.Modules.Identity.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Domain\StockPortfolio.Modules.Identity.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Application\StockPortfolio.Modules.Identity.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Infrastructure\StockPortfolio.Modules.Identity.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Presentation\StockPortfolio.Modules.Identity.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Contracts\StockPortfolio.Modules.Portfolio.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Domain\StockPortfolio.Modules.Portfolio.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Application\StockPortfolio.Modules.Portfolio.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Infrastructure\StockPortfolio.Modules.Portfolio.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Presentation\StockPortfolio.Modules.Portfolio.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Modules\MarketData\StockPortfolio.Modules.MarketData.Contracts\StockPortfolio.Modules.MarketData.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\MarketData\StockPortfolio.Modules.MarketData.Domain\StockPortfolio.Modules.MarketData.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\MarketData\StockPortfolio.Modules.MarketData.Application\StockPortfolio.Modules.MarketData.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\MarketData\StockPortfolio.Modules.MarketData.Infrastructure\StockPortfolio.Modules.MarketData.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\MarketData\StockPortfolio.Modules.MarketData.Presentation\StockPortfolio.Modules.MarketData.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Contracts\StockPortfolio.Modules.Alerts.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Domain\StockPortfolio.Modules.Alerts.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Application\StockPortfolio.Modules.Alerts.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Infrastructure\StockPortfolio.Modules.Alerts.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Presentation\StockPortfolio.Modules.Alerts.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Shared.Kernel\StockPortfolio.Shared.Kernel.csproj" />
+    <ProjectReference Include="..\..\src\Shared.Presentation\StockPortfolio.Shared.Presentation.csproj" />
+  </ItemGroup>
+
+</Project>

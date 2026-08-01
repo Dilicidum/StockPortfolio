@@ -1,0 +1,12 @@
+<Project>
+
+  <!--
+    Empty in Phase 1, and that is deliberate.
+
+    This is where anything conditional on $(TargetFramework) must live. That property is
+    empty during Directory.Build.props evaluation for single-targeting projects, so a
+    condition on it there silently never matches. Same for any property derived from an
+    SDK-defined value such as $(OutputPath).
+  -->
+
+</Project>
