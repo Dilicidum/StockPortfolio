@@ -6,7 +6,7 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Nothing is built yet.** The repo contains plans only.
+**Phase 1 in progress.** The build foundation is in and green: 28 projects (`StockPortfolio.slnx`), `Directory.Build.props` / `.targets` / `Directory.Packages.props` with Central Package Management, `tests/Directory.Build.props`, and stub `Program.cs` files. `dotnet build` and `dotnet test` both pass. No feature code yet — every project is empty apart from the stubs.
 
 Read before touching code: [docs/plan/00-overview.md](docs/plan/00-overview.md), then the phase file you're working in. Phase 1 additionally has [docs/plan/phase-1-implementation.md](docs/plan/phase-1-implementation.md) — the reviewed file-by-file build order; where it disagrees with `phase-1-sign-in.md`, the implementation plan wins. [docs/plan/er-diagram.md](docs/plan/er-diagram.md) and [docs/plan/module-interactions.md](docs/plan/module-interactions.md) are the reference diagrams. `docs/Initial.md` is the original architecture essay — **treat it as historical**; where it conflicts with `docs/plan/`, the plan wins, and three known errors in it are listed in the overview's open items.
 
@@ -56,7 +56,7 @@ Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: 
 
 **CQRS without a dispatcher.** `ICommandHandler<,>` / `IQueryHandler<,>` injected straight into Minimal API endpoints. There is one caller per handler, so a mediator has nothing to decouple. Cross-cutting concerns are DI decorators.
 
-**Results are `OneOf`** with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. `OneOfDiagnosticSuppressor` plus repo-wide `TreatWarningsAsErrors` enforce exhaustiveness — never silence CS8509 with `_ => throw`, that destroys the guarantee. If the suppressor ever has to be disabled, the escape is `<WarningsNotAsErrors>CS8509</WarningsNotAsErrors>`; editing `WarningsAsErrors` does nothing while `TreatWarningsAsErrors` is on.
+**Results are `OneOf`** with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Exhaustiveness is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed.
 
 **Rich domain.** Private setters, private parameterless EF constructor, static `Create(...)` returning a OneOf, instance methods enforcing invariants. `Id` is declared once on `AggregateRoot<TId>` and never re-declared on a derived entity (CS0108 is an error here).
 
@@ -101,6 +101,11 @@ Each of these costs a day if you meet it cold.
 - **`beforeLoad` is synchronous; React effects run after first render.** Bootstrap the session *before* mounting `RouterProvider`, or a hard refresh of a guarded route always bounces to `/login` — which is the session-persistence requirement failing while every test passes.
 - **Vite `base` must come from the environment**, not be hardcoded to `/<repo>/`. nginx serves the compose SPA at `/`, so a baked-in base makes it request `/<repo>/assets/*.js` and render blank.
 - **ACA injects default TCP probes when ingress is on.** Declare `httpGet` liveness/readiness probes in Bicep or `/health/live` and `/health/ready` are never called and the split is decorative.
+- **`[GenerateOneOf]` crashes on types in the global namespace.** It derives the generated filename from the namespace and emits `<global namespace>_Foo.g.cs`; `<` is illegal, so the generator throws `CS8785` and every implicit conversion then fails with unrelated-looking errors. Always declare unions inside a namespace.
+- **`OneOfDiagnosticSuppressor` does not exist on nuget.org** and is not needed. `.Match` takes one delegate per case, so exhaustiveness is enforced by arity — adding a case breaks every call site. `CS8509` only fires if you `switch` over `.Value`, which the convention forbids anyway.
+- **`CA1707` makes every `Method_Scenario_Expectation` test a build error** under `TreatWarningsAsErrors`. `tests/Directory.Build.props` suppresses it — and must explicitly `<Import>` the root props, because MSBuild only auto-imports the first `Directory.Build.props` it finds walking up.
+- **`GetPathOfFileAbove` inside `Exists(...)` fails to parse** with `MSB4092` — the nested single quotes break the condition parser. Hoist the path into a property first, then condition on the property.
+- **`Microsoft.OpenApi` must stay on 2.x.** 2.0.0 carries GHSA-v5pm-xwqc-g5wc so pin ≥2.11.0, but 3.x makes `IOpenApiMediaType.Example` read-only while the ASP.NET Core OpenAPI source generator still assigns to it (`CS0200`).
 
 ## Deployment
 

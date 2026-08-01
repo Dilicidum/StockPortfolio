@@ -62,7 +62,9 @@ Three consequences designed for from Phase 1:
 
 **Backend** — .NET 10 SDK 10.0.302, C# 14, xUnit v3
 
-`Microsoft.EntityFrameworkCore` **≥10.0.7** · `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 · `OneOf` 3.0.271 + `OneOfDiagnosticSuppressor` · `Microsoft.Extensions.Http.Resilience` · `Konscious.Security.Cryptography.Argon2` 1.3.1 · `StackExchange.Redis` 3.1.0 · FluentValidation · Testcontainers · `Microsoft.Extensions.TimeProvider.Testing`
+`Microsoft.EntityFrameworkCore` **≥10.0.7** · `Npgsql.EntityFrameworkCore.PostgreSQL` 10.0.3 · `OneOf` 3.0.271 + `OneOf.SourceGenerator` · `Microsoft.Extensions.Http.Resilience` · `Konscious.Security.Cryptography.Argon2` 1.3.1 · `StackExchange.Redis` 3.1.0 · FluentValidation · Testcontainers · `Microsoft.Extensions.TimeProvider.Testing`
+
+> ⚠️ **Correction (2026-08-02).** An earlier revision of this list named `OneOfDiagnosticSuppressor`. **That package does not exist on nuget.org**, and it is not needed — `.Match` is exhaustive by arity. See `phase-1-implementation.md` §3. Exact resolved versions now live in `Directory.Packages.props`, which is the single source of truth; this list is orientation only.
 
 **Frontend** — Node 24
 
@@ -76,13 +78,15 @@ React **19.2.8** · Vite **8.2.0** · `@tanstack/react-router` **1.170.18** (v1 
 
 ```
 src/
-  Shared.Kernel/                 AggregateRoot<TId>, IDomainEvent, Money, Result plumbing
+  Shared.Kernel/                 AggregateRoot<TId>, IDomainEvent, Money, CQRS interfaces
+  Shared.Presentation/           IEndpointModule, ValidationFilter<T>, ProblemDetails helpers
   Modules/
-    Identity/    Identity.Contracts · .Domain · .Application · .Infrastructure
-    Portfolio/   Portfolio.Contracts · .Domain · .Application · .Infrastructure
-    MarketData/  MarketData.Contracts · .Domain · .Application · .Infrastructure
-    Alerts/      Alerts.Contracts · .Domain · .Application · .Infrastructure
+    Identity/    .Contracts · .Domain · .Application · .Infrastructure · .Presentation
+    Portfolio/   same five
+    MarketData/  same five
+    Alerts/      same five
   Api/                           host: DI, endpoint registration, middleware
+  Migrator/                      console; applies every DbContext as the `migrator` role
   Web/                           React SPA
 tests/
   <Module>.UnitTests             per module, no infrastructure
@@ -98,13 +102,13 @@ infra/                           Bicep
 
 Assumed by every phase file.
 
-**Architecture** — everything `internal` outside `.Contracts`; a module references only other modules' `.Contracts`; `.Contracts` holds records of primitives only (no EF reference, no aggregates, no strongly-typed IDs — raw `Guid`).
+**Architecture** — accessibility follows the onion, **not** a blanket `internal`: `.Domain`, `.Application` and `.Presentation` are `public`, `.Infrastructure` is `internal` except one `<Module>Module` seam. (`internal` is per-assembly and a module is five assemblies, so blanket-`internal` cannot compile.) A module references only other modules' `.Contracts`, enforced by `Architecture.Tests` rather than the compiler. `.Contracts` holds records of primitives only — no EF reference, no aggregates, no strongly-typed IDs, raw `Guid`. See `phase-1-implementation.md` §4.2.
 
 **Four Postgres schemas + four roles, `Maximum Pool Size=2`.** Azure Postgres B1ms allows **35 user connections** (50 total, 15 reserved), and a different `Username` is a different Npgsql pool. Npgsql's default pool size of 100 × 4 roles × 2 replicas would request 800. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
 
 **CQRS** — `ICommandHandler<,>` / `IQueryHandler<,>` injected directly into Minimal API endpoints. **No dispatcher**: one caller per handler, in the same module, so there is nothing to decouple — and the concrete type gives better OpenAPI metadata. Cross-cutting concerns are DI decorators, which work without a mediator. Add a dispatcher only if a second caller appears.
 
-**Results** — OneOf with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Add `OneOfDiagnosticSuppressor` (`PrivateAssets="all"`) and `<WarningsAsErrors>CS8509</WarningsAsErrors>`, or an exhaustive switch still warns and silencing it with `_ => throw` destroys the guarantee.
+**Results** — OneOf with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Exhaustiveness comes from `.Match`'s arity, not from an analyzer: add a case and every call site breaks. Never `switch` over `.Value` and never silence CS8509 with `_ => throw`.
 
 **Rich domain** — private setters, private EF constructor, static `Create(…)` returning a OneOf, instance methods enforcing invariants. Three EF rules that bite otherwise:
 
@@ -174,7 +178,7 @@ Then steps 1–5 against the GitHub Pages URL talking to the deployed API, watch
 
 ## Open items
 
-- **Spike `OneOfDiagnosticSuppressor` against Roslyn 5** in Phase 1 — it predates .NET 10 GA. Fallback: a derived-type-count test per union.
+- ~~Spike `OneOfDiagnosticSuppressor` against Roslyn 5~~ — **done 2026-08-02.** The package does not exist; it is also unnecessary. See `phase-1-implementation.md` §3.
 - **`docs/Initial.md` needs three corrections** — alert-settings ownership (Phase 4), the window-claim overlap guard (Phase 3), the alert example's arithmetic (Phase 4).
 - **Recompute the 50-ticker ceiling** before the README quotes it. Finnhub is confirmed at 60 calls/min with a 30/sec burst cap and no batch endpoint, but `Initial.md:184` admits the figure was never verified.
 - **Confirm AMR B0 pricing in your region** before the Phase 1 deploy.

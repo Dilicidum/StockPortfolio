@@ -386,6 +386,6 @@ internal static class TokenPolicy
 - [ ] `bicep build` and `az deployment group what-if` clean
 - [ ] Deployed: `https://<user>.github.io/<repo>/` talks to `https://ca-api-<suffix>.<region>.azurecontainerapps.io` — register and log in there
 - [ ] Deep-link straight to `https://<user>.github.io/<repo>/login` → loads (proves the `404.html` fallback)
-- [ ] `OneOfDiagnosticSuppressor` verified against Roslyn 5, or the fallback derived-type-count test written
+- [x] OneOf toolchain verified against Roslyn 5 — `OneOfDiagnosticSuppressor` does not exist and is unnecessary; see `phase-1-implementation.md` §3
 - [ ] README: run instructions, the token-storage decision, the Postgres role isolation
 - [ ] Screens usable at 375px

@@ -125,7 +125,7 @@ infra/
 
 Four corrections over the obvious version of this file:
 
-**`TreatWarningsAsErrors=true` already makes CS8509 an error**, so listing it in `WarningsAsErrors` is a no-op — and, more importantly, *removing* it from that list would not un-error it. If the `OneOfDiagnosticSuppressor` spike (§12 step 2) fails, the escape hatch is `<WarningsNotAsErrors>CS8509</WarningsNotAsErrors>`, not editing `WarningsAsErrors`.
+**`TreatWarningsAsErrors=true` already makes CS8509 an error**, so listing it in `WarningsAsErrors` is a no-op — and, more importantly, *removing* it from that list would not un-error it. The only working escape is `<WarningsNotAsErrors>CS8509</WarningsNotAsErrors>`. It is not currently needed; see the spike results below.
 
 **`AnalysisLevel` is pinned to `10.0-recommended`, not `latest-recommended`.** `latest-` is a floating value: a new SDK adds analyzer warnings and, under `TreatWarningsAsErrors`, breaks the build with no repo change. §13 calls floating package versions a reproducibility hole; this is the same hole.
 
@@ -180,7 +180,6 @@ Four corrections over the obvious version of this file:
 
   <ItemGroup><!-- applies to every project -->
     <GlobalPackageReference Include="OneOf.SourceGenerator" Version="3.0.271" />
-    <GlobalPackageReference Include="OneOfDiagnosticSuppressor" Version="1.0.1" />
   </ItemGroup>
 </Project>
 ```
@@ -195,12 +194,33 @@ Three things the first draft of this file got wrong:
 
 `GlobalPackageReference` for the two OneOf analyzers is the right tool — they must be present in every project that declares or matches a union, and CPM applies `PrivateAssets="All"` to them automatically.
 
-**Spike first, before writing handlers.** `OneOfDiagnosticSuppressor` predates .NET 10 GA. In §12 step 2, create one union, one exhaustive `.Match`, and build. Check **two** things, not one:
+### The step-2 spike — done, and it changed this section
 
-1. CS8509 is suppressed under Roslyn 5.
-2. `[GenerateOneOf]` works on a type whose accessibility matches what §4.2 settles on.
+Run 2026-08-02 against SDK 10.0.302. Three results, all folded into the files above.
 
-Twenty minutes, and it decides a repo-wide compiler setting.
+**`OneOfDiagnosticSuppressor` does not exist on nuget.org.** `00-overview.md` lists it in the "versions verified" stack; that entry was wrong. It is also **not needed**: `.Match(...)` takes one delegate per case, so exhaustiveness is enforced by the method's arity — add a fourth case to a union and every call site fails to compile. `CS8509` only fires on a `switch` over `.Value`, which the convention forbids, and `TreatWarningsAsErrors` already makes that an error. The guarantee the suppressor was supposed to provide is structural.
+
+**`[GenerateOneOf]` crashes on types in the global namespace.** The generator builds its hint name from the namespace and emits `<global namespace>_RegisterResult.g.cs`; `<` is an illegal filename character, so it throws:
+
+```
+error CS8785: Generator 'OneOfGenerator' failed to generate source.
+  ArgumentException: The hintName '<global namespace>_RegisterResult.g.cs'
+  contains an invalid character '<' at position 0.
+```
+
+and every downstream implicit conversion then fails with confusing `CS7036`/`CS0029` errors that point nowhere near the cause. Inside a namespace it works cleanly on Roslyn 5. All our code is namespaced, so this is a trap for scratch files and spikes rather than production code — but it cost twenty minutes to diagnose once.
+
+**Three build-configuration bugs surfaced immediately**, each fixed in the files above:
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `NU1506` duplicate `PackageVersion` on every project | `OneOf.SourceGenerator` declared as *both* `PackageVersion` and `GlobalPackageReference` | `GlobalPackageReference` carries its own `Version`; drop the `PackageVersion` |
+| `CA1707` error in all four test projects | underscores in `Method_Scenario_Expectation` names, promoted by `TreatWarningsAsErrors` | `tests/Directory.Build.props` with `NoWarn` — and it must explicitly `<Import>` the root props, since MSBuild only auto-imports the *first* one found walking up |
+| `MSB4092: unexpected token "Directory"` | `Exists('$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', …)))` nests single quotes | hoist the path into a property, then condition on the property |
+
+**And one supply-chain finding.** `Microsoft.AspNetCore.OpenApi` 10.0.10 pulls `Microsoft.OpenApi` **2.0.0**, which carries a high-severity advisory (GHSA-v5pm-xwqc-g5wc). Transitive pinning is on, so naming it in `Directory.Packages.props` fixes it — but **3.x is not the answer**: it makes `IOpenApiMediaType.Example` read-only while the ASP.NET Core OpenAPI source generator still assigns to it, so the build fails with `CS0200` inside generated code. Pin **2.11.0**.
+
+Putting `NU1901;NU1902;NU1903;NU1904` in `WarningsNotAsErrors` earned its keep on the first build: without it the advisory would have been a hard build failure rather than a warning to act on deliberately.
 
 ---
 
@@ -963,7 +983,7 @@ Decide before writing the refresh integration test — the assertions encode the
 | # | Step | Verified by |
 |---|---|---|
 | 1 | `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig`, solution, **all** project shells + references | `dotnet build` clean, `Architecture.Tests` compile |
-| 2 | **Spike `OneOfDiagnosticSuppressor` under Roslyn 5** — one union, one `.Match`, build | CS8509 suppressed, `[GenerateOneOf]` accessibility confirmed; or fallback chosen and `WarningsNotAsErrors` set |
+| 2 | ~~Spike the OneOf toolchain~~ — **done**, see §3 | `[GenerateOneOf]` verified on Roslyn 5; no suppressor needed |
 | 3 | `Shared.Kernel` + `Money` tests | green; no EF reference anywhere in the project |
 | 4 | `Identity.Domain` — `AggregateRoot`, `UserId`, `User`, `RefreshToken` + tests | green; `User` does **not** re-declare `Id` |
 | 5 | Argon2 hasher + PHC string + tests | round-trip and distinct-salt tests green |
@@ -1023,7 +1043,7 @@ Steps 1–2 come before anything else because both set repo-wide switches that a
 - [ ] `bicep build` and `az deployment group what-if` clean; **ACA HTTP probes declared**
 - [ ] Pages URL talks to the ACA URL; deep link to `/login` loads (proves `404.html`)
 - [ ] Exactly **one** CORS layer is active, and it is the tested one
-- [ ] `OneOfDiagnosticSuppressor` verified, or fallback test written **and `WarningsNotAsErrors` set**
+- [x] OneOf toolchain verified on Roslyn 5 — no suppressor package needed (§3)
 - [ ] README: run instructions, token storage, role isolation, SSE-vs-WebSockets matrix, accessibility trade-off
 - [ ] `CLAUDE.md` accessibility rule updated to match §4.2
 - [ ] Usable at 375px
