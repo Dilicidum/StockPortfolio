@@ -1,0 +1,173 @@
+# =============================================================================
+#  StockPortfolio - the whole stack, one command, from a clean clone.
+#
+#      docker compose up --build
+#
+#  P0 req 7. Every variable below has an inline default, so a clean clone with
+#  no .env file still comes up. Copy .env.example to .env only when you want to
+#  override something (a real Finnhub key, a different port). Never commit .env.
+#
+#  Once up:
+#      http://localhost:5173        SPA (nginx, proxies /api -> api)
+#      http://localhost:8080        API directly
+#      http://localhost:8080/health/ready
+#
+#  docker-compose.override.yml is applied automatically and adds developer
+#  conveniences (published database ports, Development environment). Run
+#  `docker compose -f docker-compose.yml up` for the production-shaped stack.
+# =============================================================================
+name: stockportfolio
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Postgres - four schemas, five roles. See db/init/.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres_dev_only}
+      POSTGRES_DB: ${POSTGRES_DB:-stockportfolio}
+      # PGDATA is pinned to a subdirectory of the mount on purpose. The
+      # postgres:18 images moved the default data directory under
+      # /var/lib/postgresql/<major>/, so a named volume mounted at the old
+      # /var/lib/postgresql/data would silently persist nothing. Setting PGDATA
+      # explicitly makes the volume authoritative on any image version.
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Consumed by db/init/00-roles.sh, which passes them to psql as -v vars.
+      MIGRATOR_PW: ${MIGRATOR_PW:-migrator_dev_only}
+      IDENTITY_PW: ${IDENTITY_PW:-identity_dev_only}
+      PORTFOLIO_PW: ${PORTFOLIO_PW:-portfolio_dev_only}
+      MARKETDATA_PW: ${MARKETDATA_PW:-marketdata_dev_only}
+      ALERTS_PW: ${ALERTS_PW:-alerts_dev_only}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Only the wrapper goes into the entrypoint directory. 01-roles.sql must
+      # NOT be visible there: the entrypoint would run it bare, with no -v
+      # variables, and `:'migrator_pw'` is then a syntax error that aborts
+      # initialisation. The wrapper reads the SQL from /db/init instead.
+      - ./db/init/00-roles.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+      - ./db/init:/db/init:ro
+    healthcheck:
+      # -U and -d are mandatory. A bare `pg_isready` reports healthy while
+      # docker-entrypoint-initdb.d is still running, and the migrations
+      # container then connects to a database with no roles and fails in a way
+      # that looks intermittent.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 10s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis - price windows, alert cooldowns, SSE tickets (phases 3-4).
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Migrations - console app, applies every DbContext as `migrator`, then exits.
+  # The API must never call Migrate() at startup: two replicas racing the same
+  # migration is a corrupted history table.
+  # ---------------------------------------------------------------------------
+  migrations:
+    build:
+      context: .
+      dockerfile: src/Migrator/Dockerfile
+    image: stockportfolio-migrations:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      ConnectionStrings__Identity: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__Portfolio: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__MarketData: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__Alerts: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # API - ASP.NET Core. One connection string per module, each as its own role,
+  # every one carrying `Maximum Pool Size=2` (a different Username is a
+  # different Npgsql pool; the default of 100 would request 800 against a B1ms
+  # allowing 35).
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: src/Api/Dockerfile
+    image: stockportfolio-api:local
+    depends_on:
+      migrations:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      # ASP.NET Core has listened on 8080, not 80, since .NET 8.
+      ASPNETCORE_HTTP_PORTS: "8080"
+      ConnectionStrings__Identity: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=identity_svc;Password=${IDENTITY_PW:-identity_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__Portfolio: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=portfolio_svc;Password=${PORTFOLIO_PW:-portfolio_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__MarketData: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=marketdata_svc;Password=${MARKETDATA_PW:-marketdata_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__Alerts: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=alerts_svc;Password=${ALERTS_PW:-alerts_dev_only};Maximum Pool Size=2"
+      ConnectionStrings__Redis: "redis:6379"
+      Jwt__Issuer: ${JWT_ISSUER:-https://stockportfolio.local}
+      Jwt__Audience: ${JWT_AUDIENCE:-https://stockportfolio.local}
+      # Must be at least 32 bytes or token issuing fails fast at startup.
+      Jwt__SigningKey: ${JWT_SIGNING_KEY:-dev-only-signing-key-change-me-0123456789abcdef}
+      # Same origin through the nginx proxy, so this is only for hitting the API
+      # directly on :8080 from a dev SPA on :5173.
+      Cors__Origins__0: ${CORS_ORIGIN_0:-http://localhost:5173}
+      # Empty on purpose: with no key the app uses FakeQuoteProvider and logs a
+      # warning. Finnhub killed its sandbox in 2022, so the demo must work
+      # without a key.
+      Finnhub__ApiKey: ${FINNHUB_API_KEY:-}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Web - nginx serving the built SPA at / and proxying /api to the API.
+  # ---------------------------------------------------------------------------
+  web:
+    build:
+      context: .
+      dockerfile: src/Web/Dockerfile
+      args:
+        # nginx serves the SPA at the root here, so base is "/". Only the
+        # GitHub Pages build passes /<repo>/. Hardcoding it in vite.config.ts
+        # makes this container request /<repo>/assets/*.js and render blank.
+        VITE_BASE: "/"
+        # Empty: the SPA calls /api on its own origin and nginx proxies it.
+        VITE_API_BASE_URL: ""
+    image: stockportfolio-web:local
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "${WEB_PORT:-5173}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1/healthz || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  redis-data:

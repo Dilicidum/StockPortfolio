@@ -1,0 +1,28 @@
+# =============================================================================
+#  Local development overlay - applied automatically by `docker compose up`.
+#
+#  Keep this file free of anything the stack NEEDS to run. `docker compose -f
+#  docker-compose.yml up` must still bring up a working stack on its own; that
+#  is the shape deployed to Azure, and it is what CI builds.
+#
+#  What it adds:
+#    - Postgres and Redis published on the host, so psql / redis-cli / a local
+#      `dotnet run` can reach them.
+#    - Development environment for the API: /openapi is mapped and exceptions
+#      come back with detail.
+# =============================================================================
+services:
+
+  postgres:
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      Logging__LogLevel__Default: ${LOG_LEVEL:-Information}
+      Logging__LogLevel__Microsoft.AspNetCore: Warning

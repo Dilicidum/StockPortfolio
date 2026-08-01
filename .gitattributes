@@ -1,0 +1,28 @@
+# Normalise line endings so a Windows clone still produces a working stack.
+* text=auto
+
+# Anything executed inside a Linux container MUST be LF. With core.autocrlf=true
+# a Windows checkout would give db/init/00-roles.sh a CRLF shebang, the container
+# would fail on `#!/bin/bash\r`, Postgres init would abort, and `docker compose up`
+# would fail from a clean clone — which is P0 req 7.
+*.sh            text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+*.conf          text eol=lf
+*.sql           text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+.env.example    text eol=lf
+
+# Windows-only tooling stays CRLF.
+*.cmd           text eol=crlf
+*.bat           text eol=crlf
+*.ps1           text eol=crlf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.docx binary
+*.zip binary

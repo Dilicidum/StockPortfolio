@@ -1,0 +1,57 @@
+# =============================================================================
+#  All three images (api, migrations, web) build with the repository root as
+#  their context, so this is the single ignore file for the whole repo. Keeping
+#  one context is deliberate: Central Package Management puts
+#  Directory.Packages.props and global.json at the root, and restore inside the
+#  container fails without them.
+#
+#  Two entries here are correctness, not speed:
+#    - **/node_modules  a host node_modules is built for Windows and would
+#                       shadow the Linux one `npm ci` installs in the image.
+#    - **/bin, **/obj   host build output leaks stale assets and NuGet
+#                       assets files into the SDK stage.
+# =============================================================================
+
+# --- VCS and tooling ---------------------------------------------------------
+.git
+.gitignore
+.gitattributes
+.github
+.claude
+.vs
+.idea
+.vscode
+**/*.user
+**/*.suo
+
+# --- .NET build output -------------------------------------------------------
+artifacts
+**/bin
+**/obj
+
+# --- Node --------------------------------------------------------------------
+**/node_modules
+**/dist
+**/.vite
+**/npm-debug.log*
+
+# --- Not needed to build any image -------------------------------------------
+tests
+infra
+docs
+**/*.md
+**/*.docx
+**/*.zip
+UI for project review
+db
+StockPortfolio.slnx
+**/*.http
+
+# --- Docker / env ------------------------------------------------------------
+docker-compose*.yml
+# Only real secrets. src/Web/.env* is left alone on purpose - Vite reads
+# .env.production at build time and excluding it would silently change the
+# bundle's configuration.
+.env
+.env.local
+**/.env.local

@@ -754,8 +754,19 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   -v portfolio_pw="$PORTFOLIO_PW" \
   -v marketdata_pw="$MARKETDATA_PW" \
   -v alerts_pw="$ALERTS_PW" \
-  -f /docker-entrypoint-initdb.d/01-roles.sql
+  -f /db/init/01-roles.sql          # ⚠️ NOT /docker-entrypoint-initdb.d/ — see below
 ```
+
+⚠️ **`01-roles.sql` must not be visible inside `/docker-entrypoint-initdb.d`.** The entrypoint globs that directory once and runs *everything* in it — so if the `.sql` sits there too, it gets executed **bare** after the wrapper, with no `-v` flags, hitting exactly the syntax error the wrapper exists to prevent. Mount them separately:
+
+```yaml
+- ./db/init/00-roles.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+- ./db/init:/db/init:ro
+```
+
+⚠️ **`.gitattributes` must force `*.sh` to `eol=lf`.** With `core.autocrlf=true` on Windows — the default for many installs — a clean clone gives the wrapper a CRLF shebang, the container fails on `#!/bin/bash\r`, Postgres init aborts, and `docker compose up` dies. Same for Dockerfiles and `nginx.conf`. This is a P0 req 7 failure that only appears on someone else's machine.
+
+⚠️ **`postgres:18` moved its default data directory** under `/var/lib/postgresql/<major>/`. A named volume mounted at the old `/var/lib/postgresql/data` therefore persists nothing, and `docker compose down && up` silently loses every account. Pin `PGDATA` to a subdirectory of the mount.
 
 `01-roles.sql` creates all four schemas and all five roles **in Phase 1**, even though only `identity` has tables — `PortfolioRole_CannotReadIdentitySchema` needs `portfolio_svc` to exist, and that test is the whole point of the role design.
 
