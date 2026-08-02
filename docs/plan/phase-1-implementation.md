@@ -566,7 +566,9 @@ Three EF traps this shape avoids, each documented and each expensive:
 
 `RefreshToken.cs` — `Id`, `UserId`, `TokenHash` (`byte[]`), `ExpiresAt`, `CreatedAt`, `SupersededAt`, `SupersededBy`, plus `Supersede(RefreshToken replacement, TimeProvider clock)` which **throws** if already superseded.
 
-`User.ChangePassword(string newHash)` from the design doc is **deliberately not built in Phase 1** — no endpoint calls it, and an untested public mutator is worse than none. It arrives with the settings screen in Phase 5.
+`User.ChangePasswordHash(string newHash)` **is built**, with tests. An earlier revision of this plan deferred it to Phase 5 on the grounds that "an untested public mutator is worse than none" — that objection dissolves once it is tested, and `identity-contracts.md` (which three agents built against) requires it. No endpoint calls it yet; the Phase 5 settings screen will.
+
+`RefreshToken.Revoke(TimeProvider)` was **added** beyond the original design, and had to be: `RevokeSessionHandler` must end a session with *no* replacement, while `Supersede` requires one. Without it, logout could only be expressed as `token.Supersede(token, clock)` — a self-link that corrupts the rotation chain replay detection depends on.
 
 ### 5.3 `Identity.Application`
 
