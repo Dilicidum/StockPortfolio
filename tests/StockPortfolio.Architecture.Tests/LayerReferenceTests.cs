@@ -25,9 +25,8 @@ public sealed class LayerReferenceTests
     public static TheoryData<string> InfrastructureAssemblies => AssembliesFor("Infrastructure");
 
     /// <summary>The four <c>.Presentation</c> assemblies.</summary>
-    // Was AssembliesFor("Infrastructure") — a copy-paste from the line above that pointed the
-    // Presentation rule at the Infrastructure assemblies, so rule 5 was never enforced at all.
-    // Caught by deliberately breaking rule 4 and watching which tests moved.
+    // Worth a second look when editing: passing "Infrastructure" here points rule 5 at the wrong
+    // layer and it then enforces nothing, while still reporting green.
     public static TheoryData<string> PresentationAssemblies => AssembliesFor("Presentation");
 
     /// <summary>
