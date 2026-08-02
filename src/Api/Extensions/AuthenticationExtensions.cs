@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Text;
 
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -8,7 +9,7 @@ using Microsoft.IdentityModel.Tokens;
 namespace StockPortfolio.Api.Extensions;
 
 /// <summary>Bearer-token authentication for the whole host.</summary>
-public static class AuthenticationExtensions
+internal static class AuthenticationExtensions
 {
     /// <summary>The configuration section carrying the signing settings: Jwt__SigningKey and friends.</summary>
     public const string JwtSectionName = "Jwt";
@@ -26,9 +27,6 @@ public static class AuthenticationExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configuration);
-
         var section = configuration.GetSection(JwtSectionName);
         var signingKey = section["SigningKey"];
 
@@ -80,8 +78,27 @@ public static class AuthenticationExtensions
                     NameClaimType = JwtRegisteredClaimNames.Sub,
                     RoleClaimType = "role",
                 };
+
+                // Validation proves the signature, not the payload: a correctly signed token with no `sub`
+                // authenticates happily, and RequireAuthorization only asks for IsAuthenticated. Fail here so
+                // every guarded route can assume a usable subject rather than each one re-checking.
+                options.Events = new JwtBearerEvents
+                {
+                    OnTokenValidated = context =>
+                    {
+                        if (!Guid.TryParse(SubjectOf(context.Principal), out _))
+                        {
+                            context.Fail("The access token carries no usable 'sub' claim.");
+                        }
+
+                        return Task.CompletedTask;
+                    },
+                };
             });
 
         return services;
     }
+
+    private static string? SubjectOf(ClaimsPrincipal? principal) =>
+        principal?.FindFirstValue(JwtRegisteredClaimNames.Sub);
 }

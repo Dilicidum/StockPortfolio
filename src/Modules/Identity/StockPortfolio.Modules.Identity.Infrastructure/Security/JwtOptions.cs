@@ -35,8 +35,6 @@ internal sealed class JwtOptions
     /// <summary>Reads and validates the Jwt section, throwing if the module cannot sign tokens.</summary>
     public static JwtOptions FromConfiguration(IConfiguration configuration)
     {
-        ArgumentNullException.ThrowIfNull(configuration);
-
         var section = configuration.GetSection(SectionName);
         var signingKey = section["SigningKey"];
 

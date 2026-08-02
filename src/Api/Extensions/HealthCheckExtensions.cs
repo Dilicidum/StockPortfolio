@@ -7,15 +7,15 @@ using StockPortfolio.Api.HealthChecks;
 namespace StockPortfolio.Api.Extensions;
 
 /// <summary>The two health endpoints and the checks behind them.</summary>
-public static class HealthCheckExtensions
+internal static class HealthCheckExtensions
 {
-    /// <summary>Liveness.</summary>
+    /// <summary>The path ACA's liveness probe calls, which must never touch a dependency.</summary>
     public const string LivenessPath = "/health/live";
 
-    /// <summary>Readiness.</summary>
+    /// <summary>The path ACA's readiness probe calls, which runs every dependency check.</summary>
     public const string ReadinessPath = "/health/ready";
 
-    /// <summary>The ConnectionStrings key holding the Redis endpoint, e.g.</summary>
+    /// <summary>The ConnectionStrings key holding the Redis endpoint.</summary>
     public const string RedisConnectionStringName = "Redis";
 
     private const string PostgresCheckName = "postgres";
@@ -26,9 +26,6 @@ public static class HealthCheckExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(configuration);
-
         var redisConnectionString = configuration.GetConnectionString(RedisConnectionStringName);
 
         if (string.IsNullOrWhiteSpace(redisConnectionString))
@@ -45,7 +42,7 @@ public static class HealthCheckExtensions
         // AbortOnConnectFail=false: a Redis blip must not kill startup.
         redisOptions.AbortOnConnectFail = false;
 
-        // Resolved lazily: the singleton factory does not run until something asks for it, which in Phase 1.
+        // Resolved lazily: the singleton factory does not run until something asks for it, which in Phase 1 is only the readiness check.
         services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
 
         services.AddHealthChecks()
@@ -55,11 +52,9 @@ public static class HealthCheckExtensions
         return services;
     }
 
-    /// <summary>Maps LivenessPath and ReadinessPath.</summary>
+    /// <summary>Maps the anonymous liveness and readiness routes.</summary>
     public static IEndpointRouteBuilder MapStockPortfolioHealthChecks(this IEndpointRouteBuilder app)
     {
-        ArgumentNullException.ThrowIfNull(app);
-
         // Predicate = _ => false selects zero checks: liveness must never touch a dependency.
         app.MapHealthChecks(LivenessPath, new HealthCheckOptions { Predicate = _ => false })
             .AllowAnonymous()

@@ -54,20 +54,57 @@ public sealed class ModuleBoundaryTests
                 + Describe(shells));
     }
 
+    /// <summary>The third part of the guard: which assemblies are skipped is a decision, not a drift.</summary>
+    [Fact]
+    public void EmptyShells_AreExactlyThePhasesNotYetBuilt()
+    {
+        // Hard-coded on purpose: this is the list of rules currently not enforced, so it must change by hand.
+        string[] expected =
+        [
+            "StockPortfolio.Modules.Alerts.Api",
+            "StockPortfolio.Modules.Alerts.Application",
+            "StockPortfolio.Modules.Alerts.Contracts",
+            "StockPortfolio.Modules.Alerts.Domain",
+            "StockPortfolio.Modules.Alerts.Infrastructure",
+            "StockPortfolio.Modules.Identity.Contracts",
+            "StockPortfolio.Modules.MarketData.Api",
+            "StockPortfolio.Modules.MarketData.Application",
+            "StockPortfolio.Modules.MarketData.Contracts",
+            "StockPortfolio.Modules.MarketData.Domain",
+            "StockPortfolio.Modules.MarketData.Infrastructure",
+            "StockPortfolio.Modules.Portfolio.Api",
+            "StockPortfolio.Modules.Portfolio.Application",
+            "StockPortfolio.Modules.Portfolio.Contracts",
+            "StockPortfolio.Modules.Portfolio.Domain",
+            "StockPortfolio.Modules.Portfolio.Infrastructure",
+        ];
+
+        var actual = SolutionAssemblies.ScannedNames
+            .Where(name => SolutionAssemblies.IsEmptyShell(SolutionAssemblies.Get(name)))
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+        actual.ShouldBe(
+            expected,
+            ignoreOrder: false,
+            "The set of empty-shell assemblies has moved. Rule 2 already skips all four .Contracts "
+                + "assemblies, so a rule that skips everywhere reports green while enforcing nothing:"
+                + Environment.NewLine
+                + Describe(expected.Except(actual, StringComparer.Ordinal)
+                    .Select(name => name + " now carries code — delete it from the expected list, and "
+                        + "check the rules it just switched on actually pass"))
+                + Environment.NewLine
+                + Describe(actual.Except(expected, StringComparer.Ordinal)
+                    .Select(name => name + " has become an empty shell — every rule over it is now "
+                        + "silently skipping, which is a regression, not a pass")));
+    }
+
     /// <summary>Rule 1.</summary>
     [Theory]
     [MemberData(nameof(ScannedAssemblies))]
     public void Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts(string assemblyName)
     {
-        if (SolutionAssemblies.IsHost(assemblyName))
-        {
-            // Api and Migrator are the composition roots: they reference every <M>.Infrastructure and <M>.Api on.
-            Assert.Skip(
-                assemblyName
-                    + " is a composition root and is exempt by design: it wires every module's "
-                    + "Infrastructure and Api together, which is the one place that is allowed to.");
-        }
-
+        // No composition-root exemption: this project references neither host, so neither is ever scanned.
         var assembly = SolutionAssemblies.Get(assemblyName);
 
         SkipIfEmptyShell(assembly, assemblyName);

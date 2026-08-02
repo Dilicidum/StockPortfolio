@@ -12,9 +12,6 @@ public sealed class ValidationFilter<TRequest>(IValidator<TRequest> validator) :
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next)
     {
-        ArgumentNullException.ThrowIfNull(context);
-        ArgumentNullException.ThrowIfNull(next);
-
         if (context.Arguments.OfType<TRequest>().FirstOrDefault() is not { } request)
         {
             return await next(context);

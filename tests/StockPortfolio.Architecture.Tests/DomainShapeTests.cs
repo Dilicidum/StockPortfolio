@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using Shouldly;
+using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Tests;
 
@@ -48,6 +49,36 @@ public sealed class DomainShapeTests
         DescribeMutableProperties(typeof(ViolatingShape))
             .ShouldHaveSingleItem()
             .ShouldContain(nameof(ViolatingShape.Mutable), Case.Sensitive);
+    }
+
+    /// <summary>Presses the button on the smoke detector: rule 3 passes by finding nothing, so it must find.</summary>
+    [Fact]
+    public void DomainSetterRule_SeesTheRealDomainTypes_SoAnEmptyResultMeansSomething()
+    {
+        var identityDomain = SolutionAssemblies.Get(SolutionAssemblies.NameOf("Identity", "Domain"));
+
+        var scanned = identityDomain.GetTypes()
+            .Where(IsDomainType)
+            .Select(type => type.FullName!)
+            .ToList();
+
+        scanned.ShouldContain(
+            typeof(User).FullName!,
+            "Rule 3's filter no longer selects User, so the rule scans a smaller set than it reports.");
+
+        scanned.ShouldContain(
+            typeof(RefreshToken).FullName!,
+            "Rule 3's filter no longer selects RefreshToken, so the rule scans a smaller set than it reports.");
+
+        SolutionAssemblies.IsDomainNamespace(typeof(User).Namespace).ShouldBeTrue(
+            typeof(User).Namespace + " is a module's domain namespace; not recognising it empties rule 3.");
+
+        SolutionAssemblies.IsDomainNamespace("StockPortfolio.Modules.Identity.Application").ShouldBeFalse(
+            "Application is not Domain. Widening the filter would make rule 3 police types it has no "
+                + "invariant to police.");
+
+        SolutionAssemblies.IsDomainNamespace("StockPortfolio.Shared.Kernel").ShouldBeFalse(
+            "Shared.Kernel is not a module, so it carries no module's domain namespace.");
     }
 
     private static bool IsDomainType(Type type) =>

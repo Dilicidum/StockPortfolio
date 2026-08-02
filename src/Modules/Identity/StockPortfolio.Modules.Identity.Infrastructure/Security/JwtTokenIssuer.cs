@@ -23,8 +23,6 @@ internal sealed class JwtTokenIssuer : ITokenIssuer
 
     public JwtTokenIssuer(JwtOptions options)
     {
-        ArgumentNullException.ThrowIfNull(options);
-
         _options = options;
         _signingCredentials = new SigningCredentials(
             new SymmetricSecurityKey(options.GetSigningKeyBytes()),

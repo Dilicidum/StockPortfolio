@@ -58,7 +58,6 @@ public sealed class RefreshToken
         TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(tokenHash);
-        ArgumentNullException.ThrowIfNull(clock);
 
         if (tokenHash.Length == 0)
         {
@@ -86,18 +85,13 @@ public sealed class RefreshToken
     }
 
     /// <summary>Reports whether the session can still be exchanged for a new token pair.</summary>
-    public bool IsActive(TimeProvider clock)
-    {
-        ArgumentNullException.ThrowIfNull(clock);
-
-        return SupersededAt is null && clock.GetUtcNow() < ExpiresAt;
-    }
+    public bool IsActive(TimeProvider clock) =>
+        SupersededAt is null && clock.GetUtcNow() < ExpiresAt;
 
     /// <summary>Rotates this session, handing its role to replacement.</summary>
     public void Supersede(RefreshToken replacement, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(replacement);
-        ArgumentNullException.ThrowIfNull(clock);
 
         if (replacement.Id.Equals(Id))
         {
@@ -122,8 +116,6 @@ public sealed class RefreshToken
     /// <summary>Ends this session with no replacement — the logout path.</summary>
     public void Revoke(TimeProvider clock)
     {
-        ArgumentNullException.ThrowIfNull(clock);
-
         EnsureNotAlreadySuperseded();
 
         SupersededAt = clock.GetUtcNow();

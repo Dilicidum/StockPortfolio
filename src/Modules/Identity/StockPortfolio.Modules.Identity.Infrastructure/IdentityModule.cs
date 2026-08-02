@@ -1,5 +1,3 @@
-using System.Runtime.CompilerServices;
-
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,9 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 using StockPortfolio.Modules.Identity.Infrastructure.Security;
-
-// The unit tests exercise Argon2PasswordHasher and PhcString directly.
-[assembly: InternalsVisibleTo("StockPortfolio.Modules.Identity.UnitTests")]
 
 namespace StockPortfolio.Modules.Identity.Infrastructure;
 

@@ -1,4 +1,5 @@
 using Shouldly;
+using Xunit.Sdk;
 
 namespace StockPortfolio.Tests;
 
@@ -12,8 +13,17 @@ public sealed class LayerReferenceTests
     public static TheoryData<string> InfrastructureAssemblies => AssembliesFor("Infrastructure");
 
     /// <summary>The four .Api assemblies.</summary>
-    // Worth a second look when editing: passing "Infrastructure" here points rule 5 at the wrong layer.
     public static TheoryData<string> ApiAssemblies => AssembliesFor("Api");
+
+    /// <summary>Presses the button on the smoke detector for the rule targets themselves.</summary>
+    [Fact]
+    public void MemberData_NamesTheLayerEachRuleClaims()
+    {
+        // The bug this replaces a comment for: AssembliesFor("Infrastructure") once fed rule 5, green.
+        ShouldNameEveryModulesLayer(ContractsAssemblies, SolutionAssemblies.ContractsLayer);
+        ShouldNameEveryModulesLayer(InfrastructureAssemblies, "Infrastructure");
+        ShouldNameEveryModulesLayer(ApiAssemblies, "Api");
+    }
 
     /// <summary>Rule 2.</summary>
     [Theory]
@@ -175,6 +185,34 @@ public sealed class LayerReferenceTests
 
     private static TheoryData<string> AssembliesFor(string layer) =>
         [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, layer))];
+
+    private static void ShouldNameEveryModulesLayer(TheoryData<string> data, string layer)
+    {
+        var suffix = "." + layer;
+
+        var named = data
+            .Cast<ITheoryDataRow>()
+            .Select(row => (string)row.GetData()[0]!)
+            .ToList();
+
+        named.Count.ShouldBe(
+            SolutionAssemblies.ModuleNames.Length,
+            "The " + layer + " rule must run over one assembly per module, and there are "
+                + SolutionAssemblies.ModuleNames.Length + " modules.");
+
+        named.ShouldAllBe(
+            name => name.EndsWith(suffix, StringComparison.Ordinal),
+            "Every assembly the " + layer + " rule runs over must be a ." + layer + " assembly. "
+                + "A member data property pointed at the wrong layer reports green while checking "
+                + "nothing the rule claims to check:"
+                + Environment.NewLine
+                + ModuleBoundaryTests.Describe(named));
+
+        named.ShouldBe(
+            SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, layer)),
+            ignoreOrder: true,
+            "The " + layer + " rule must name exactly one ." + layer + " assembly per module.");
+    }
 
     private static bool IsPersistence(string? name) =>
         name is not null

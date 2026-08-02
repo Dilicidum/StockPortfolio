@@ -42,7 +42,7 @@ internal static class HandlerLog
         FaultedCallback(logger, handler, elapsedMilliseconds, exception);
 }
 
-/// <summary>Logs the start, duration and failure of every .</summary>
+/// <summary>Logs the start, duration and failure of every command handler.</summary>
 internal sealed class LoggingCommandHandler<TCommand, TResult>(
     ICommandHandler<TCommand, TResult> inner,
     ILogger<LoggingCommandHandler<TCommand, TResult>> logger)
@@ -73,7 +73,7 @@ internal sealed class LoggingCommandHandler<TCommand, TResult>(
         (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
 }
 
-/// <summary>Logs the start, duration and failure of every .</summary>
+/// <summary>Logs the start, duration and failure of every query handler.</summary>
 internal sealed class LoggingQueryHandler<TQuery, TResult>(
     IQueryHandler<TQuery, TResult> inner,
     ILogger<LoggingQueryHandler<TQuery, TResult>> logger)

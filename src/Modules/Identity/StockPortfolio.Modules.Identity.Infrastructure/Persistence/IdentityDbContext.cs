@@ -21,8 +21,6 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        ArgumentNullException.ThrowIfNull(modelBuilder);
-
         modelBuilder.HasDefaultSchema(SchemaName);
         modelBuilder.ApplyConfigurationsFromAssembly(
             typeof(IdentityDbContext).Assembly,
@@ -32,15 +30,11 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
-        ArgumentNullException.ThrowIfNull(optionsBuilder);
-
         optionsBuilder.ConfigureWarnings(w => w.Throw(CoreEventId.SkippedEntityTypeConfigurationWarning));
     }
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        ArgumentNullException.ThrowIfNull(configurationBuilder);
-
         configurationBuilder.Properties<UserId>().HaveConversion<UserIdConverter>();
         configurationBuilder.DefaultTypeMapping<UserId>().HasConversion<UserIdConverter>();
 

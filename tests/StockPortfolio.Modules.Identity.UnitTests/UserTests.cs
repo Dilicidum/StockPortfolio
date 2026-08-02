@@ -98,32 +98,4 @@ public sealed class UserTests
             () => User.Create("ann@example.com", passwordHash!, new FakeTimeProvider(Noon)));
     }
 
-    [Fact]
-    public void Create_NullClock_Throws()
-    {
-        Should.Throw<ArgumentNullException>(
-            () => User.Create("ann@example.com", ValidHash, null!));
-    }
-
-    [Fact]
-    public void ChangePasswordHash_NewHash_ReplacesTheStoredOne()
-    {
-        var user = User.Create("ann@example.com", ValidHash, new FakeTimeProvider(Noon)).AsT0;
-
-        user.ChangePasswordHash("$argon2id$v=19$m=19456,t=2,p=1$bmV3c2FsdG5ld3NhbHQ$bmV3aGFzaA");
-
-        user.PasswordHash.ShouldNotBe(ValidHash);
-    }
-
-    [Theory]
-    [InlineData(null)]
-    [InlineData("")]
-    [InlineData("   ")]
-    public void ChangePasswordHash_BlankHash_Throws(string? newHash)
-    {
-        var user = User.Create("ann@example.com", ValidHash, new FakeTimeProvider(Noon)).AsT0;
-
-        Should.Throw<ArgumentException>(() => user.ChangePasswordHash(newHash!));
-        user.PasswordHash.ShouldBe(ValidHash);
-    }
 }

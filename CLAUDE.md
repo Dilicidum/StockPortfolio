@@ -6,7 +6,7 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 153 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
+**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 188 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
 
 `docs/plan/` was swept to match the conventions below — its snippets are current, and where a decision was reversed the plan says so and why, rather than quietly showing the new shape. `docs/Initial.md` is the exception and stays historical.
 
@@ -19,7 +19,7 @@ Work phase by phase. A phase is done when it runs in a browser, not when tests p
 ```bash
 docker compose up                    # whole stack, from a clean clone, no API key needed
 dotnet build
-dotnet test                          # 153 tests; the integration suite needs Docker running
+dotnet test                          # 188 tests; the integration suite needs Docker running
 npm --prefix src/Web run dev
 npm --prefix src/Web test
 
@@ -30,7 +30,7 @@ dotnet ef migrations add <Name> --context <Module>DbContext --output-dir Persist
 az deployment group what-if -g <rg> -f infra/main.bicep    # before any deploy
 ```
 
-`/openapi/v1.json` is served in Development only, so read it from `dotnet run --project src/Api`, not from the container.
+`/openapi/v1.json` is served in Development only — which `docker-compose.override.yml` makes the default, so it *is* reachable at `:8080` on a plain `docker compose up`, as well as from `dotnet run --project src/Api`.
 
 With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a warning. That is deliberate — Finnhub killed its sandbox in 2022, so the demo must work without a key.
 
@@ -130,7 +130,9 @@ The trade is real and worth knowing: the typed union made the compiler reject a 
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** 153 of them: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** 188 passing of 217 discovered: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+
+**The 29 skips are architecture rules waiting on empty modules, and that number is pinned.** A rule that skips asserts nothing — rule 2 currently runs zero of its four cases, because all four `.Contracts` projects are empty. `EmptyShells_AreExactlyThePhasesNotYetBuilt` fixes the exact list of 16 shell assemblies, so the day Portfolio gains its first type the skip set changes as a deliberate edit rather than silently shifting what is enforced. Quoting a passing count without the skip count hides this.
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was verified by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while reporting green. `ReferenceWalker_FindsEdgesThatDoExist` guards the same class of bug permanently: rules that pass by finding nothing need a companion that fails if the search finds nothing.
 

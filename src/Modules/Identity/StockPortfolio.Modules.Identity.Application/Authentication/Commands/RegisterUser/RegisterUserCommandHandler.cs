@@ -1,6 +1,7 @@
 using OneOf;
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
+using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
@@ -8,9 +9,8 @@ namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.Re
 /// <summary>Creates an account and opens the first session for it.</summary>
 public sealed class RegisterUserCommandHandler(
     IPasswordHasher passwordHasher,
-    ITokenIssuer tokenIssuer,
     IUserRepository users,
-    IRefreshTokenRepository refreshTokens,
+    SessionOpener sessions,
     TimeProvider clock) : ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>
 {
     /// <inheritdoc/>
@@ -31,29 +31,16 @@ public sealed class RegisterUserCommandHandler(
 
         return await User.Create(command.Email, passwordHash, clock)
             .Match(
-                user => AddThenIssueAsync(user, ct),
+                user => AddThenOpenAsync(user, ct),
                 invalid => Task.FromResult<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>(invalid));
     }
 
-    private async Task<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>> AddThenIssueAsync(
+    private async Task<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>> AddThenOpenAsync(
         User user,
         CancellationToken ct)
     {
         await users.AddAsync(user, ct);
 
-        var now = clock.GetUtcNow();
-        var accessExpiresAt = now + TokenPolicy.AccessTokenLifetime;
-        var accessToken = tokenIssuer.IssueAccessToken(user.Id, user.Email, accessExpiresAt);
-        var refreshToken = tokenIssuer.NewRefreshToken();
-
-        var session = RefreshToken.Issue(
-            user.Id,
-            tokenIssuer.HashRefreshToken(refreshToken),
-            now + TokenPolicy.RefreshTokenLifetime,
-            clock);
-
-        await refreshTokens.AddAsync(session, ct);
-
-        return new TokenPair(accessToken, refreshToken, accessExpiresAt);
+        return await sessions.OpenAsync(user, ct);
     }
 }

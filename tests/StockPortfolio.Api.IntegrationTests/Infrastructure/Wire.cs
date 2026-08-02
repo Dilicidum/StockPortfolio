@@ -1,7 +1,11 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
+
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
@@ -69,6 +73,24 @@ internal static class Wire
 
         return payload;
     }
+
+    /// <summary>Signs an access token with the host's own key, carrying exactly the claims asked for and no others.</summary>
+    public static string MintAccessToken(
+        string signingKey,
+        string issuer,
+        string audience,
+        DateTimeOffset expiresAt,
+        IDictionary<string, object>? claims = null) =>
+        new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
+        {
+            Issuer = issuer,
+            Audience = audience,
+            Expires = expiresAt.UtcDateTime,
+            SigningCredentials = new SigningCredentials(
+                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
+                SecurityAlgorithms.HmacSha256),
+            Claims = claims ?? new Dictionary<string, object>(StringComparer.Ordinal),
+        });
 
     /// <summary>Sends a request carrying a bearer token.</summary>
     public static async Task<HttpResponseMessage> SendAsync(

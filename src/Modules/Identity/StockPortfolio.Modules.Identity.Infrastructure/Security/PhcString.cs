@@ -94,7 +94,7 @@ internal sealed record PhcString(int MemoryKib, int Iterations, int Parallelism,
             return false;
         }
 
-        // NumberStyles.None rejects a leading sign, whitespace and thousands separators, so "+2" and " 2" are.
+        // NumberStyles.None rejects a leading sign, whitespace and thousands separators, so "+2" and " 2" fail.
         return int.TryParse(
             segment.AsSpan(tag.Length),
             NumberStyles.None,

@@ -2,7 +2,7 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Application.Abstractions;
 
-/// <summary>Mints the two kinds of token the module hands out: a signed, self-contained access token, and an.</summary>
+/// <summary>Mints both tokens the module hands out: a signed, self-contained access token and an opaque refresh token.</summary>
 public interface ITokenIssuer
 {
     /// <summary>Signs an access token for a user.</summary>

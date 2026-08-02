@@ -20,10 +20,6 @@ internal static class SolutionAssemblies
     public static ImmutableArray<string> LayerNames { get; } =
         [ContractsLayer, "Domain", "Application", "Infrastructure", "Api"];
 
-    /// <summary>The composition roots, exempt from the cross-module rule.</summary>
-    public static ImmutableArray<string> HostAssemblyNames { get; } =
-        ["StockPortfolio.Api", "StockPortfolio.Migrator"];
-
     /// <summary>The assemblies that must exist for the rules below to mean anything.</summary>
     public static ImmutableArray<string> ExpectedNames { get; } = BuildExpectedNames();
 
@@ -41,10 +37,6 @@ internal static class SolutionAssemblies
         name is not null
         && name.StartsWith("StockPortfolio.", StringComparison.Ordinal)
         && !name.EndsWith(".Tests", StringComparison.Ordinal);
-
-    /// <summary>Reports whether an assembly is one of the exempt composition roots.</summary>
-    public static bool IsHost(string? name) =>
-        name is not null && HostAssemblyNames.Contains(name, StringComparer.Ordinal);
 
     /// <summary>Splits a module assembly name into its module and layer.</summary>
     public static bool TryParseModuleLayer(

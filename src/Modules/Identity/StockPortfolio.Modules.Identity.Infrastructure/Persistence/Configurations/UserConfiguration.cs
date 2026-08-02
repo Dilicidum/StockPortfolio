@@ -21,8 +21,6 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 
     public void Configure(EntityTypeBuilder<User> builder)
     {
-        ArgumentNullException.ThrowIfNull(builder);
-
         builder.ToTable(TableName);
 
         builder.HasKey(u => u.Id);

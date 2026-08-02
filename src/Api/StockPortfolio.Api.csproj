@@ -5,9 +5,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Never published: it carries the local signing key and connection strings, and shipping it
+         into the image means the "not configured" guards can never fire in a Development container. -->
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
-    <PackageReference Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="StackExchange.Redis" />
     <PackageReference Include="Scrutor" />

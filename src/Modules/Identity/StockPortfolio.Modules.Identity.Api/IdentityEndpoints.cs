@@ -15,6 +15,7 @@ using StockPortfolio.Modules.Identity.Application.Authentication.Commands.Regist
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 using StockPortfolio.Shared.Api;
+using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Api;
@@ -39,11 +40,14 @@ public static class IdentityEndpoints
     /// <summary>Maps the five authentication routes onto /api/auth.</summary>
     public static IEndpointRouteBuilder MapIdentityEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/auth").WithTags("Authentication");
-
         // Every status an endpoint can actually emit is declared. 415 and 500 carry problem+json
         // because AddProblemDetails and UseStatusCodePages give even framework-generated
         // responses a body - verified against the running API, not assumed.
+
+        // 500 is the one status every route here shares, so it is declared once on the group.
+        var group = app.MapGroup("/api/auth")
+            .WithTags("Authentication")
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/register", RegisterAsync)
             .AddEndpointFilter<ValidationFilter<RegisterUserRequest>>()
@@ -54,8 +58,7 @@ public static class IdentityEndpoints
             .Produces<TokenPair>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         group.MapPost("/login", LoginAsync)
             .AddEndpointFilter<ValidationFilter<LoginUserRequest>>()
@@ -66,8 +69,7 @@ public static class IdentityEndpoints
             .Produces<TokenPair>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         group.MapPost("/refresh", RefreshAsync)
             .AddEndpointFilter<ValidationFilter<RefreshSessionRequest>>()
@@ -78,8 +80,7 @@ public static class IdentityEndpoints
             .Produces<TokenPair>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         group.MapPost("/logout", LogoutAsync)
             .RequireAuthorization()
@@ -88,16 +89,14 @@ public static class IdentityEndpoints
             .WithDescription("Idempotent. Send the refresh token in the body to retire it immediately; omit it and the call still returns 204.")
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         group.MapGet("/me", GetCurrentUserAsync)
             .RequireAuthorization()
             .WithName("GetCurrentUser")
             .WithSummary("Returns the identity behind the current access token.")
             .Produces<GetCurrentUserResult>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         return app;
     }
@@ -170,7 +169,8 @@ public static class IdentityEndpoints
         IQueryHandler<GetCurrentUserQuery, OneOf<GetCurrentUserResult, NotFound>> handler,
         CancellationToken ct)
     {
-        // A token that authenticated but carries no usable `sub` is a broken token, not a broken user — 401.
+        // Totality over a string?, not a security control: OnTokenValidated already rejects a subject-less
+        // token, so this only gives FindFirstValue's null a branch to go down.
         if (!Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out var userId))
         {
             return ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");

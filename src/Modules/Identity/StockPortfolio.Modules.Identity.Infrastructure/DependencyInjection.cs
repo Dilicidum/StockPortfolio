@@ -4,11 +4,13 @@ using OneOf;
 using OneOf.Types;
 
 using StockPortfolio.Modules.Identity.Application;
+using StockPortfolio.Modules.Identity.Application.Authentication;
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
+using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure;
@@ -18,6 +20,9 @@ internal static class DependencyInjection
 {
     internal static IServiceCollection AddIdentityHandlers(this IServiceCollection services)
     {
+        // Not a handler, but the collaborator all three session-opening handlers share.
+        services.AddScoped<SessionOpener>();
+
         services.AddScoped<
             ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>,
             RegisterUserCommandHandler>();

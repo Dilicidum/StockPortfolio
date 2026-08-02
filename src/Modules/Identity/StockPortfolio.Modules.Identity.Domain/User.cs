@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Mail;
 using OneOf;
-using StockPortfolio.Shared.Kernel.Cqrs;
+using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Identity.Domain;
 
@@ -43,7 +43,6 @@ public sealed class User
     /// <summary>Creates a user, normalising the email and rejecting a malformed one.</summary>
     public static OneOf<User, InvalidInput> Create(string email, string passwordHash, TimeProvider clock)
     {
-        ArgumentNullException.ThrowIfNull(clock);
         ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
 
         if (string.IsNullOrWhiteSpace(email))
@@ -59,13 +58,6 @@ public sealed class User
         }
 
         return new User(UserId.New(), normalised, passwordHash, clock.GetUtcNow());
-    }
-
-    /// <summary>Replaces the stored password hash.</summary>
-    public void ChangePasswordHash(string newHash)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(newHash);
-        PasswordHash = newHash;
     }
 
     /// <summary>Decides whether an already-normalised address is well formed enough to store.</summary>

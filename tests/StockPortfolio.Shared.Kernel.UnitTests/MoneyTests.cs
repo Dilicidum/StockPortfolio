@@ -80,15 +80,16 @@ public sealed class MoneyTests
         (Money.Usd(2.5m) * 4m).ShouldBe(Money.Usd(10m));
 
     [Fact]
-    public void Add_DoesNotMutateOperands()
+    public void Add_IsCommutative_AcrossCurrencyCasing()
     {
-        var left = Money.Usd(1m);
-        var right = Money.Usd(2m);
+        // The guard is case-insensitive but record equality is ordinal, so before the constructor
+        // normalised the currency these two sums compared unequal while both read as "3 dollars".
+        var lowerFirst = new Money(1m, "usd").Add(Money.Usd(2m));
+        var upperFirst = Money.Usd(1m).Add(new Money(2m, "usd"));
 
-        _ = left.Add(right);
-
-        left.Amount.ShouldBe(1m);
-        right.Amount.ShouldBe(2m);
+        lowerFirst.ShouldBe(upperFirst);
+        lowerFirst.Currency.ShouldBe("USD");
+        upperFirst.Currency.ShouldBe("USD");
     }
 
     [Fact]

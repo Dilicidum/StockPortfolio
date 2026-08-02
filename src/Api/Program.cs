@@ -30,8 +30,19 @@ builder.Services.AddStockPortfolioAuthentication(builder.Configuration);
 builder.Services.AddAuthorization();
 
 // 3.
+var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>();
+
+if (corsOrigins is null || corsOrigins.Length == 0)
+{
+    throw new InvalidOperationException(
+        "Configuration 'Cors:Origins' is missing or empty. The SPA is cross-origin in every deployment "
+        + "target, so an empty origin list builds a policy that matches nothing and the API starts green "
+        + "while every browser call fails. Set Cors__Origins__0 in the environment (compose and Bicep both "
+        + "do), or Cors:Origins in appsettings.");
+}
+
 builder.Services.AddCors(options => options.AddPolicy("spa", policy => policy
-    .WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [])
+    .WithOrigins(corsOrigins)
     .AllowAnyHeader()
     .AllowAnyMethod()
     .AllowCredentials()));

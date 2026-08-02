@@ -10,13 +10,10 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
 {
     internal const string TableName = "refresh_tokens";
 
-    /// <summary>One row per opaque token.</summary>
+    /// <summary>One row per opaque token, and the index every refresh look-up goes through.</summary>
     internal const string TokenHashUniqueIndexName = "ix_refresh_tokens_token_hash";
 
-    /// <summary>Partial index over the same column, restricted to live rows.</summary>
-    internal const string ActiveTokenIndexName = "ix_refresh_tokens_active";
-
-    /// <summary>EF creates an index for the foreign key whether or not it is asked to.</summary>
+    /// <summary>EF creates an index for the foreign key whether or not it is asked to, so it is named here.</summary>
     internal const string UserIdIndexName = "ix_refresh_tokens_user_id";
 
     /// <summary>SHA-256 output.</summary>
@@ -24,8 +21,6 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
 
     public void Configure(EntityTypeBuilder<RefreshToken> builder)
     {
-        ArgumentNullException.ThrowIfNull(builder);
-
         builder.ToTable(TableName);
 
         builder.HasKey(t => t.Id);
@@ -66,15 +61,10 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
             .IsUnique()
             .HasDatabaseName(TokenHashUniqueIndexName);
 
-        // Second index on the same column, so the named overload is required — the unnamed one would be.
-        builder.HasIndex(t => t.TokenHash, ActiveTokenIndexName)
-            .HasDatabaseName(ActiveTokenIndexName)
-            .HasFilter("superseded_at IS NULL");
-
         builder.HasIndex(t => t.UserId)
             .HasDatabaseName(UserIdIndexName);
 
-        // A real foreign key: both tables live in the `identity` schema and are owned by the same role, so.
+        // A real foreign key: both tables live in the `identity` schema and are owned by the same role.
         builder.HasOne<User>()
             .WithMany()
             .HasForeignKey(t => t.UserId)

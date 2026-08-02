@@ -9,8 +9,6 @@
 
   <ItemGroup Label="Domain / Application">
     <PackageVersion Include="OneOf" Version="3.0.271" />
-    <!-- OneOf.SourceGenerator is a GlobalPackageReference below; it carries its own
-         Version, so a PackageVersion entry here would be a duplicate (NU1506). -->
     <PackageVersion Include="FluentValidation" Version="12.1.1" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
   </ItemGroup>
@@ -36,7 +34,6 @@
          so naming it here upgrades it everywhere. -->
     <PackageVersion Include="Microsoft.OpenApi" Version="2.11.0" />
     <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.10" />
-    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.10" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
     <PackageVersion Include="Scrutor" Version="7.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
@@ -58,9 +55,10 @@
     docs/plan/00-overview.md listed it in the verified stack; that was wrong.
     Exhaustiveness is instead guaranteed structurally - see the note in
     Directory.Build.props and docs/plan/phase-1-implementation.md §3.
+
+    OneOf.SourceGenerator was a GlobalPackageReference here and is gone too:
+    it only does anything for [GenerateOneOf], which appears zero times because
+    handlers return OneOf<...> directly. Reintroduce it with the attribute, not before.
   -->
-  <ItemGroup Label="Applies to every project">
-    <GlobalPackageReference Include="OneOf.SourceGenerator" Version="3.0.271" />
-  </ItemGroup>
 
 </Project>
