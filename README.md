@@ -99,12 +99,21 @@ its list ends with "тощо" (etc.). Every control is hand-built with Tailwind.
 ### Token storage — the honest version
 
 - **Access token in memory only.** A module-scoped variable, never `localStorage`.
-- **Refresh token**: an httpOnly cookie under compose (same origin through nginx). GitHub Pages is a
-  different origin, so there it comes back in the response body and lives in `sessionStorage`.
+- **Refresh token in `sessionStorage`**, in every deployment. **There is no cookie** — an earlier
+  version of this section claimed an httpOnly cookie under compose, and that half was never built.
+  The server sets no cookie anywhere; every auth endpoint returns the pair in the response body.
 
-The `sessionStorage` half is genuinely weaker than an httpOnly cookie and it is the honest
-consequence of hosting a SPA statically on a different origin from its API. The client sends both
-and needs no deployment flag. It argues for a short refresh-token lifetime — see `TokenPolicy`.
+`sessionStorage` is weaker than an httpOnly cookie and it is the honest consequence of hosting the
+SPA statically on a different origin from its API: the cookie would be third-party, and Safari
+blocks those outright. It argues for a short refresh-token lifetime — see `TokenPolicy`.
+
+Being tab-scoped, `sessionStorage` also meant a second tab started with no credential and bounced to
+`/login` while the first was still signed in. Rather than move the token somewhere shared — which on
+a static cross-origin SPA means `localStorage`, i.e. a 14-day credential any injected script can read
+— the session is **handed between tabs over `BroadcastChannel`**: a new tab asks, a live tab answers,
+and nothing is ever written to disk. Every rotation is broadcast too, so the tab that did not refresh
+does not end up holding a superseded token. Close every tab and the session still ends. See
+`src/Web/src/auth/sessionChannel.ts`.
 
 Rotation is on, with a short grace period so two open tabs refreshing at once do not log each other
 out. Reusing a superseded token after the grace window closes is rejected.

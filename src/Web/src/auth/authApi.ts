@@ -76,9 +76,10 @@ export async function logout(): Promise<void> {
 }
 
 /**
- * Restores a session on page load: swap the refresh token (httpOnly cookie
- * under compose, sessionStorage under Pages) for a fresh access token, then
- * identify the user. `refreshAccessToken` already stored the pair.
+ * Restores a session on page load: swap the refresh token — always from
+ * sessionStorage, there is no cookie in any deployment, see lib/tokenStore.ts —
+ * for a fresh access token, then identify the user. `refreshAccessToken` has
+ * already stored the pair by the time this returns.
  *
  * Rejection here is the ordinary "not signed in" path, not an error worth
  * reporting — a first-time visitor takes it on every load.
