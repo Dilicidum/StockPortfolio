@@ -668,9 +668,7 @@ On multi-case results, annotate the lambda with an explicit `Results<Ok<T>, Prob
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// 1. Options, validated at startup
-builder.Services.AddOptions<JwtOptions>()
-    .BindConfiguration("Jwt").ValidateDataAnnotations().ValidateOnStart();
+// 1. Options — NOT here. See the correction below.
 
 // 2. Cross-cutting
 builder.Services.AddProblemDetails();
@@ -699,9 +697,9 @@ builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddIdentityPresentation();
 builder.Services.DecorateHandlers();      // logging only; must come after the modules
 
-// 6. Health
+// 6. Health — NOT AddDbContextCheck<IdentityDbContext>. See the correction below.
 builder.Services.AddHealthChecks()
-    .AddDbContextCheck<IdentityDbContext>("postgres")
+    .AddCheck<PostgresHealthCheck>("postgres")
     .AddCheck<RedisHealthCheck>("redis");
 
 var app = builder.Build();
@@ -723,7 +721,20 @@ app.Run();
 public partial class Program;      // required by WebApplicationFactory<Program>
 ```
 
-Six things in there that are decisions, not boilerplate:
+### ⚠️ Correction — two things this section originally got wrong
+
+An earlier revision of §6 put `AddOptions<JwtOptions>()` and `AddDbContextCheck<IdentityDbContext>()` in `Api/Program.cs`. **Neither compiles**, for the same reason: `JwtOptions` and `IdentityDbContext` are `internal` to `Identity.Infrastructure`, and `Api` is a different assembly, so it cannot name them at all.
+
+This is the flip side of the rule in §4.3. `AddDbContext<IdentityDbContext>(...)` *does* compile — but only because that call sits **inside** `Identity.Infrastructure`, where the type is visible. Move the same line one assembly out and it is `CS0122`. The distinction is not "generic argument vs signature"; it is simply which assembly is doing the naming.
+
+Both moved:
+
+- **JWT options validation lives in `AddIdentityModule`**, which resolves and validates the `Jwt` section eagerly and throws naming `Jwt:SigningKey` if it is missing or under 32 bytes. That fires during registration, which is *earlier* than `ValidateOnStart()` would have. The host still reads `Jwt:SigningKey`/`Issuer`/`Audience` straight from `IConfiguration` for `AddJwtBearer` — configuration keys cross assembly boundaries freely, types do not.
+- **The Postgres readiness check is a hand-written `IHealthCheck`** opening an Npgsql connection on `ConnectionStrings:Identity` and running `SELECT 1`. Slightly less informative than `AddDbContextCheck`, and it avoids adding a package reference to Infrastructure purely to satisfy the host.
+
+**The general lesson, worth applying to phases 2–6:** anything the host must *name* has to be public, so it belongs in the module's one public seam. Anything the host only needs to *configure* travels as a configuration key instead. When a plan snippet mentions an internal type in `Program.cs`, that snippet is wrong.
+
+### Six things in there that are decisions, not boilerplate
 
 **No `UseResponseCompression()`.** Not now, not later. It buffers `text/event-stream` and Phase 4's alert feed dies silently — no error, just no events.
 

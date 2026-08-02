@@ -23,6 +23,13 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
     /// </summary>
     internal const string ActiveTokenIndexName = "ix_refresh_tokens_active";
 
+    /// <summary>
+    /// EF creates an index for the foreign key whether or not it is asked to. Declaring it here is only
+    /// about the name: the convention-generated one is <c>IX_refresh_tokens_user_id</c>, and one
+    /// PascalCase identifier among six snake_case ones has to be quoted in every hand-written query.
+    /// </summary>
+    internal const string UserIdIndexName = "ix_refresh_tokens_user_id";
+
     /// <summary>SHA-256 output. Fixed width, so <c>bytea</c> comparisons never see a length mismatch.</summary>
     private const int TokenHashLength = 32;
 
@@ -75,6 +82,9 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
         builder.HasIndex(t => t.TokenHash, ActiveTokenIndexName)
             .HasDatabaseName(ActiveTokenIndexName)
             .HasFilter("superseded_at IS NULL");
+
+        builder.HasIndex(t => t.UserId)
+            .HasDatabaseName(UserIdIndexName);
 
         // A real foreign key: both tables live in the `identity` schema and are owned by the same role,
         // so Postgres can enforce it. Cross-schema references (portfolio.holdings.user_id and friends)
