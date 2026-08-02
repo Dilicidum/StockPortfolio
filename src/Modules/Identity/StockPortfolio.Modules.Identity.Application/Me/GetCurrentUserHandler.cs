@@ -1,6 +1,7 @@
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
+using OneOf.Types;
 
 namespace StockPortfolio.Modules.Identity.Application.Me;
 
@@ -21,7 +22,7 @@ public sealed class GetCurrentUserHandler(IUserRepository users)
 
         if (user is null)
         {
-            return new SessionNotFound();
+            return new NotFound();
         }
 
         return new UserSummary(user.Id.Value, user.Email);

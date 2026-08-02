@@ -15,16 +15,41 @@ namespace StockPortfolio.Modules.Identity.Domain;
 /// why <see cref="SupersededBy"/> is nullable).
 /// </para>
 /// <para>
-/// As with <see cref="User"/>: <c>Id</c> is not re-declared, there is no constructor whose
-/// parameter names match mapped properties, and no setter validates anything.
+/// As with <see cref="User"/>: one private constructor taking every mapped value, no
+/// parameterless constructor, no object initialiser, and no guard inside the constructor — EF Core
+/// binds it on every read, so anything it does runs once per row.
 /// </para>
 /// </remarks>
-public sealed class RefreshToken : AggregateRoot<RefreshTokenId>
+public sealed class RefreshToken
 {
-    /// <summary>EF Core materialisation only. Runs no validation and sets nothing.</summary>
-    private RefreshToken()
+    /// <summary>The only constructor. Assigns and nothing else.</summary>
+    /// <param name="id">The identity of the session.</param>
+    /// <param name="userId">The user the session belongs to.</param>
+    /// <param name="tokenHash">SHA-256 of the token handed to the client.</param>
+    /// <param name="expiresAt">When the session stops being refreshable.</param>
+    /// <param name="createdAt">When the session was opened.</param>
+    /// <param name="supersededAt">When it was rotated or revoked, if it was.</param>
+    /// <param name="supersededBy">The session that replaced it, if any.</param>
+    private RefreshToken(
+        RefreshTokenId id,
+        UserId userId,
+        byte[] tokenHash,
+        DateTimeOffset expiresAt,
+        DateTimeOffset createdAt,
+        DateTimeOffset? supersededAt,
+        RefreshTokenId? supersededBy)
     {
+        Id = id;
+        UserId = userId;
+        TokenHash = tokenHash;
+        ExpiresAt = expiresAt;
+        CreatedAt = createdAt;
+        SupersededAt = supersededAt;
+        SupersededBy = supersededBy;
     }
+
+    /// <summary>Gets the identity of the session. A UUIDv7, generated in the domain.</summary>
+    public RefreshTokenId Id { get; private set; }
 
     /// <summary>Gets the user this session belongs to.</summary>
     public UserId UserId { get; private set; }
@@ -101,14 +126,14 @@ public sealed class RefreshToken : AggregateRoot<RefreshTokenId>
                 "A refresh token cannot be issued already expired.");
         }
 
-        return new RefreshToken
-        {
-            Id = RefreshTokenId.New(),
-            UserId = userId,
-            TokenHash = tokenHash,
-            ExpiresAt = expiresAt,
-            CreatedAt = now,
-        };
+        return new RefreshToken(
+            RefreshTokenId.New(),
+            userId,
+            tokenHash,
+            expiresAt,
+            now,
+            supersededAt: null,
+            supersededBy: null);
     }
 
     /// <summary>

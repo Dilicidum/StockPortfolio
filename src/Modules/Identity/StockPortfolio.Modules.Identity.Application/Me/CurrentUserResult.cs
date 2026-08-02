@@ -1,5 +1,6 @@
 using OneOf;
 using StockPortfolio.Modules.Identity.Domain;
+using OneOf.Types;
 
 namespace StockPortfolio.Modules.Identity.Application.Me;
 
@@ -11,6 +12,6 @@ namespace StockPortfolio.Modules.Identity.Application.Me;
 /// account keeps presenting a perfectly well-signed token until it expires.
 /// </remarks>
 [GenerateOneOf]
-public partial class CurrentUserResult : OneOfBase<UserSummary, SessionNotFound>
+public partial class CurrentUserResult : OneOfBase<UserSummary, NotFound>
 {
 }

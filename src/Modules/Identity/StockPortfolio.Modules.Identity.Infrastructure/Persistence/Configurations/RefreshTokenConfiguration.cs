@@ -95,6 +95,5 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
             .HasConstraintName("fk_refresh_tokens_user_id")
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.Ignore(t => t.DomainEvents);
     }
 }

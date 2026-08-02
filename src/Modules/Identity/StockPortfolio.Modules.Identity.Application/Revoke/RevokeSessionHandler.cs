@@ -1,6 +1,7 @@
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
+using OneOf.Types;
 
 namespace StockPortfolio.Modules.Identity.Application.Revoke;
 
@@ -35,7 +36,7 @@ public sealed class RevokeSessionHandler(
         // to revoke either way, and the caller learns nothing about which tokens ever existed.
         if (session is null || session.SupersededAt is not null)
         {
-            return new SessionNotFound();
+            return new NotFound();
         }
 
         session.Revoke(clock);

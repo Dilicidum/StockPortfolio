@@ -1,5 +1,12 @@
 namespace StockPortfolio.Modules.Identity.Domain;
 
+// Only genuine failure cases live here.
+//
+// `Success` and `NotFound` used to be declared in this file. Both were mistakes: OneOf already
+// ships `OneOf.Types.Success` and `OneOf.Types.NotFound`, so redeclaring them bought nothing and
+// gave every module its own incompatible spelling of the same idea — and `Success` is not an error,
+// so a file named Errors.cs was the wrong home for it regardless. Use the OneOf.Types versions.
+
 /// <summary>
 /// Registration was refused because the address is already in use.
 /// </summary>
@@ -20,14 +27,3 @@ public sealed record InvalidCredentials;
 /// One case for the same reason <see cref="InvalidCredentials"/> is one case.
 /// </summary>
 public sealed record InvalidOrExpired;
-
-/// <summary>
-/// The session or the user behind it no longer exists — a valid-looking token whose row has gone.
-/// </summary>
-public sealed record SessionNotFound;
-
-/// <summary>
-/// The operation completed and has nothing to report. Used where the alternative would be
-/// <c>OneOf&lt;Unit, …&gt;</c>.
-/// </summary>
-public sealed record Success;

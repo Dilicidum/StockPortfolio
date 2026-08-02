@@ -59,8 +59,5 @@ internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
             .IsUnique()
             .HasDatabaseName(EmailUniqueIndexName);
 
-        // Domain events never reach the database. AggregateRoot marks the property [NotMapped];
-        // this is belt and braces so a change there cannot silently create a column.
-        builder.Ignore(u => u.DomainEvents);
     }
 }

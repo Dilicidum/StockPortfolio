@@ -1,56 +1,64 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Mail;
 using OneOf;
-using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Domain;
 
 /// <summary>
 /// A person who can sign in. Owns nothing but an email address and a password hash — the
-/// application deliberately stores no profile, so this aggregate stays the whole of Identity.
+/// application deliberately stores no profile.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <c>Id</c> is <b>not</b> re-declared here. It is declared once on
-/// <see cref="AggregateRoot{TId}"/>; a re-declaration is CS0108 (hides inherited member), which
-/// <c>TreatWarningsAsErrors</c> turns into a build error. EF Core maps the inherited property
-/// normally.
+/// <b>There is exactly one constructor and it takes every mapped value.</b> It is private, so the
+/// only route to a new <see cref="User"/> is <see cref="Create"/>, and there is no object
+/// initialiser, no parameterless constructor and no public setter anywhere. A half-built
+/// <see cref="User"/> is not representable.
 /// </para>
 /// <para>
-/// There is no constructor taking the mapped values. EF Core's constructor binder is
-/// convention-based, matches on parameter name, and is blind to accessibility — a
-/// <c>private User(UserId id, string email, …)</c> would be selected for materialisation and would
-/// run the factory's guards on every <c>SELECT</c>. Construction goes through
-/// <see cref="Create"/> and an object initialiser instead.
-/// </para>
-/// <para>
-/// There is likewise no validation in the setters. <c>PropertyAccessMode.PreferField</c> has been
-/// EF Core's default since 3.0, so EF writes the backing field and never calls the setter;
-/// validation there is dead code that looks alive.
+/// EF Core's constructor binder matches on parameter name and will select this constructor for
+/// materialisation. That is intended and safe <b>because the constructor only assigns</b>. The trap
+/// worth knowing is the other arrangement: put the guards inside the constructor and EF re-runs
+/// every one of them on every row of every <c>SELECT</c>. Validation therefore lives in
+/// <see cref="Create"/>, which EF never calls.
 /// </para>
 /// </remarks>
-public sealed class User : AggregateRoot<UserId>
+public sealed class User
 {
     /// <summary>The longest address the RFC 5321 forward path allows.</summary>
     private const int MaxEmailLength = 254;
 
-    /// <summary>EF Core materialisation only. Runs no validation and sets nothing.</summary>
-    private User()
+    /// <summary>
+    /// The only constructor. Assigns and nothing else — see the note on the class about why no
+    /// guard may ever be added here.
+    /// </summary>
+    /// <param name="id">The identity of the user.</param>
+    /// <param name="email">The already-normalised sign-in address.</param>
+    /// <param name="passwordHash">The already-hashed password.</param>
+    /// <param name="createdAt">When the account was created.</param>
+    private User(UserId id, string email, string passwordHash, DateTimeOffset createdAt)
     {
+        Id = id;
+        Email = email;
+        PasswordHash = passwordHash;
+        CreatedAt = createdAt;
     }
 
+    /// <summary>Gets the identity of the user. A UUIDv7, generated in the domain.</summary>
+    public UserId Id { get; private set; }
+
     /// <summary>Gets the sign-in address, always trimmed and lower-cased.</summary>
-    public string Email { get; private set; } = null!;
+    public string Email { get; private set; }
 
     /// <summary>Gets the PHC-encoded Argon2id hash of the password. Never the password itself.</summary>
-    public string PasswordHash { get; private set; } = null!;
+    public string PasswordHash { get; private set; }
 
     /// <summary>Gets the instant the account was created, taken from the caller's clock.</summary>
     public DateTimeOffset CreatedAt { get; private set; }
 
     /// <summary>
-    /// Creates a user, normalising the email and rejecting a malformed one.
+    /// Creates a user, normalising the email and rejecting a malformed one. The only way to make one.
     /// </summary>
     /// <param name="email">The address as the caller typed it. Trimmed and lower-cased on the way in.</param>
     /// <param name="passwordHash">An already-hashed password. Hashing is the application layer's job.</param>
@@ -82,13 +90,7 @@ public sealed class User : AggregateRoot<UserId>
             return new ValidationFailed("email", "Not a valid email address.");
         }
 
-        return new User
-        {
-            Id = UserId.New(),
-            Email = normalised,
-            PasswordHash = passwordHash,
-            CreatedAt = clock.GetUtcNow(),
-        };
+        return new User(UserId.New(), normalised, passwordHash, clock.GetUtcNow());
     }
 
     /// <summary>Replaces the stored password hash.</summary>
@@ -112,8 +114,8 @@ public sealed class User : AggregateRoot<UserId>
     /// <remarks>
     /// Deliberately structural rather than exhaustive. Full RFC 5322 conformance is neither
     /// achievable with a predicate nor useful — the only proof an address exists is a message sent
-    /// to it. The user-facing shape rules (length, character classes) live in FluentValidation on
-    /// the HTTP request; this is the last line, so it stays cheap and total.
+    /// to it. The user-facing shape rules live in FluentValidation on the command; this is the last
+    /// line, so it stays cheap and total.
     /// </remarks>
     private static bool IsWellFormedEmail(string candidate)
     {
