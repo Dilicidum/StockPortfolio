@@ -246,13 +246,14 @@ jobs:
           echo "Runner IP: $RUNNER_IP"
           RULE="gh-runner-${{ github.run_id }}"
           echo "rule=$RULE" >> "$GITHUB_OUTPUT"
-          # --server-name, NOT --name. On this command --name is the RULE name, so passing the
-          # server through it fails with "the following arguments are required: --server-name/-s"
-          # rather than anything that points at the real mistake.
+          # The server goes in --server-name and the rule in --name. There is no --rule-name on
+          # this command, despite `az containerapp job` and friends using that spelling; getting it
+          # wrong reports "unrecognized arguments: --rule-name" only after the earlier flag is
+          # already right, so the two mistakes surface one at a time.
           az postgres flexible-server firewall-rule create \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
             --server-name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
-            --rule-name "$RULE" \
+            --name "$RULE" \
             --start-ip-address "$RUNNER_IP" \
             --end-ip-address "$RUNNER_IP" \
             --output none
@@ -279,7 +280,7 @@ jobs:
           az postgres flexible-server firewall-rule delete \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
             --server-name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
-            --rule-name '${{ steps.pgfirewall.outputs.rule }}' \
+            --name '${{ steps.pgfirewall.outputs.rule }}' \
             --yes --output none || true
 
       # -----------------------------------------------------------------------------------------
