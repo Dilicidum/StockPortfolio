@@ -14,13 +14,18 @@ resource env 'Microsoft.App/managedEnvironments@2026-01-01' = {
   location: location
   tags: tags
   properties: {
+    // NOT SET: properties.appLogsConfiguration.
+    //
     // No Log Analytics workspace. Its ingestion is the least predictable line on the bill for a
     // demo, and the app already emits structured logs to stdout, readable with
-    // `az containerapp logs show`. Swap to 'log-analytics' plus a logAnalyticsConfiguration
-    // block if you want retained, queryable logs.
-    appLogsConfiguration: {
-      destination: 'none'
-    }
+    // `az containerapp logs show`. Add 'log-analytics' plus a logAnalyticsConfiguration block if
+    // you want retained, queryable logs.
+    //
+    // The block is OMITTED rather than set to destination: 'none'. The literal string is rejected
+    // at preflight with "App Logs destination 'none' not supported. Supported values:
+    // 'log-analytics', 'azure-monitor' or none" -- where that trailing "or none" means the
+    // property absent, not the word. The error reads like a contradiction and costs an hour if
+    // taken at face value.
     workloadProfiles: [
       {
         name: 'Consumption'
