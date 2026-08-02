@@ -34,7 +34,7 @@
  * redundant; under Pages the cookie is absent. Neither case needs a flag.
  */
 
-const REFRESH_TOKEN_KEY = 'tz.refreshToken'
+const REFRESH_TOKEN_KEY = 'stockportfolio.refreshToken'
 
 let accessToken: string | null = null
 let accessExpiresAt: string | null = null

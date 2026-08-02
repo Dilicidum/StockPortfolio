@@ -6,7 +6,7 @@ export function Logo({ size = 20 }: { size?: number }) {
         style={{ width: size, height: size }}
         className="rounded-[5px] bg-ac"
       />
-      <span className="font-semibold tracking-[-0.01em]">Tickerzone</span>
+      <span className="font-semibold tracking-[-0.01em]">StockPortfolio</span>
     </span>
   )
 }
