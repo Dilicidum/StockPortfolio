@@ -14,23 +14,27 @@ Work phase by phase. A phase is done when it runs in a browser, not when tests p
 
 ## Commands
 
-Land in Phase 1; until then they don't exist.
-
 ```bash
 docker compose up                    # whole stack, from a clean clone, no API key needed
-dotnet test                          # unit + integration (integration needs Docker running)
 dotnet build
+dotnet test                          # 149 tests; the integration suite needs Docker running
 npm --prefix src/Web run dev
 npm --prefix src/Web test
-dotnet ef migrations add <Name> --context <Module>DbContext --project src/Modules/<M>/<M>.Infrastructure --startup-project src/Api
+
+# migrations: --project is the module's Infrastructure, --startup-project is always the host
+dotnet ef migrations add <Name> --context <Module>DbContext --output-dir Persistence/Migrations \
+  --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Api
+
 az deployment group what-if -g <rg> -f infra/main.bicep    # before any deploy
 ```
+
+`/openapi/v1.json` is served in Development only, so read it from `dotnet run --project src/Api`, not from the container.
 
 With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a warning. That is deliberate — Finnhub killed its sandbox in 2022, so the demo must work without a key.
 
 ## Architecture
 
-Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api` and the `Api` host. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
 **Accessibility follows the onion, not a blanket `internal`.** `internal` is per-assembly and a module is five assemblies, so "everything internal outside `.Contracts`" cannot compile — `Identity.Infrastructure` could not see `User` in `Identity.Domain`.
 
@@ -44,8 +48,8 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
-- Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into `Api` (makes the host the merge point for every feature).
-- `Shared.Kernel` must stay framework-free — `Money`, `IDomainEvent`, the CQRS interfaces. There is no `AggregateRoot`. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
+- Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **`Api` host** (makes the host the merge point for every feature). `StockPortfolio.Api` is the host; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, no collision.
+- `Shared.Kernel` must stay framework-free — `Money` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no `IDomainEvent`; both were deleted as unused, and Phase 4 adds an event type where one is actually raised. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`.
 - Dependency direction is **Alerts → Portfolio → MarketData**. Identity has zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
@@ -97,13 +101,21 @@ The constructor must stay guard-free. EF's binder matches on parameter name and 
 
 Shape validation is an **endpoint filter, not a DI decorator**. A decorator would have to return an unconstrained `TResult` and cannot manufacture a failure value; a filter sits in the HTTP pipeline and can `return TypedResults.ValidationProblem(...)` directly. Inject `IValidator<T>`, never `IEnumerable<IValidator<T>>` — the collection form silently validates nothing when a validator is missing. Validators do no I/O: "is this email taken?" is a context question and belongs in the handler as a result case. `LoggingDecorator` stays a decorator; it has no `TResult` problem. Do not use the built-in .NET 10 `AddValidation()` — it is DataAnnotations-attribute-driven and awkward for conditional or cross-field rules.
 
+**Every endpoint declares every status it can emit.** `.Produces<T>(200)` for the success shape, then `.ProducesValidationProblem()` (400), plus `.ProducesProblem(...)` for each of 401 / 409 / 415 / 500 that the route can actually reach. `ProducesValidationProblem()` is metadata only — it documents the 400 that `ValidationFilter<T>` returns and is shorthand for `Produces<HttpValidationProblemDetails>(400, "application/problem+json")`.
+
+415 and 500 are declared as `problem+json` because `AddProblemDetails()` **and** `UseStatusCodePages()` are both registered, which is what gives framework-generated bare status codes a body. Drop either one and those declarations become lies. Verify with a real request before adding a status — a bare `Produces` claiming a body that never arrives is worse than an undeclared response. Read the result back from `/openapi/v1.json`, not from the source.
+
+**Comments: one line, and only where the code cannot say it.** No `<remarks>`, no `<param>`/`<returns>`/`<exception>` blocks, no banner rules. A doc comment is a single `/// <summary>…</summary>`. If a comment must span lines to make sense, the rationale belongs in `docs/plan/` or a commit message, not in the file.
+
 **Money is `decimal` server-side and serialised as strings.** Never compute money in the browser. Weight and percentages are computed server-side too.
 
 **EF Core only — no raw SQL.** The brief permits raw or query builder and asks only for parameterisation, which EF Core makes structural. Parameterisation is proven by a `DbCommandInterceptor` in the test fixture asserting no user-supplied value ever reaches `CommandText`.
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** Unit tests touch no infrastructure. Integration tests share one Testcontainers collection fixture and need `public partial class Program { }`. Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** 149 of them: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+
+**A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was verified by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while reporting green. `ReferenceWalker_FindsEdgesThatDoExist` guards the same class of bug permanently: rules that pass by finding nothing need a companion that fails if the search finds nothing.
 
 ## Traps
 
@@ -132,6 +144,13 @@ Each of these costs a day if you meet it cold.
 - **`OneOfDiagnosticSuppressor` does not exist on nuget.org** and is not needed. `.Match` takes one delegate per case, so exhaustiveness is enforced by arity — adding a case breaks every call site. `CS8509` only fires if you `switch` over `.Value`, which the convention forbids anyway.
 - **`CA1707` makes every `Method_Scenario_Expectation` test a build error** under `TreatWarningsAsErrors`. `tests/Directory.Build.props` suppresses it — and must explicitly `<Import>` the root props, because MSBuild only auto-imports the first `Directory.Build.props` it finds walking up.
 - **`GetPathOfFileAbove` inside `Exists(...)` fails to parse** with `MSB4092` — the nested single quotes break the condition parser. Hoist the path into a property first, then condition on the property.
+- **EF needs no parameterless constructor — but it binds by NAME.** Constructor binding has existed since EF Core 2.1 and does not care about accessibility, so one private all-args constructor is enough. The hazard is renaming a constructor parameter without renaming its property: EF then finds no bindable constructor, and with no parameterless fallback the **whole model fails to build at startup**, not on the first query. `EfConstructorBindingTests` pins it.
+- **An assembly-level `[SuppressMessage]` must live in its own `AssemblyInfo.cs`.** Twice now, deleting an unrelated type (`AggregateRoot.cs`, then `IEndpointModule.cs`) took the assembly's `CA1716` suppression with it and broke the build, because the attribute was riding on whichever file happened to be first.
+- **`dotnet test --no-build` after a FAILED build silently runs the previous assembly** and reports green. A mutation test "passing" is meaningless unless the build that preceded it succeeded — check the build result, not just the test result.
+- **Regex renames rewrite more than types.** Renaming `RefreshSession` → `RefreshSessionCommand` across the repo also rewrote the *namespace* segment and an OpenAPI operation id in a string literal. The namespace matches the **folder** and carries no role suffix; string literals are not identifiers. The build failed on two unrelated-looking XML `cref` errors, two steps from the cause.
+- **Extension-filtered scripts miss `Dockerfile`** — it has no extension. A repo-wide rename left both .NET images copying `*.Presentation.csproj`; `dotnet build` stayed green because those paths only exist inside the container build context.
+- **A local `dotnet run` holds file locks** and breaks the next build with `MSB3021: being used by another process`. `pkill` does not reach it on Windows — use `Stop-Process`.
+- **Windows Application Control can block a freshly built DLL** with `0x800711C7 — An Application Control policy has blocked this file`, which surfaces as a `FileLoadException` in the architecture tests. Not a code fault; delete that project's `artifacts/bin` and `artifacts/obj` and rebuild.
 - **`Microsoft.OpenApi` must stay on 2.x.** 2.0.0 carries GHSA-v5pm-xwqc-g5wc so pin ≥2.11.0, but 3.x makes `IOpenApiMediaType.Example` read-only while the ASP.NET Core OpenAPI source generator still assigns to it (`CS0200`).
 
 ## Deployment
