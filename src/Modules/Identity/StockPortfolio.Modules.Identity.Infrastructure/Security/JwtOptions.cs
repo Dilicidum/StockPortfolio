@@ -5,26 +5,12 @@ using Microsoft.Extensions.Configuration;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Security;
 
-/// <summary>
-/// The signing settings for access tokens, read from the <c>Jwt</c> configuration section.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Bound eagerly in <c>IdentityModule.AddIdentityModule</c> rather than through
-/// <c>AddOptions&lt;T&gt;().ValidateOnStart()</c>. Two reasons: this type is internal, so the host cannot
-/// name it in a generic argument; and the eager path fails during service registration, which is earlier
-/// and produces a plainer stack trace than an options validation failure.
-/// </para>
-/// <para>
-/// The failure mode this prevents is the expensive one: a missing or short signing key that surfaces at
-/// the first login attempt, in production, as a 500 from deep inside the token handler.
-/// </para>
-/// </remarks>
+/// <summary>The signing settings for access tokens, read from the Jwt configuration section.</summary>
 internal sealed class JwtOptions
 {
     internal const string SectionName = "Jwt";
 
-    /// <summary>HMAC-SHA256 keys shorter than the 256-bit output are rejected outright by <c>SymmetricSecurityKey</c>.</summary>
+    /// <summary>HMAC-SHA256 keys shorter than the 256-bit output are rejected outright by SymmetricSecurityKey.</summary>
     internal const int MinimumSigningKeyBytes = 32;
 
     private const string DefaultIssuer = "StockPortfolio";
@@ -46,8 +32,7 @@ internal sealed class JwtOptions
     /// <summary>A copy, so a caller cannot zero or mutate the key held by the singleton.</summary>
     public byte[] GetSigningKeyBytes() => (byte[])_signingKeyBytes.Clone();
 
-    /// <summary>Reads and validates the <c>Jwt</c> section, throwing if the module cannot sign tokens.</summary>
-    /// <exception cref="InvalidOperationException">The signing key is absent or shorter than <see cref="MinimumSigningKeyBytes"/> bytes.</exception>
+    /// <summary>Reads and validates the Jwt section, throwing if the module cannot sign tokens.</summary>
     public static JwtOptions FromConfiguration(IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(configuration);

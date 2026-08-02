@@ -4,50 +4,16 @@ using Shouldly;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>
-/// Rule 3 — no public settable property under a <c>Modules.*.Domain</c> namespace.
-/// </summary>
-/// <remarks>
-/// <para>
-/// The domain is rich: private setters, a private parameterless constructor for EF, a static
-/// factory returning a <c>OneOf</c>, and instance methods that enforce invariants. A public setter
-/// routes around all of it, and it is the single change that turns an aggregate into a bag of data
-/// nobody validates.
-/// </para>
-/// <para>
-/// Two details decide whether this rule works or is noise:
-/// </para>
-/// <list type="bullet">
-/// <item>
-/// <description>
-/// The setter is fetched with <c>GetSetMethod(nonPublic: false)</c>. The default
-/// <c>GetSetMethod()</c> returns private accessors too, so <c>{ get; private set; }</c> — the
-/// prescribed shape — would read as a violation and every entity in the solution would fail.
-/// </description>
-/// </item>
-/// <item>
-/// <description>
-/// <c>init</c> is allowed, <c>set</c> is not. An <c>init</c> accessor cannot mutate an existing
-/// instance, and every positional record — <c>UserId(Guid Value)</c>, <c>Money(decimal, string)</c>
-/// — compiles its parameters to public <c>init</c> properties. Banning it would fail the value
-/// objects while catching nothing that a private constructor plus a static factory has not already
-/// closed off.
-/// </description>
-/// </item>
-/// </list>
-/// </remarks>
+/// <summary>Rule 3 — no public settable property under a Modules.*.Domain namespace.</summary>
 public sealed class DomainShapeTests
 {
     private const string IsExternalInitTypeName = "System.Runtime.CompilerServices.IsExternalInit";
 
-    /// <summary>The four <c>.Domain</c> assemblies.</summary>
+    /// <summary>The four .Domain assemblies.</summary>
     public static TheoryData<string> DomainAssemblies =>
         [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, "Domain"))];
 
-    /// <summary>
-    /// Rule 3, per module.
-    /// </summary>
-    /// <param name="assemblyName">The <c>.Domain</c> assembly under inspection.</param>
+    /// <summary>Rule 3, per module.</summary>
     [Theory]
     [MemberData(nameof(DomainAssemblies))]
     public void DomainType_ExposesNoPublicSetter(string assemblyName)
@@ -72,11 +38,7 @@ public sealed class DomainShapeTests
                 + "PropertyAccessMode.PreferField writes the backing field and never calls it.");
     }
 
-    /// <summary>
-    /// Proves rule 3 discriminates: the shapes the domain actually uses must all read as clean,
-    /// and a plain public setter must read as a violation. Without this, a rule that returned
-    /// "no violations" for every input would look exactly like a passing rule.
-    /// </summary>
+    /// <summary>Proves rule 3 discriminates: the shapes the domain actually uses must all read as clean, and a.</summary>
     [Fact]
     public void DomainSetterRule_AcceptsTheDomainShapes_AndRejectsAPublicSetter()
     {
@@ -103,8 +65,7 @@ public sealed class DomainShapeTests
 
     private static bool HasPublicSetter(PropertyInfo property)
     {
-        // A record's EqualityContract is emitted by the compiler and carries no setter anyway;
-        // named explicitly so a future compiler change cannot turn it into a spurious failure.
+        // A record's EqualityContract is emitted by the compiler and carries no setter anyway; named.
         if (string.Equals(property.Name, "EqualityContract", StringComparison.Ordinal)
             || property.IsDefined(typeof(CompilerGeneratedAttribute), inherit: false))
         {
@@ -122,8 +83,7 @@ public sealed class DomainShapeTests
             .Any(modifier => string.Equals(modifier.FullName, IsExternalInitTypeName, StringComparison.Ordinal));
 
 #pragma warning disable CA1812 // Instantiated by nothing: these exist to be reflected over.
-    // Abstract, not sealed, so `protected set` is legal here: it is the shape AggregateRoot.Id
-    // uses, and the rule has to read it as compliant.
+    // Abstract, not sealed, so `protected set` is legal here.
     private abstract class CompliantShapes
     {
         public string PrivateSet { get; private set; } = string.Empty;

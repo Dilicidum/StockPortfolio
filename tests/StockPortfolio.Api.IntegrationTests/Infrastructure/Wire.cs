@@ -6,25 +6,12 @@ using System.Text.Json;
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 /// <summary>The token pair returned by register, login and refresh.</summary>
-/// <param name="AccessToken">The signed JWT.</param>
-/// <param name="RefreshToken">The opaque refresh token.</param>
-/// <param name="AccessExpiresAt">When the access token stops being accepted.</param>
 public sealed record AuthPayload(string AccessToken, string RefreshToken, DateTimeOffset AccessExpiresAt);
 
-/// <summary>The body of <c>GET /api/auth/me</c>.</summary>
-/// <param name="Id">The user's identifier.</param>
-/// <param name="Email">The user's normalised address.</param>
+/// <summary>The body of GET /api/auth/me.</summary>
 public sealed record UserPayload(Guid Id, string Email);
 
-/// <summary>
-/// Thin helpers over the five <c>/api/auth</c> routes, so the tests read as assertions rather than
-/// as plumbing.
-/// </summary>
-/// <remarks>
-/// Deliberately no shared "arrange a user" fixture state: every test mints its own address from a
-/// GUID. Tests in a collection run sequentially, but sequential is not ordered — a test that reused
-/// another test's account would pass or fail depending on which one xUnit happened to schedule first.
-/// </remarks>
+/// <summary>Thin helpers over the five /api/auth routes, so the tests read as assertions rather than as.</summary>
 internal static class Wire
 {
     /// <summary>Media type the API must use for RFC 7807 errors.</summary>
@@ -34,39 +21,22 @@ internal static class Wire
     public const string ValidPassword = "correct-horse-battery-staple";
 
     /// <summary>Mints an address no other test can collide with.</summary>
-    /// <param name="prefix">A readable hint about which test owns it.</param>
-    /// <returns>A unique, well-formed address.</returns>
     public static string UniqueEmail(string prefix) =>
         $"{prefix}-{Guid.NewGuid():N}@example.test";
 
-    /// <summary>Posts to <c>/api/auth/register</c>.</summary>
-    /// <param name="client">The client to use.</param>
-    /// <param name="email">The address to register.</param>
-    /// <param name="password">The password to register.</param>
-    /// <returns>The raw response, so a test can assert on its status.</returns>
+    /// <summary>Posts to /api/auth/register.</summary>
     public static Task<HttpResponseMessage> RegisterAsync(HttpClient client, string email, string password) =>
         client.PostAsJsonAsync("/api/auth/register", new { email, password });
 
-    /// <summary>Posts to <c>/api/auth/login</c>.</summary>
-    /// <param name="client">The client to use.</param>
-    /// <param name="email">The address to sign in with.</param>
-    /// <param name="password">The password to sign in with.</param>
-    /// <returns>The raw response.</returns>
+    /// <summary>Posts to /api/auth/login.</summary>
     public static Task<HttpResponseMessage> LoginAsync(HttpClient client, string email, string password) =>
         client.PostAsJsonAsync("/api/auth/login", new { email, password });
 
-    /// <summary>Posts to <c>/api/auth/refresh</c>.</summary>
-    /// <param name="client">The client to use.</param>
-    /// <param name="refreshToken">The token to exchange.</param>
-    /// <returns>The raw response.</returns>
+    /// <summary>Posts to /api/auth/refresh.</summary>
     public static Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
         client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken });
 
     /// <summary>Registers a new account and returns its tokens, asserting the 201 on the way.</summary>
-    /// <param name="client">The client to use.</param>
-    /// <param name="email">The address to register.</param>
-    /// <param name="password">The password to register.</param>
-    /// <returns>The issued token pair.</returns>
     public static async Task<AuthPayload> RegisterSucceedsAsync(
         HttpClient client,
         string email,
@@ -80,8 +50,6 @@ internal static class Wire
     }
 
     /// <summary>Reads a token pair out of a successful auth response.</summary>
-    /// <param name="response">The response to read.</param>
-    /// <returns>The token pair, asserted non-empty.</returns>
     public static async Task<AuthPayload> ReadTokensAsync(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -96,12 +64,6 @@ internal static class Wire
     }
 
     /// <summary>Sends a request carrying a bearer token.</summary>
-    /// <param name="client">The client to use.</param>
-    /// <param name="method">The HTTP method.</param>
-    /// <param name="path">The request path.</param>
-    /// <param name="accessToken">The access token, or <see langword="null"/> for an anonymous call.</param>
-    /// <param name="body">An optional JSON body.</param>
-    /// <returns>The raw response.</returns>
     public static async Task<HttpResponseMessage> SendAsync(
         HttpClient client,
         HttpMethod method,
@@ -127,8 +89,6 @@ internal static class Wire
     }
 
     /// <summary>Renders a response for a failing assertion's message.</summary>
-    /// <param name="response">The response to render.</param>
-    /// <returns>Status line and body.</returns>
     public static async Task<string> Describe(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);

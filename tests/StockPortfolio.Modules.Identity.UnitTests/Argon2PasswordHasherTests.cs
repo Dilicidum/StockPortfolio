@@ -4,11 +4,7 @@ using StockPortfolio.Modules.Identity.Infrastructure.Security;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>
-/// Each case here is ~40 ms of deliberate work — that is the point of a 19 MiB memory-hard KDF — so the
-/// suite stays small and covers only the properties that would be silent failures: the round trip, a
-/// wrong password answering false instead of throwing, and the salt actually being random.
-/// </summary>
+/// <summary>Each case here is ~40 ms of deliberate work — that is the point of a 19 MiB memory-hard KDF — so.</summary>
 public sealed class Argon2PasswordHasherTests
 {
     private const string Password = "correct horse battery staple";
@@ -28,8 +24,7 @@ public sealed class Argon2PasswordHasherTests
     {
         var encoded = _hasher.Hash(Password);
 
-        // Not an exception: a failed verification is an expected outcome of a login, and throwing here
-        // would turn every mistyped password into a 500.
+        // Not an exception: a failed verification is an expected outcome of a login, and throwing here would.
         var verified = Should.NotThrow(() => _hasher.Verify("Correct horse battery staple", encoded));
 
         verified.ShouldBeFalse();
@@ -46,8 +41,7 @@ public sealed class Argon2PasswordHasherTests
     [Fact]
     public void Hash_CalledTwiceWithTheSamePassword_ProducesDifferentHashes()
     {
-        // If these matched, the salt would be constant or absent, and the whole users table would fall to
-        // one rainbow table. This is the assertion that proves RandomNumberGenerator is actually in play.
+        // If these matched, the salt would be constant or absent, and the whole users table would fall to one.
         var first = _hasher.Hash(Password);
         var second = _hasher.Hash(Password);
 
@@ -75,8 +69,7 @@ public sealed class Argon2PasswordHasherTests
     [Fact]
     public void DummyHash_CarriesTheSameCostParametersAsARealHash()
     {
-        // Login verifies against DummyHash when the email is unknown, so that path only hides account
-        // existence if it does the same amount of work. Matching parameters is what makes the timing match.
+        // Login verifies against DummyHash when the email is unknown, so that path only hides account.
         PhcString.TryParse(_hasher.DummyHash, out var dummy).ShouldBeTrue();
         PhcString.TryParse(_hasher.Hash(Password), out var real).ShouldBeTrue();
 

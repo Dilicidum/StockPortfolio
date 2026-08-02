@@ -6,15 +6,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
-/// <summary>
-/// One SQL statement as it was handed to Npgsql: the text the server will parse, and the values that
-/// travelled beside it.
-/// </summary>
-/// <param name="CommandText">The literal <c>DbCommand.CommandText</c>.</param>
-/// <param name="Parameters">
-/// Every parameter's name and value. This is the half of the statement that is <i>data</i> — it is
-/// never parsed as SQL.
-/// </param>
+/// <summary>One SQL statement as it was handed to Npgsql: the text the server will parse, and the values that.</summary>
 public sealed record ExecutedCommand(string CommandText, IReadOnlyList<CommandParameter> Parameters)
 {
     /// <summary>Gets just the parameter values, for the common "did this value travel as data?" check.</summary>
@@ -22,30 +14,9 @@ public sealed record ExecutedCommand(string CommandText, IReadOnlyList<CommandPa
 }
 
 /// <summary>One parameter as Npgsql received it.</summary>
-/// <param name="Name">
-/// The provider-side name, e.g. <c>p0</c>. EF Core's Npgsql provider writes these into the statement
-/// as <c>@p0</c>, not as the positional <c>$1</c> the wire protocol ultimately uses.
-/// </param>
-/// <param name="Value">The value, rendered as a string.</param>
 public sealed record CommandParameter(string Name, string Value);
 
-/// <summary>
-/// Records every SQL statement EF Core executes, so a test can assert on the text/parameter split.
-/// </summary>
-/// <remarks>
-/// <para>
-/// This is the evidence behind brief P0 req 6 — «параметризація… конкатенація рядків у SQL
-/// неприпустима». Reading EF Core LINQ tells a reviewer nothing about the SQL that reaches the
-/// server, so <c>ParameterisationTests</c> registers this interceptor, drives hostile input through
-/// the real HTTP endpoints, and asserts the input never appears in any <c>CommandText</c>.
-/// </para>
-/// <para>
-/// All six execution hooks are overridden, sync and async. EF Core picks the pair by call shape —
-/// <c>ReaderExecuting</c> for queries, <c>NonQueryExecuting</c> for <c>INSERT</c>/<c>UPDATE</c>,
-/// <c>ScalarExecuting</c> for single-value reads — and overriding only the async reader would
-/// silently record a subset while still going green.
-/// </para>
-/// </remarks>
+/// <summary>Records every SQL statement EF Core executes, so a test can assert on the text/parameter split.</summary>
 public sealed class RecordingDbCommandInterceptor : DbCommandInterceptor
 {
     private readonly ConcurrentQueue<ExecutedCommand> _commands = new();

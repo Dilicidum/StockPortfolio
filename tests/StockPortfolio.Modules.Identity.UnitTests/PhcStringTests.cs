@@ -4,11 +4,7 @@ using StockPortfolio.Modules.Identity.Infrastructure.Security;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>
-/// The PHC string is what makes the argon2 cost factors upgradable, so the round trip has to be exact:
-/// verification re-derives with whatever <c>m</c>, <c>t</c> and <c>p</c> come back out of the column.
-/// A parse that quietly returned the wrong parallelism would fail every login with no diagnostic.
-/// </summary>
+/// <summary>The PHC string is what makes the argon2 cost factors upgradable, so the round trip has to be exact.</summary>
 public sealed class PhcStringTests
 {
     private static readonly byte[] Salt = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
@@ -54,8 +50,7 @@ public sealed class PhcStringTests
         var segments = formatted.Split('$');
         segments.Length.ShouldBe(6);
 
-        // PHC base64 is unpadded. A stray '=' would make the string non-canonical and break every other
-        // argon2 implementation that might one day have to read this column.
+        // PHC base64 is unpadded.
         segments[4].ShouldNotContain("=");
         segments[5].ShouldNotContain("=");
     }
@@ -72,8 +67,7 @@ public sealed class PhcStringTests
     // Wrong algorithm or version.
     [InlineData("$argon2i$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2E$aGFzaGhhc2hoYXNoaGFzaA")]
     [InlineData("$argon2id$v=16$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2E$aGFzaGhhc2hoYXNoaGFzaA")]
-    // Malformed or hostile cost parameters. m=99999999 is the one that matters: a corrupt row must not
-    // be able to ask the process for 95 GiB.
+    // Malformed or hostile cost parameters.
     [InlineData("$argon2id$v=19$m=abc,t=2,p=1$c2FsdHNhbHRzYWx0c2E$aGFzaGhhc2hoYXNoaGFzaA")]
     [InlineData("$argon2id$v=19$m=19456,t=2$c2FsdHNhbHRzYWx0c2E$aGFzaGhhc2hoYXNoaGFzaA")]
     [InlineData("$argon2id$v=19$m=99999999,t=2,p=1$c2FsdHNhbHRzYWx0c2E$aGFzaGhhc2hoYXNoaGFzaA")]
@@ -84,8 +78,7 @@ public sealed class PhcStringTests
     [InlineData("$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHRzYWx0c2E$aGFzaA")]
     public void TryParse_MalformedInput_ReturnsFalseWithoutThrowing(string malformed)
     {
-        // The input is a database column. A corrupt row must fail one login, not the process - which is
-        // why this is TryParse and not a constructor that throws.
+        // The input is a database column.
         var parsed = Should.NotThrow(() => PhcString.TryParse(malformed, out _));
 
         parsed.ShouldBeFalse();

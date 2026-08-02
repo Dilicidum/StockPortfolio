@@ -4,9 +4,7 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>
-/// The <see cref="RefreshToken"/> aggregate — one login session, and the three ways it can end.
-/// </summary>
+/// <summary>The RefreshToken aggregate — one login session, and the three ways it can end.</summary>
 public sealed class RefreshTokenTests
 {
     private static readonly DateTimeOffset Noon =
@@ -81,8 +79,7 @@ public sealed class RefreshTokenTests
     [Fact]
     public void Supersede_AlreadySuperseded_Throws()
     {
-        // The link is the audit chain replay detection reads. Overwriting it silently would lose
-        // the evidence, so this is an invariant and it throws.
+        // The link is the audit chain replay detection reads.
         var clock = new FakeTimeProvider(Noon);
         var original = Issue(clock);
         var first = Issue(clock);

@@ -5,26 +5,18 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Configurations;
 
-/// <summary>Maps <see cref="User"/> to <c>identity.users</c>.</summary>
-/// <remarks>
-/// Parameterless constructor on purpose: <c>ApplyConfigurationsFromAssembly</c> silently skips any
-/// <c>IEntityTypeConfiguration</c> that takes constructor arguments.
-/// </remarks>
+/// <summary>Maps User to identity.users.</summary>
 internal sealed class UserConfiguration : IEntityTypeConfiguration<User>
 {
     internal const string TableName = "users";
 
-    /// <summary>
-    /// The unique index behind registration conflict detection.
-    /// <c>UserRepository</c> matches on this name when it maps SQLSTATE 23505 to
-    /// <c>AddUserOutcome.EmailTaken</c>, so any other unique violation still surfaces as an exception.
-    /// </summary>
+    /// <summary>The unique index behind registration conflict detection.</summary>
     internal const string EmailUniqueIndexName = "ix_users_email";
 
     /// <summary>RFC 5321 caps a forward path at 320 characters.</summary>
     private const int EmailMaxLength = 320;
 
-    /// <summary>An argon2id PHC string with a 16-byte salt and 32-byte hash is ~100 chars; 256 leaves room to raise the parameters.</summary>
+    /// <summary>An argon2id PHC string with a 16-byte salt and 32-byte hash is ~100 chars; 256 leaves room to raise.</summary>
     private const int PasswordHashMaxLength = 256;
 
     public void Configure(EntityTypeBuilder<User> builder)

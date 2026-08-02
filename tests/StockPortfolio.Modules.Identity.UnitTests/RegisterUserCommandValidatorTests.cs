@@ -5,10 +5,7 @@ using StockPortfolio.Modules.Identity.Application.Authentication.Commands.Regist
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>
-/// The shape layer of registration. These rules run before any handler, so what they reject never
-/// reaches the database — and what they accept must still survive the context and invariant layers.
-/// </summary>
+/// <summary>The shape layer of registration.</summary>
 public sealed class RegisterUserCommandValidatorTests
 {
     private static readonly string ValidPassword = new('a', RegisterUserCommandValidator.MinimumPasswordLength);
@@ -28,10 +25,7 @@ public sealed class RegisterUserCommandValidatorTests
     {
         var result = _validator.Validate(new RegisterUserCommand("not-an-email", ValidPassword));
 
-        // The field name is the load-bearing part: ValidationFilter turns Errors into the
-        // `errors` dictionary of a ValidationProblemDetails, keyed by PropertyName, and the SPA
-        // camel-cases that key to attach the message to the right input. A rename here silently
-        // detaches the message from the field in the browser.
+        // The field name is the load-bearing part: ValidationFilter turns Errors into the `errors` dictionary.
         var failure = result.Errors.ShouldHaveSingleItem();
         failure.PropertyName.ShouldBe(nameof(RegisterUserCommand.Email));
         failure.ErrorMessage.ShouldContain("Email");
@@ -63,9 +57,7 @@ public sealed class RegisterUserCommandValidatorTests
     [Fact]
     public void Validate_PassphraseWithNoDigitsOrSymbols_Succeeds()
     {
-        // Guards the policy decision, not just the code: there are deliberately no character-class
-        // rules, so a long all-lowercase passphrase must pass. If someone "hardens" the validator
-        // by adding a digit requirement, this test is what tells them it was a choice.
+        // Guards the policy decision, not just the code: there are deliberately no character-class rules, so.
         var result = _validator.Validate(new RegisterUserCommand("ada@example.com", "sixteen lower case"));
 
         result.IsValid.ShouldBeTrue();
@@ -85,8 +77,7 @@ public sealed class RegisterUserCommandValidatorTests
     [Fact]
     public void Validate_EmptyPassword_ReportsOneMessageNotTwo()
     {
-        // Cascade.Stop: "required" and "too short" are the same complaint to a user staring at an
-        // empty box, and two messages under one input reads as a broken form.
+        // Cascade.Stop: "required" and "too short" are the same complaint to a user staring at an empty box.
         var result = _validator.Validate(new RegisterUserCommand("ada@example.com", ""));
 
         result.Errors.ShouldHaveSingleItem().PropertyName.ShouldBe(nameof(RegisterUserCommand.Password));

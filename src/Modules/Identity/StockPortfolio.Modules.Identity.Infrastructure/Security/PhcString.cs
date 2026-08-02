@@ -3,21 +3,7 @@ using System.Globalization;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Security;
 
-/// <summary>
-/// The PHC string format for an argon2id hash:
-/// <c>$argon2id$v=19$m=19456,t=2,p=1$&lt;b64salt&gt;$&lt;b64hash&gt;</c>.
-/// </summary>
-/// <remarks>
-/// <para>
-/// Storing the parameters alongside the digest is what makes the cost factors upgradable. Verification
-/// re-derives with the parameters that produced the stored hash, so raising <c>m</c> or <c>t</c> later
-/// does not invalidate anyone's password — a login can compare the stored parameters against the current
-/// ones and transparently rehash. A bare digest column forecloses that.
-/// </para>
-/// <para>
-/// Base64 here is the standard alphabet with padding stripped, per the PHC specification.
-/// </para>
-/// </remarks>
+/// <summary>The PHC string format for an argon2id hash.</summary>
 internal sealed record PhcString(int MemoryKib, int Iterations, int Parallelism, byte[] Salt, byte[] Hash)
 {
     internal const string AlgorithmId = "argon2id";
@@ -25,8 +11,7 @@ internal sealed record PhcString(int MemoryKib, int Iterations, int Parallelism,
     /// <summary>0x13 — the only argon2 version anything still emits.</summary>
     internal const int Version = 19;
 
-    // Bounds on parse. A stored hash is trusted input, but a corrupted or attacker-supplied row must not
-    // be able to ask for a 16 GiB derivation; the parse is the only place to say so.
+    // Bounds on parse.
     private const int MinMemoryKib = 8;
     private const int MaxMemoryKib = 1_048_576;
     private const int MinIterations = 1;
@@ -45,10 +30,7 @@ internal sealed record PhcString(int MemoryKib, int Iterations, int Parallelism,
         CultureInfo.InvariantCulture,
         $"${AlgorithmId}$v={Version}$m={MemoryKib},t={Iterations},p={Parallelism}${Encode(Salt)}${Encode(Hash)}");
 
-    /// <summary>
-    /// Parses a PHC string. Returns <see langword="false"/> for anything malformed rather than throwing:
-    /// the input is a database column, and a bad row must fail a login, not the process.
-    /// </summary>
+    /// <summary>Parses a PHC string.</summary>
     public static bool TryParse(string? value, [NotNullWhen(true)] out PhcString? result)
     {
         result = null;
@@ -112,8 +94,7 @@ internal sealed record PhcString(int MemoryKib, int Iterations, int Parallelism,
             return false;
         }
 
-        // NumberStyles.None rejects a leading sign, whitespace and thousands separators, so "+2" and
-        // " 2" are malformed rather than quietly accepted.
+        // NumberStyles.None rejects a leading sign, whitespace and thousands separators, so "+2" and " 2" are.
         return int.TryParse(
             segment.AsSpan(tag.Length),
             NumberStyles.None,
@@ -125,8 +106,7 @@ internal sealed record PhcString(int MemoryKib, int Iterations, int Parallelism,
     {
         value = [];
 
-        // Unpadded base64 can be 0, 2 or 3 characters short of a multiple of four; one short is
-        // impossible, and Convert would reject it anyway.
+        // Unpadded base64 can be 0, 2 or 3 characters short of a multiple of four; one short is impossible.
         var padding = (4 - (segment.Length % 4)) % 4;
         if (segment.Length == 0 || padding == 3)
         {

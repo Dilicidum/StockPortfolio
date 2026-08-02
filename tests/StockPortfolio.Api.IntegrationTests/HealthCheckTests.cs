@@ -7,10 +7,7 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>
-/// The liveness/readiness split, which is only worth having if the two endpoints actually differ.
-/// </summary>
-/// <param name="fixture">The shared containers and host.</param>
+/// <summary>The liveness/readiness split, which is only worth having if the two endpoints actually differ.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class HealthCheckTests(ApiFixture fixture)
 {
@@ -20,15 +17,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
     /// <summary>Readiness is healthy, and both dependency checks are the reason.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// The HTTP body cannot carry the check names: <c>MapHealthChecks</c>'s default response writer
-    /// emits the aggregate status and nothing else, so <c>/health/ready</c> answers the four
-    /// characters <c>Healthy</c>. Asserting that both named checks exist and both passed therefore
-    /// goes through <see cref="HealthCheckService"/> on the same host — the same registrations the
-    /// endpoint runs, read where the names survive. Asserting only the body would go green if someone
-    /// deleted a check.
-    /// </remarks>
     [Fact]
     public async Task Health_Ready_ReportsPostgresAndRedis()
     {
@@ -53,21 +41,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
     }
 
     /// <summary>Liveness answers 200 with Postgres and Redis both unreachable.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// <para>
-    /// Container Apps <i>restarts</i> a container whose liveness probe fails, so a liveness probe that
-    /// touches Postgres turns a database blip into a restart loop — a degraded app becomes a down one.
-    /// Readiness failing merely takes the replica out of rotation and puts it back when the dependency
-    /// returns; nothing is killed.
-    /// </para>
-    /// <para>
-    /// Proving "does not touch Postgres" needs a host where touching Postgres would be visible, so this
-    /// builds a second one pointed at port 1 — reserved, and nothing listens on it. Readiness is
-    /// asserted <i>unhealthy</i> on that same host, which is what makes liveness's 200 mean something:
-    /// without it the test would pass equally well against a host whose dependencies were fine.
-    /// </para>
-    /// </remarks>
     [Fact]
     public async Task Health_Live_IgnoresDependencies()
     {
@@ -86,7 +59,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
     }
 
     /// <summary>Both probes are anonymous — an authenticated probe is an unreachable probe.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
     [Fact]
     public async Task Health_Endpoints_AreAnonymous()
     {

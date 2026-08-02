@@ -4,15 +4,7 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
 
-/// <summary>
-/// Exchanges a refresh token for a new token pair, rotating the session if
-/// <see cref="TokenPolicy.RotateOnUse"/> says so.
-/// </summary>
-/// <param name="tokenIssuer">Hashes the presented token and mints the new pair.</param>
-/// <param name="users">Confirms the account behind the session still exists.</param>
-/// <param name="refreshTokens">Finds the session and stores its replacement.</param>
-/// <param name="unitOfWork">Commits the rotation and the replacement together.</param>
-/// <param name="clock">Supplies every timestamp.</param>
+/// <summary>Exchanges a refresh token for a new token pair, rotating the session if RotateOnUse says so.</summary>
 public sealed class RefreshSessionCommandHandler(
     ITokenIssuer tokenIssuer,
     IUserRepository users,
@@ -21,7 +13,6 @@ public sealed class RefreshSessionCommandHandler(
     TimeProvider clock) : ICommandHandler<RefreshSessionCommand, RefreshSessionResult>
 {
     /// <inheritdoc/>
-    /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
     public async Task<RefreshSessionResult> Handle(RefreshSessionCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -38,7 +29,7 @@ public sealed class RefreshSessionCommandHandler(
 
         if (user is null)
         {
-            // The session outlived its account. Indistinguishable from a bad token, on purpose.
+            // The session outlived its account.
             return new InvalidOrExpired();
         }
 
@@ -48,8 +39,7 @@ public sealed class RefreshSessionCommandHandler(
 
         if (!TokenPolicy.RotateOnUse)
         {
-            // Nothing changed, so nothing to commit: the same session keeps running and only the
-            // short-lived access token is renewed.
+            // Nothing changed, so nothing to commit: the same session keeps running and only the short-lived.
             return new TokenPair(accessToken, command.RefreshToken, accessExpiresAt);
         }
 
@@ -63,8 +53,7 @@ public sealed class RefreshSessionCommandHandler(
 
         await refreshTokens.AddAsync(replacement, ct).ConfigureAwait(false);
 
-        // Guarded, not assumed: Supersede throws on a second call, and the branch below admits
-        // already-superseded tokens for the length of the grace period.
+        // Guarded, not assumed: Supersede throws on a second call, and the branch below admits.
         if (session.SupersededAt is null)
         {
             session.Supersede(replacement, clock);
@@ -75,19 +64,7 @@ public sealed class RefreshSessionCommandHandler(
         return new TokenPair(accessToken, replacementToken, accessExpiresAt);
     }
 
-    /// <summary>
-    /// Decides whether a stored session may still be refreshed, allowing for the rotation grace
-    /// period.
-    /// </summary>
-    /// <param name="session">The session found by token hash.</param>
-    /// <returns><see langword="true"/> when the refresh may proceed.</returns>
-    /// <remarks>
-    /// Rotation and concurrent tabs are in direct conflict: two tabs refreshing within the same
-    /// instant means the second one presents a token that was current when it was sent and stale by
-    /// the time it arrives. Without a grace window that tab is logged out for no reason the user
-    /// can see. The window is short so that a genuinely replayed token — presented minutes later —
-    /// is still rejected.
-    /// </remarks>
+    /// <summary>Decides whether a stored session may still be refreshed, allowing for the rotation grace period.</summary>
     private bool IsAcceptable(RefreshToken session)
     {
         if (session.IsActive(clock))

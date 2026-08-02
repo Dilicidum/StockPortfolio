@@ -5,15 +5,11 @@ using OneOf.Types;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 
-/// <summary>
-/// Reads the signed-in user. Changes nothing, so it is a query and takes no unit of work.
-/// </summary>
-/// <param name="users">Finds the account.</param>
+/// <summary>Reads the signed-in user.</summary>
 public sealed class GetCurrentUserQueryHandler(IUserRepository users)
     : IQueryHandler<GetCurrentUserQuery, GetCurrentUserResult>
 {
     /// <inheritdoc/>
-    /// <exception cref="ArgumentNullException"><paramref name="query"/> is <see langword="null"/>.</exception>
     public async Task<GetCurrentUserResult> Handle(GetCurrentUserQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);

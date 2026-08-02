@@ -5,32 +5,21 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Configurations;
 
-/// <summary>Maps <see cref="RefreshToken"/> to <c>identity.refresh_tokens</c>.</summary>
-/// <remarks>
-/// Parameterless constructor on purpose — see <see cref="UserConfiguration"/>.
-/// </remarks>
+/// <summary>Maps RefreshToken to identity.refresh_tokens.</summary>
 internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<RefreshToken>
 {
     internal const string TableName = "refresh_tokens";
 
-    /// <summary>One row per opaque token. The uniqueness is what makes a hash lookup a point read.</summary>
+    /// <summary>One row per opaque token.</summary>
     internal const string TokenHashUniqueIndexName = "ix_refresh_tokens_token_hash";
 
-    /// <summary>
-    /// Partial index over the same column, restricted to live rows. Rotation looks a token up by hash and
-    /// then asks whether it is still active, so the index that answers it should never page in the
-    /// superseded history — which is the majority of the table after a few days of use.
-    /// </summary>
+    /// <summary>Partial index over the same column, restricted to live rows.</summary>
     internal const string ActiveTokenIndexName = "ix_refresh_tokens_active";
 
-    /// <summary>
-    /// EF creates an index for the foreign key whether or not it is asked to. Declaring it here is only
-    /// about the name: the convention-generated one is <c>IX_refresh_tokens_user_id</c>, and one
-    /// PascalCase identifier among six snake_case ones has to be quoted in every hand-written query.
-    /// </summary>
+    /// <summary>EF creates an index for the foreign key whether or not it is asked to.</summary>
     internal const string UserIdIndexName = "ix_refresh_tokens_user_id";
 
-    /// <summary>SHA-256 output. Fixed width, so <c>bytea</c> comparisons never see a length mismatch.</summary>
+    /// <summary>SHA-256 output.</summary>
     private const int TokenHashLength = 32;
 
     public void Configure(EntityTypeBuilder<RefreshToken> builder)
@@ -65,7 +54,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
             .HasColumnType("timestamp with time zone")
             .IsRequired();
 
-        // Null while the token is live. That nullability is the partial index's predicate.
+        // Null while the token is live.
         builder.Property(t => t.SupersededAt)
             .HasColumnName("superseded_at")
             .HasColumnType("timestamp with time zone");
@@ -77,8 +66,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
             .IsUnique()
             .HasDatabaseName(TokenHashUniqueIndexName);
 
-        // Second index on the same column, so the named overload is required — the unnamed one would
-        // be treated as a redefinition of the unique index above.
+        // Second index on the same column, so the named overload is required — the unnamed one would be.
         builder.HasIndex(t => t.TokenHash, ActiveTokenIndexName)
             .HasDatabaseName(ActiveTokenIndexName)
             .HasFilter("superseded_at IS NULL");
@@ -86,9 +74,7 @@ internal sealed class RefreshTokenConfiguration : IEntityTypeConfiguration<Refre
         builder.HasIndex(t => t.UserId)
             .HasDatabaseName(UserIdIndexName);
 
-        // A real foreign key: both tables live in the `identity` schema and are owned by the same role,
-        // so Postgres can enforce it. Cross-schema references (portfolio.holdings.user_id and friends)
-        // stay logical-only — see docs/plan/er-diagram.md.
+        // A real foreign key: both tables live in the `identity` schema and are owned by the same role, so.
         builder.HasOne<User>()
             .WithMany()
             .HasForeignKey(t => t.UserId)

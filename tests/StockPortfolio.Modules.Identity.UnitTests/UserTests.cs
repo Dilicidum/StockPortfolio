@@ -4,10 +4,7 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>
-/// The <see cref="User"/> aggregate: what it normalises, what it refuses, and where its clock
-/// comes from.
-/// </summary>
+/// <summary>The User aggregate: what it normalises, what it refuses, and where its clock comes from.</summary>
 public sealed class UserTests
 {
     private static readonly DateTimeOffset Noon =
@@ -48,8 +45,7 @@ public sealed class UserTests
     [Fact]
     public void Create_Always_TakesCreatedAtFromTheInjectedClock()
     {
-        // Deliberately not "now": if the entity reached for DateTimeOffset.UtcNow this assertion
-        // would fail by two years, which is the point of injecting the clock.
+        // Deliberately not "now": if the entity reached for DateTimeOffset.UtcNow this assertion would fail.
         var clock = new FakeTimeProvider(Noon);
 
         var result = User.Create("ann@example.com", ValidHash, clock);
@@ -97,8 +93,7 @@ public sealed class UserTests
     [InlineData("   ")]
     public void Create_BlankPasswordHash_Throws(string? passwordHash)
     {
-        // An invariant, not a context failure: a blank hash would let anything authenticate, and no
-        // caller can legitimately ask for one.
+        // An invariant, not a context failure: a blank hash would let anything authenticate, and no caller.
         Should.Throw<ArgumentException>(
             () => User.Create("ann@example.com", passwordHash!, new FakeTimeProvider(Noon)));
     }

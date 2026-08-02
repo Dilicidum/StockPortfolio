@@ -1,9 +1,7 @@
 using Shouldly;
 using StockPortfolio.Shared.Kernel;
 
-// Namespace is `StockPortfolio.Tests`, matching the other test projects, rather than mirroring the
-// assembly name: CA1716 rejects a `Shared` namespace segment and a test assembly has no public API
-// worth suppressing the rule for.
+// Namespace matches the other test projects rather than mirroring the source tree.
 namespace StockPortfolio.Tests;
 
 public sealed class MoneyTests

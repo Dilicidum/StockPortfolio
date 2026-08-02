@@ -6,29 +6,7 @@ using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>
-/// Proves EF Core can materialise the entities even though neither has a parameterless
-/// constructor.
-/// </summary>
-/// <remarks>
-/// <para>
-/// The entities expose exactly one constructor: private, taking every mapped value. The usual
-/// worry is that EF needs a parameterless constructor and will fail at the first <c>SELECT</c>. It
-/// does not — EF Core has bound constructors by convention since 2.1, matching <b>parameter names
-/// to property names</b> case-insensitively, and accessibility is irrelevant, so a private one is
-/// fine.
-/// </para>
-/// <para>
-/// The reason to pin it with a test rather than trust it: the binding is by NAME. Rename a
-/// constructor parameter without renaming its property — <c>createdAt</c> to <c>created</c>, say —
-/// and EF silently stops binding the constructor, then throws at runtime because there is no
-/// parameterless fallback. That failure would surface as "no suitable constructor" on the first
-/// query, far from the rename that caused it. These tests fail at build-and-test time instead.
-/// </para>
-/// <para>
-/// Building the model does not open a connection, so this stays a unit test.
-/// </para>
-/// </remarks>
+/// <summary>Proves EF Core can materialise the entities even though neither has a parameterless constructor.</summary>
 public sealed class EfConstructorBindingTests
 {
     private static IModel BuildModel()
@@ -92,8 +70,7 @@ public sealed class EfConstructorBindingTests
             .Select(p => p.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        // Every scalar EF persists must arrive through the constructor; anything EF had to set
-        // afterwards would mean a property the constructor forgot.
+        // Every scalar EF persists must arrive through the constructor; anything EF had to set afterwards.
         foreach (var property in entityType.GetProperties())
         {
             bound.ShouldContain(

@@ -5,15 +5,7 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
 
-/// <summary>
-/// Verifies a password and opens a session.
-/// </summary>
-/// <param name="passwordHasher">Verifies the password — and burns the same time when there is no account.</param>
-/// <param name="tokenIssuer">Mints the access and refresh tokens.</param>
-/// <param name="users">Finds the account.</param>
-/// <param name="refreshTokens">Stores the new session.</param>
-/// <param name="unitOfWork">Commits it.</param>
-/// <param name="clock">Supplies every timestamp.</param>
+/// <summary>Verifies a password and opens a session.</summary>
 public sealed class LoginUserCommandHandler(
     IPasswordHasher passwordHasher,
     ITokenIssuer tokenIssuer,
@@ -23,7 +15,6 @@ public sealed class LoginUserCommandHandler(
     TimeProvider clock) : ICommandHandler<LoginUserCommand, LoginUserResult>
 {
     /// <inheritdoc/>
-    /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
     [SuppressMessage(
         "Globalization",
         "CA1308:Normalize strings to uppercase",
@@ -37,10 +28,7 @@ public sealed class LoginUserCommandHandler(
 
         if (user is null)
         {
-            // Verify against a fixed hash of nothing rather than returning here. An early return
-            // makes an unknown address answer in microseconds and a known one in the tens of
-            // milliseconds Argon2 costs, and that difference is an account-enumeration oracle
-            // whether or not the response bodies are identical.
+            // Verify against a fixed hash of nothing rather than returning here.
             _ = passwordHasher.Verify(command.Password, passwordHasher.DummyHash);
             return new InvalidCredentials();
         }

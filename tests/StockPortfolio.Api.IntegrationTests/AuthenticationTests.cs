@@ -8,17 +8,13 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>
-/// The five <c>/api/auth</c> routes, driven end to end over HTTP against a real Postgres.
-/// </summary>
-/// <param name="fixture">The shared containers and host.</param>
+/// <summary>The five /api/auth routes, driven end to end over HTTP against a real Postgres.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AuthenticationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
     /// <summary>Registering issues a usable session, and the same credentials sign in again.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
     [Fact]
     public async Task Register_ThenLogin_ReturnsTokens()
     {
@@ -31,8 +27,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         var fromRegister = await Wire.ReadTokensAsync(registered);
         fromRegister.AccessExpiresAt.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
 
-        // 201 without a Location reads as an oversight. There is no GET /api/users/{id}, so the created
-        // account is addressable only as the caller's own identity, and that is what the header says.
+        // 201 without a Location reads as an oversight.
         registered.Headers.Location?.ToString().ShouldBe("/api/auth/me");
 
         using var loggedIn = await Wire.LoginAsync(client, email, Wire.ValidPassword);
@@ -45,13 +40,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>The second registration of one address conflicts rather than overwriting.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// The uniqueness guarantee is the database index, not a pre-<c>SELECT</c>: check-then-insert is a
-    /// race two concurrent registrations both win. <c>UserRepository</c> catches SQLSTATE <c>23505</c>
-    /// on the <c>ix_users_email</c> index specifically and turns it into <c>EmailAlreadyUsed</c>, so any
-    /// <i>other</i> unique violation still surfaces as an exception instead of a misleading 409.
-    /// </remarks>
     [Fact]
     public async Task Register_DuplicateEmail_Returns409()
     {
@@ -67,13 +55,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>A password under the floor is a field-level 400, not a generic one.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// This asserts the whole shape-validation path: the <c>ValidationFilter&lt;RegisterUserCommand&gt;</c>
-    /// endpoint filter short-circuits before the handler, and <c>AddProblemDetails</c> renders RFC 7807.
-    /// The <c>errors</c> key is <c>Password</c> with a capital P — FluentValidation names the property
-    /// from the member expression, and it is not run through the JSON naming policy.
-    /// </remarks>
     [Fact]
     public async Task Register_WeakPassword_Returns400WithProblemDetails()
     {
@@ -95,12 +76,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>Case and surrounding whitespace do not create a second account.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// Normalisation happens in <c>User.Create</c>, which is the only place it can be trusted: the
-    /// lower-cased form is what the unique index keys on, so anything that normalises later would let
-    /// <c>Foo@Bar.com</c> and <c>foo@bar.com</c> become two accounts.
-    /// </remarks>
     [Fact]
     public async Task Register_NormalisesEmailToLowercase()
     {
@@ -132,14 +107,12 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         user.ShouldNotBeNull();
         user.Email.ShouldBe(lower);
 
-        // Registering the mixed-case form a second time conflicts, which is the property that matters:
-        // two spellings, one account.
+        // Registering the mixed-case form a second time conflicts, which is the property that matters: two.
         using var again = await Wire.RegisterAsync(client, mixed, Wire.ValidPassword);
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(again));
     }
 
     /// <summary>An anonymous call to a guarded route is rejected.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
     [Fact]
     public async Task Me_WithoutToken_Returns401()
     {
@@ -151,16 +124,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>A bearer token resolves back to the account that owns it.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// <b>This test is the only automatic proof that <c>MapInboundClaims = false</c> is set.</b>
-    /// <c>JwtBearerOptions.MapInboundClaims</c> defaults to <see langword="true"/> even though the
-    /// underlying <c>JsonWebTokenHandler</c> defaults to <see langword="false"/> — the options object
-    /// overrides the handler. Left at the default, <c>sub</c> arrives renamed to the long
-    /// <c>http://schemas.xmlsoap.org/…/nameidentifier</c> URI, <c>IdentityEndpoints</c>' lookup for
-    /// <c>"sub"</c> returns null, and every authenticated request 401s with nothing in the logs to
-    /// explain it. If someone deletes that line, this assertion is what catches it.
-    /// </remarks>
     [Fact]
     public async Task Me_WithValidToken_ReturnsEmail()
     {
@@ -183,14 +146,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>Signing out answers 204 and does not require a body.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// Both shapes are exercised because both are supported: the SPA signs out by dropping its local
-    /// session and sends nothing, while a client that still holds the refresh token can hand it over so
-    /// the long-lived half is retired immediately. Sign-out is idempotent, so an unknown or
-    /// already-revoked token is still 204 — answering 404 would turn the endpoint into an oracle for
-    /// which token strings exist.
-    /// </remarks>
     [Fact]
     public async Task Logout_Returns204()
     {
@@ -227,7 +182,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>Sign-out still needs a bearer token — it is not an anonymous route.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
     [Fact]
     public async Task Logout_WithoutToken_Returns401()
     {
@@ -239,12 +193,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     }
 
     /// <summary>A wrong password and an unknown address give the identical answer.</summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// <c>LoginUserCommandHandler</c> verifies against a fixed dummy hash when the account does not exist, so
-    /// the two cases match in response <i>and</i> in timing. Telling them apart would turn login into an
-    /// account enumerator.
-    /// </remarks>
     [Fact]
     public async Task Login_WithWrongPassword_IsIndistinguishableFromUnknownAccount()
     {
@@ -259,8 +207,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         wrongPassword.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(wrongPassword));
         unknownAccount.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(unknownAccount));
 
-        // Compared field by field rather than as raw text: ProblemDetails carries a per-request
-        // traceId, which differs by construction and says nothing about which account exists.
+        // Compared field by field rather than as raw text: ProblemDetails carries a per-request traceId.
         var first = await ReadProblemAsync(wrongPassword);
         var second = await ReadProblemAsync(unknownAccount);
 

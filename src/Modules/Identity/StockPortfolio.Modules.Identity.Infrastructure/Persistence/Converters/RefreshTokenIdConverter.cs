@@ -4,12 +4,7 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Converters;
 
-/// <summary>
-/// Maps the strongly-typed <see cref="RefreshTokenId"/> to the plain <see cref="Guid"/> the database stores.
-/// </summary>
-/// <remarks>
-/// Same reasoning as <see cref="UserIdConverter"/>: EF Core types stay out of <c>.Domain</c>.
-/// </remarks>
+/// <summary>Maps the strongly-typed RefreshTokenId to the plain Guid the database stores.</summary>
 internal sealed class RefreshTokenIdConverter : ValueConverter<RefreshTokenId, Guid>
 {
     public RefreshTokenIdConverter()

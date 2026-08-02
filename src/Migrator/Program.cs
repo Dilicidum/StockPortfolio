@@ -4,25 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using StockPortfolio.Modules.Identity.Infrastructure;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  StockPortfolio migrator
-// ─────────────────────────────────────────────────────────────────────────────
-//  Applies every module's EF migrations, connecting as the `migrator` role, which
-//  owns the schemas and is the only role with CREATE.
-//
-//  This runs as its own container: `docker compose up` gates the API on
-//  `migrations: service_completed_successfully`, and the ACA deployment runs the
-//  same image as a Manual-trigger job. The API itself must NEVER call Migrate()
-//  at startup - two replicas racing the same migration corrupt the history table.
-//
-//  HOW IT REACHES AN INTERNAL DbContext
-//  Every <Module>DbContext is `internal` to its own Infrastructure assembly, so
-//  this project cannot name one. It does not need to: it calls each module's
-//  public registration seam, then walks the ServiceCollection for descriptors
-//  whose service type derives from DbContext and migrates whatever it finds.
-//  Adding a module later means adding one Add<Module>Module call below - nothing
-//  else changes, and no type ever has to be made public to satisfy this tool.
-// ─────────────────────────────────────────────────────────────────────────────
+// Applies every module's EF migrations, connecting as the `migrator` role.
 
 var configuration = new ConfigurationBuilder()
     .AddEnvironmentVariables()
@@ -38,17 +20,14 @@ if (string.IsNullOrWhiteSpace(migratorConnectionString))
     return 1;
 }
 
-// Each module binds its own connection string by name. Point every one of them at the migrator
-// credentials for the duration of this process - the service roles have DML only and cannot
-// CREATE, so running migrations as them would fail with a permission error at the first DDL.
+// Each module binds its own connection string by name.
 var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
 {
     ["ConnectionStrings:Identity"] = migratorConnectionString,
     ["ConnectionStrings:Portfolio"] = migratorConnectionString,
     ["ConnectionStrings:MarketData"] = migratorConnectionString,
     ["ConnectionStrings:Alerts"] = migratorConnectionString,
-    // AddIdentityModule validates the Jwt section eagerly, so it must be satisfiable here even
-    // though the migrator never issues a token. Not a secret and never used to sign anything.
+    // AddIdentityModule validates the Jwt section eagerly; the migrator never signs anything.
     ["Jwt:SigningKey"] = configuration["Jwt:SigningKey"]
                          ?? "migrator-placeholder-signing-key-unused-32b",
 };
@@ -60,8 +39,7 @@ var migratorConfiguration = new ConfigurationBuilder()
 
 var services = new ServiceCollection();
 
-// One line per module. Portfolio, MarketData and Alerts have no DbContext yet; they will be
-// added here as their phases land.
+// One line per module.
 services.AddIdentityModule(migratorConfiguration);
 
 var contextTypes = services

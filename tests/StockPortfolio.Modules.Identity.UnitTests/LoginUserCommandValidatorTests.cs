@@ -5,10 +5,7 @@ using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginU
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>
-/// Login validates presence and nothing else. The tests that assert what it does <i>not</i> reject
-/// matter as much as the ones that assert what it does.
-/// </summary>
+/// <summary>Login validates presence and nothing else.</summary>
 public sealed class LoginUserCommandValidatorTests
 {
     private readonly LoginUserCommandValidator _validator = new();
@@ -43,9 +40,7 @@ public sealed class LoginUserCommandValidatorTests
     [Fact]
     public void Validate_ShortPassword_Succeeds()
     {
-        // Deliberate: the registration policy is not applied at sign-in. Enforcing it here would
-        // answer "does an account with a short password exist?" with a 400 instead of a 401, and
-        // would lock out every account that predates a future policy change.
+        // Deliberate: the registration policy is not applied at sign-in.
         var result = _validator.Validate(new LoginUserCommand("ada@example.com", "short"));
 
         result.IsValid.ShouldBeTrue();
@@ -54,9 +49,7 @@ public sealed class LoginUserCommandValidatorTests
     [Fact]
     public void Validate_MalformedEmail_Succeeds()
     {
-        // Also deliberate. An unparseable address matches no account, and the handler already
-        // answers that with the same undifferentiated 401 it gives a wrong password. Rejecting it
-        // here would make the failure shape depend on the input, which is the leak we are avoiding.
+        // Also deliberate.
         var result = _validator.Validate(new LoginUserCommand("not-an-email", "correct horse battery staple"));
 
         result.IsValid.ShouldBeTrue();

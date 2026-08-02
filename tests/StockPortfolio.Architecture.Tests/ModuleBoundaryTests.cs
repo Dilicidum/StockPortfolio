@@ -3,25 +3,13 @@ using Shouldly;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>
-/// Rule 1 — a module reaches another module only through its <c>.Contracts</c> assembly — plus the
-/// discovery guard every other rule in this assembly leans on.
-/// </summary>
-/// <remarks>
-/// The compiler used to enforce this by accident, when everything outside <c>.Contracts</c> was
-/// <c>internal</c>. It cannot any more: a module is five assemblies, so <c>Domain</c> and
-/// <c>Application</c> have to be public for its own <c>Infrastructure</c> to see them. This file is
-/// what replaced the compiler. Weakening it silently re-opens the boundary.
-/// </remarks>
+/// <summary>Rule 1 — a module reaches another module only through its .Contracts assembly — plus the discovery.</summary>
 public sealed class ModuleBoundaryTests
 {
     /// <summary>Every first-party assembly the rules run over.</summary>
     public static TheoryData<string> ScannedAssemblies => [.. SolutionAssemblies.ScannedNames];
 
-    /// <summary>
-    /// The guard against a false green. Reflection rules that scan an empty set pass for the wrong
-    /// reason, so the expected assemblies are pinned by name and must all load.
-    /// </summary>
+    /// <summary>The guard against a false green.</summary>
     [Fact]
     public void ExpectedAssemblies_AllLoadByName_SoNoRuleScansAnEmptySet()
     {
@@ -41,11 +29,7 @@ public sealed class ModuleBoundaryTests
                 + Describe(missing));
     }
 
-    /// <summary>
-    /// The second half of the guard. Rules skip an assembly that holds no first-party types yet,
-    /// which is honest but toothless — so the assemblies that <em>do</em> hold code are pinned here.
-    /// Empty these and the whole suite would degrade to skips and still report green.
-    /// </summary>
+    /// <summary>The second half of the guard.</summary>
     [Fact]
     public void PopulatedAssemblies_AreNotEmptyShells_SoTheRulesAreNotAllSkipped()
     {
@@ -70,19 +54,14 @@ public sealed class ModuleBoundaryTests
                 + Describe(shells));
     }
 
-    /// <summary>
-    /// Rule 1. Cross-module coupling is legal only through <c>&lt;Other&gt;.Contracts</c>.
-    /// </summary>
-    /// <param name="assemblyName">The assembly under inspection.</param>
+    /// <summary>Rule 1.</summary>
     [Theory]
     [MemberData(nameof(ScannedAssemblies))]
     public void Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts(string assemblyName)
     {
         if (SolutionAssemblies.IsHost(assemblyName))
         {
-            // Api and Migrator are the composition roots: they reference every <M>.Infrastructure
-            // and <M>.Api on purpose. Exempting them is not a loophole — it is the whole
-            // point of having a host.
+            // Api and Migrator are the composition roots: they reference every <M>.Infrastructure and <M>.Api on.
             Assert.Skip(
                 assemblyName
                     + " is a composition root and is exempt by design: it wires every module's "
@@ -111,11 +90,7 @@ public sealed class ModuleBoundaryTests
                 + "go through Contracts, or move the type you need into Contracts as a record of primitives.");
     }
 
-    /// <summary>
-    /// Rule 1, second half. <c>Shared.Kernel</c> and <c>Shared.Api</c> are referenced *by*
-    /// modules and must never reference one back, in any layer — not even <c>.Contracts</c>.
-    /// </summary>
-    /// <param name="assemblyName">The shared assembly under inspection.</param>
+    /// <summary>Rule 1, second half.</summary>
     [Theory]
     [InlineData("StockPortfolio.Shared.Kernel")]
     [InlineData("StockPortfolio.Shared.Api")]
@@ -136,13 +111,7 @@ public sealed class ModuleBoundaryTests
                 + Describe(violations));
     }
 
-    /// <summary>
-    /// Presses the button on the smoke detector. Rule 1 reports "no violations" both when the
-    /// boundary holds and when the predicate behind it is broken, and those two look identical in a
-    /// test report. This pins the predicate's answers on inputs whose verdict is not in doubt.
-    /// </summary>
-    /// <param name="referenced">The referenced assembly name.</param>
-    /// <param name="isViolation">The verdict rule 1 must reach for a member of <c>Alerts</c>.</param>
+    /// <summary>Presses the button on the smoke detector.</summary>
     [Theory]
     [InlineData("StockPortfolio.Modules.Portfolio.Domain", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Application", true)]
@@ -167,10 +136,7 @@ public sealed class ModuleBoundaryTests
     {
         if (SolutionAssemblies.IsEmptyShell(assembly))
         {
-            // Portfolio, MarketData and Alerts are shells until their phase lands. Such an assembly
-            // has an AssemblyRef table of System.Runtime alone no matter what its .csproj declares,
-            // so the rule would pass on emptiness rather than on compliance. Skipping says so out
-            // loud instead of banking a green it has not earned.
+            // Portfolio, MarketData and Alerts are shells until their phase lands.
             Assert.Skip(
                 assemblyName
                     + " declares no StockPortfolio type yet (empty shell project), so its reference "

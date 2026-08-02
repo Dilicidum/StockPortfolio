@@ -4,31 +4,13 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>
-/// What the migration and <c>db/init/01-roles.sql</c> left behind, asserted against the live server.
-/// </summary>
-/// <param name="fixture">The shared containers and host.</param>
+/// <summary>What the migration and db/init/01-roles.sql left behind, asserted against the live server.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class MigrationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>
-    /// The four module schemas exist, <c>identity</c> holds both tables, and — the part that is easy
-    /// to get wrong — the migrations history table sits in <c>identity</c> rather than <c>public</c>.
-    /// </summary>
-    /// <returns>A task that completes when the assertions have run.</returns>
-    /// <remarks>
-    /// <c>HasDefaultSchema</c> moves the entity tables but <b>not</b> <c>__EFMigrationsHistory</c>
-    /// (efcore#24127, closed <i>not planned</i>). Only
-    /// <c>MigrationsHistoryTable("__EFMigrationsHistory", "identity")</c> on the Npgsql options builder
-    /// does that. Get it wrong and all four module contexts share
-    /// <c>public.__EFMigrationsHistory</c>, each sees the others' migration ids, and
-    /// <c>database update</c> reports migrations as applied-but-missing — a failure that reads as data
-    /// corruption and arrives three phases from now. Hence the explicit
-    /// "and it is not in public" assertion: finding it in <c>identity</c> is not enough on its own if a
-    /// stray copy also exists.
-    /// </remarks>
+    /// <summary>The four module schemas exist, identity holds both tables, and — the part that is easy to get wrong.</summary>
     [Fact]
     public async Task Migrations_ApplyCleanly_OnEmptyDatabase()
     {
@@ -68,8 +50,7 @@ public sealed class MigrationTests(ApiFixture fixture)
         historySchemas.ShouldBe(["identity"]);
         historySchemas.ShouldNotContain("public");
 
-        // The migration is recorded, not merely the tables created: an empty history table with the
-        // right shape would mean Migrate() had been bypassed by EnsureCreated somewhere.
+        // The migration is recorded, not merely the tables created: an empty history table with the right.
         var applied = await ReadStringsAsync(
             connection,
             """SELECT "MigrationId" FROM identity."__EFMigrationsHistory" ORDER BY "MigrationId" """);

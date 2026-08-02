@@ -5,18 +5,7 @@ using OneOf.Types;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 
-/// <summary>
-/// Closes a session so its refresh token can never be used again.
-/// </summary>
-/// <param name="tokenIssuer">Hashes the presented token to find the session.</param>
-/// <param name="refreshTokens">Finds the session.</param>
-/// <param name="unitOfWork">Commits the revocation.</param>
-/// <param name="clock">Supplies the revocation timestamp.</param>
-/// <remarks>
-/// Only the refresh token is revoked. The access token is self-contained and cannot be recalled, so
-/// it stays valid until it expires — which is what makes
-/// <see cref="TokenPolicy.AccessTokenLifetime"/> the real revocation latency of this system.
-/// </remarks>
+/// <summary>Closes a session so its refresh token can never be used again.</summary>
 public sealed class RevokeSessionCommandHandler(
     ITokenIssuer tokenIssuer,
     IRefreshTokenRepository refreshTokens,
@@ -24,7 +13,6 @@ public sealed class RevokeSessionCommandHandler(
     TimeProvider clock) : ICommandHandler<RevokeSessionCommand, RevokeSessionResult>
 {
     /// <inheritdoc/>
-    /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
     public async Task<RevokeSessionResult> Handle(RevokeSessionCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
@@ -32,8 +20,7 @@ public sealed class RevokeSessionCommandHandler(
         var presentedHash = tokenIssuer.HashRefreshToken(command.RefreshToken);
         var session = await refreshTokens.FindByHashAsync(presentedHash, ct).ConfigureAwait(false);
 
-        // An already-closed session is reported the same as an unknown one: there is nothing left
-        // to revoke either way, and the caller learns nothing about which tokens ever existed.
+        // An already-closed session is reported the same as an unknown one: there is nothing left to revoke.
         if (session is null || session.SupersededAt is not null)
         {
             return new NotFound();

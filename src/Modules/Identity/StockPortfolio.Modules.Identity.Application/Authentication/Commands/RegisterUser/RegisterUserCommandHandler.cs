@@ -4,15 +4,7 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 
-/// <summary>
-/// Creates an account and opens the first session for it.
-/// </summary>
-/// <param name="passwordHasher">Hashes the password before it reaches the database.</param>
-/// <param name="tokenIssuer">Mints the access and refresh tokens.</param>
-/// <param name="users">Stores the new user.</param>
-/// <param name="refreshTokens">Stores the new session.</param>
-/// <param name="unitOfWork">Commits both.</param>
-/// <param name="clock">Supplies every timestamp. Never <c>DateTimeOffset.UtcNow</c>.</param>
+/// <summary>Creates an account and opens the first session for it.</summary>
 public sealed class RegisterUserCommandHandler(
     IPasswordHasher passwordHasher,
     ITokenIssuer tokenIssuer,
@@ -22,13 +14,11 @@ public sealed class RegisterUserCommandHandler(
     TimeProvider clock) : ICommandHandler<RegisterUserCommand, RegisterUserResult>
 {
     /// <inheritdoc/>
-    /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
     public async Task<RegisterUserResult> Handle(RegisterUserCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        // Hash first, unconditionally. Hashing before knowing whether the address is free keeps
-        // registration's cost independent of whether the account already exists.
+        // Hash first, unconditionally.
         var passwordHash = passwordHasher.Hash(command.Password);
 
         return await User.Create(command.Email, passwordHash, clock)
@@ -40,9 +30,7 @@ public sealed class RegisterUserCommandHandler(
 
     private async Task<RegisterUserResult> AddThenIssueAsync(User user, CancellationToken ct)
     {
-        // No pre-SELECT for a duplicate address: two concurrent registrations would both see
-        // nothing and both proceed. The unique index is the check, and the repository turns its
-        // 23505 into an outcome so this project never sees the driver.
+        // No pre-SELECT for a duplicate address: two concurrent registrations would both see nothing and both.
         var outcome = await users.AddAsync(user, ct).ConfigureAwait(false);
 
         if (outcome is AddUserOutcome.EmailTaken)
