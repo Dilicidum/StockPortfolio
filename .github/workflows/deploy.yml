@@ -246,9 +246,12 @@ jobs:
           echo "Runner IP: $RUNNER_IP"
           RULE="gh-runner-${{ github.run_id }}"
           echo "rule=$RULE" >> "$GITHUB_OUTPUT"
+          # --server-name, NOT --name. On this command --name is the RULE name, so passing the
+          # server through it fails with "the following arguments are required: --server-name/-s"
+          # rather than anything that points at the real mistake.
           az postgres flexible-server firewall-rule create \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
-            --name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
+            --server-name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
             --rule-name "$RULE" \
             --start-ip-address "$RUNNER_IP" \
             --end-ip-address "$RUNNER_IP" \
@@ -275,7 +278,7 @@ jobs:
         run: |
           az postgres flexible-server firewall-rule delete \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
-            --name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
+            --server-name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
             --rule-name '${{ steps.pgfirewall.outputs.rule }}' \
             --yes --output none || true
 
