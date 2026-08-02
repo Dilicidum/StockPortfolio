@@ -43,57 +43,63 @@ public static class IdentityEndpoints
 
         var group = app.MapGroup("/api/auth").WithTags("Authentication");
 
+        // Every status an endpoint can actually emit is declared. 415 and 500 carry problem+json
+        // because AddProblemDetails and UseStatusCodePages give even framework-generated
+        // responses a body - verified against the running API, not assumed.
+
         group.MapPost("/register", RegisterAsync)
             .AddEndpointFilter<ValidationFilter<RegisterUserCommand>>()
             .AllowAnonymous()
             .WithName("Register")
             .WithSummary("Creates an account and signs the caller straight in.")
-            .WithDescription(
-                "Returns the same token pair as login, so the SPA never has to post the password " +
-                "twice. Location points at /api/auth/me, the only address the new account has.")
+            .WithDescription("Returns the same token pair as login; Location points at /api/auth/me.")
             .Produces<TokenPair>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
-            .ProducesProblem(StatusCodes.Status409Conflict);
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/login", LoginAsync)
             .AddEndpointFilter<ValidationFilter<LoginUserCommand>>()
             .AllowAnonymous()
             .WithName("Login")
             .WithSummary("Exchanges email and password for a token pair.")
-            .WithDescription(
-                "A wrong password and an unknown email give the identical 401. The distinction is " +
-                "withheld on purpose: telling them apart turns the endpoint into an account enumerator.")
+            .WithDescription("A wrong password and an unknown email give the identical 401, so the endpoint is not an account enumerator.")
             .Produces<TokenPair>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
-            .ProducesProblem(StatusCodes.Status401Unauthorized);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/refresh", RefreshAsync)
             .AddEndpointFilter<ValidationFilter<RefreshSessionCommand>>()
             .AllowAnonymous()
             .WithName("Refresh")
             .WithSummary("Exchanges a refresh token for a fresh token pair.")
-            .WithDescription(
-                "Anonymous by design — the caller reaches here precisely because its access token " +
-                "has expired, so requiring a valid bearer would make the endpoint unreachable.")
+            .WithDescription("Anonymous by design: the caller arrives here because its access token has expired.")
             .Produces<TokenPair>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
-            .ProducesProblem(StatusCodes.Status401Unauthorized);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/logout", LogoutAsync)
             .RequireAuthorization()
             .WithName("Logout")
             .WithSummary("Ends the session.")
-            .WithDescription(
-                "Idempotent: 204 whether or not a refresh token was supplied and whether or not it " +
-                "was still live. Send the refresh token in the body to retire it immediately.")
-            .Produces(StatusCodes.Status204NoContent);
+            .WithDescription("Idempotent. Send the refresh token in the body to retire it immediately; omit it and the call still returns 204.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         group.MapGet("/me", GetCurrentUserAsync)
             .RequireAuthorization()
             .WithName("GetCurrentUser")
             .WithSummary("Returns the identity behind the current access token.")
             .Produces<UserSummary>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized);
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
     }
