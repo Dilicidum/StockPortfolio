@@ -69,7 +69,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     /// <summary>A password under the floor is a field-level 400, not a generic one.</summary>
     /// <returns>A task that completes when the assertions have run.</returns>
     /// <remarks>
-    /// This asserts the whole shape-validation path: the <c>ValidationFilter&lt;RegisterUser&gt;</c>
+    /// This asserts the whole shape-validation path: the <c>ValidationFilter&lt;RegisterUserCommand&gt;</c>
     /// endpoint filter short-circuits before the handler, and <c>AddProblemDetails</c> renders RFC 7807.
     /// The <c>errors</c> key is <c>Password</c> with a capital P — FluentValidation names the property
     /// from the member expression, and it is not run through the JSON naming policy.
@@ -241,7 +241,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     /// <summary>A wrong password and an unknown address give the identical answer.</summary>
     /// <returns>A task that completes when the assertions have run.</returns>
     /// <remarks>
-    /// <c>LoginUserHandler</c> verifies against a fixed dummy hash when the account does not exist, so
+    /// <c>LoginUserCommandHandler</c> verifies against a fixed dummy hash when the account does not exist, so
     /// the two cases match in response <i>and</i> in timing. Telling them apart would turn login into an
     /// account enumerator.
     /// </remarks>

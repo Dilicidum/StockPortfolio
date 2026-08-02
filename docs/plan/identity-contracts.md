@@ -168,34 +168,34 @@ public interface IUnitOfWork { Task SaveChangesAsync(CancellationToken ct); }
 ### Use cases — one folder each, three files: command, result union, handler
 
 ```csharp
-namespace StockPortfolio.Modules.Identity.Application.Register;
-public sealed record RegisterUser(string Email, string Password);
-[GenerateOneOf] public partial class RegisterResult : OneOfBase<TokenPair, EmailAlreadyUsed, ValidationFailed>;
-public sealed class RegisterUserHandler : ICommandHandler<RegisterUser, RegisterResult>;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
+public sealed record RegisterUserCommand(string Email, string Password);
+[GenerateOneOf] public partial class RegisterUserResult : OneOfBase<TokenPair, EmailAlreadyUsed, ValidationFailed>;
+public sealed class RegisterUserCommandHandler : ICommandHandler<RegisterUserCommand, RegisterUserResult>;
 
-namespace StockPortfolio.Modules.Identity.Application.Login;
-public sealed record LoginUser(string Email, string Password);
-[GenerateOneOf] public partial class LoginResult : OneOfBase<TokenPair, InvalidCredentials>;
-public sealed class LoginUserHandler : ICommandHandler<LoginUser, LoginResult>;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
+public sealed record LoginUserCommand(string Email, string Password);
+[GenerateOneOf] public partial class LoginUserResult : OneOfBase<TokenPair, InvalidCredentials>;
+public sealed class LoginUserCommandHandler : ICommandHandler<LoginUserCommand, LoginUserResult>;
 
-namespace StockPortfolio.Modules.Identity.Application.Refresh;
-public sealed record RefreshSession(string RefreshToken);      // NOT RefreshToken - CS0542
-[GenerateOneOf] public partial class RefreshResult : OneOfBase<TokenPair, InvalidOrExpired>;
-public sealed class RefreshSessionHandler : ICommandHandler<RefreshSession, RefreshResult>;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
+public sealed record RefreshSessionCommand(string RefreshToken);      // NOT RefreshToken - CS0542
+[GenerateOneOf] public partial class RefreshSessionResult : OneOfBase<TokenPair, InvalidOrExpired>;
+public sealed class RefreshSessionCommandHandler : ICommandHandler<RefreshSessionCommand, RefreshSessionResult>;
 
-namespace StockPortfolio.Modules.Identity.Application.Revoke;
-public sealed record RevokeSession(string RefreshToken);
-[GenerateOneOf] public partial class RevokeResult : OneOfBase<Success, SessionNotFound>;
-public sealed class RevokeSessionHandler : ICommandHandler<RevokeSession, RevokeResult>;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
+public sealed record RevokeSessionCommand(string RefreshToken);
+[GenerateOneOf] public partial class RevokeSessionResult : OneOfBase<Success, SessionNotFound>;
+public sealed class RevokeSessionCommandHandler : ICommandHandler<RevokeSessionCommand, RevokeSessionResult>;
 
-namespace StockPortfolio.Modules.Identity.Application.Me;
-public sealed record GetCurrentUser(Guid UserId);
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
+public sealed record GetCurrentUserQuery(Guid UserId);
 public sealed record UserSummary(Guid Id, string Email);
-[GenerateOneOf] public partial class CurrentUserResult : OneOfBase<UserSummary, SessionNotFound>;
-public sealed class GetCurrentUserHandler : IQueryHandler<GetCurrentUser, CurrentUserResult>;
+[GenerateOneOf] public partial class GetCurrentUserResult : OneOfBase<UserSummary, SessionNotFound>;
+public sealed class GetCurrentUserQueryHandler : IQueryHandler<GetCurrentUserQuery, GetCurrentUserResult>;
 ```
 
-`LoginResult` has **two** cases, not three. `InvalidCredentials` is deliberately undifferentiated — separating "no such user" from "wrong password" leaks account existence. The handler must also verify against `IPasswordHasher.DummyHash` when the user does not exist, so the timing does not leak either.
+`LoginUserResult` has **two** cases, not three. `InvalidCredentials` is deliberately undifferentiated — separating "no such user" from "wrong password" leaks account existence. The handler must also verify against `IPasswordHasher.DummyHash` when the user does not exist, so the timing does not leak either.
 
 ---
 

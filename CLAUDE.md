@@ -6,7 +6,7 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Phase 1 in progress.** The build foundation is in and green: 28 projects (`StockPortfolio.slnx`), `Directory.Build.props` / `.targets` / `Directory.Packages.props` with Central Package Management, `tests/Directory.Build.props`, and stub `Program.cs` files. `dotnet build` and `dotnet test` both pass. No feature code yet — every project is empty apart from the stubs.
+**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 149 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
 
 Read before touching code: [docs/plan/00-overview.md](docs/plan/00-overview.md), then the phase file you're working in. Phase 1 additionally has [docs/plan/phase-1-implementation.md](docs/plan/phase-1-implementation.md) — the reviewed file-by-file build order; where it disagrees with `phase-1-sign-in.md`, the implementation plan wins. [docs/plan/er-diagram.md](docs/plan/er-diagram.md) and [docs/plan/module-interactions.md](docs/plan/module-interactions.md) are the reference diagrams. `docs/Initial.md` is the original architecture essay — **treat it as historical**; where it conflicts with `docs/plan/`, the plan wins, and three known errors in it are listed in the overview's open items.
 
@@ -45,7 +45,7 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
 - Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into `Api` (makes the host the merge point for every feature).
-- `Shared.Kernel` must stay framework-free — `AggregateRoot`, `Money`, `IDomainEvent`, the CQRS interfaces. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
+- `Shared.Kernel` must stay framework-free — `Money`, `IDomainEvent`, the CQRS interfaces. There is no `AggregateRoot`. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`.
 - Dependency direction is **Alerts → Portfolio → MarketData**. Identity has zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
@@ -56,7 +56,28 @@ Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: 
 
 **CQRS without a dispatcher.** `ICommandHandler<,>` / `IQueryHandler<,>` injected straight into Minimal API endpoints. There is one caller per handler, so a mediator has nothing to decouple. Cross-cutting concerns are DI decorators.
 
-**A use-case folder holds exactly three things**: the command (or query), the result record if one is needed, and the handler. Queries follow the same shape. **The command is the request body** — endpoints bind it directly off the wire, and its validator sits in `.Api` next to the endpoint. Do not add a parallel `XxxRequest` record that copies it field for field.
+**CQRS layout and naming — both are fixed.**
+
+```
+Application/
+  <FeatureArea>/            e.g. Authentication
+    Commands/
+      <UseCase>/            e.g. RegisterUser
+        <UseCase>Command.cs
+        <UseCase>CommandHandler.cs
+        <UseCase>Result.cs        only if the use case needs one
+    Queries/
+      <UseCase>/
+        <UseCase>Query.cs
+        <UseCase>QueryHandler.cs
+        <UseCase>Result.cs
+```
+
+Every CQRS type in a module lives under one feature-area folder, split into `Commands/` and `Queries/`, then one folder per use case. Class names carry the role: `RegisterUserCommand`, `RegisterUserCommandHandler`, `RegisterUserResult`, `GetCurrentUserQuery`, `GetCurrentUserQueryHandler`. Never `RegisterUser` for a command or `RegisterUserHandler` for a handler — the suffix is not optional.
+
+The namespace matches the folder, so it stops at the use-case folder (`…Application.Authentication.Commands.RegisterUser`) and does **not** repeat the `Command` suffix.
+
+**The command is the request body.** Endpoints bind it directly off the wire; its validator lives in `.Api` as `<UseCase>CommandValidator`. Do not add a parallel `XxxRequest` record that copies the command field for field.
 
 **Results are `OneOf`** with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Exhaustiveness is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed.
 

@@ -2,7 +2,7 @@ using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
-namespace StockPortfolio.Modules.Identity.Application.Refresh;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
 
 /// <summary>
 /// Exchanges a refresh token for a new token pair, rotating the session if
@@ -13,16 +13,16 @@ namespace StockPortfolio.Modules.Identity.Application.Refresh;
 /// <param name="refreshTokens">Finds the session and stores its replacement.</param>
 /// <param name="unitOfWork">Commits the rotation and the replacement together.</param>
 /// <param name="clock">Supplies every timestamp.</param>
-public sealed class RefreshSessionHandler(
+public sealed class RefreshSessionCommandHandler(
     ITokenIssuer tokenIssuer,
     IUserRepository users,
     IRefreshTokenRepository refreshTokens,
     IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<RefreshSession, RefreshResult>
+    TimeProvider clock) : ICommandHandler<RefreshSessionCommand, RefreshSessionResult>
 {
     /// <inheritdoc/>
     /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
-    public async Task<RefreshResult> Handle(RefreshSession command, CancellationToken ct)
+    public async Task<RefreshSessionResult> Handle(RefreshSessionCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
 

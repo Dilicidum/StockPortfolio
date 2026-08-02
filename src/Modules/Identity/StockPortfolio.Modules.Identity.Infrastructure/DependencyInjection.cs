@@ -1,10 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 
-using StockPortfolio.Modules.Identity.Application.Login;
-using StockPortfolio.Modules.Identity.Application.Me;
-using StockPortfolio.Modules.Identity.Application.Refresh;
-using StockPortfolio.Modules.Identity.Application.Register;
-using StockPortfolio.Modules.Identity.Application.Revoke;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
+using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure;
@@ -26,11 +26,11 @@ internal static class DependencyInjection
 {
     internal static IServiceCollection AddIdentityHandlers(this IServiceCollection services)
     {
-        services.AddScoped<ICommandHandler<RegisterUser, RegisterResult>, RegisterUserHandler>();
-        services.AddScoped<ICommandHandler<LoginUser, LoginResult>, LoginUserHandler>();
-        services.AddScoped<ICommandHandler<RefreshSession, RefreshResult>, RefreshSessionHandler>();
-        services.AddScoped<ICommandHandler<RevokeSession, RevokeResult>, RevokeSessionHandler>();
-        services.AddScoped<IQueryHandler<GetCurrentUser, CurrentUserResult>, GetCurrentUserHandler>();
+        services.AddScoped<ICommandHandler<RegisterUserCommand, RegisterUserResult>, RegisterUserCommandHandler>();
+        services.AddScoped<ICommandHandler<LoginUserCommand, LoginUserResult>, LoginUserCommandHandler>();
+        services.AddScoped<ICommandHandler<RefreshSessionCommand, RefreshSessionResult>, RefreshSessionCommandHandler>();
+        services.AddScoped<ICommandHandler<RevokeSessionCommand, RevokeSessionResult>, RevokeSessionCommandHandler>();
+        services.AddScoped<IQueryHandler<GetCurrentUserQuery, GetCurrentUserResult>, GetCurrentUserQueryHandler>();
 
         return services;
     }

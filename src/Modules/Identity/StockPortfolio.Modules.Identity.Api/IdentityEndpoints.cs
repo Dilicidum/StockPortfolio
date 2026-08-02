@@ -6,11 +6,11 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using StockPortfolio.Modules.Identity.Application;
-using StockPortfolio.Modules.Identity.Application.Login;
-using StockPortfolio.Modules.Identity.Application.Me;
-using StockPortfolio.Modules.Identity.Application.Refresh;
-using StockPortfolio.Modules.Identity.Application.Register;
-using StockPortfolio.Modules.Identity.Application.Revoke;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
+using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 using StockPortfolio.Modules.Identity.Api.Validators;
 using StockPortfolio.Shared.Kernel.Cqrs;
 using StockPortfolio.Shared.Api;
@@ -79,7 +79,7 @@ public static class IdentityEndpoints
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddValidatorsFromAssemblyContaining<LoginUserValidator>();
+        services.AddValidatorsFromAssemblyContaining<LoginUserCommandValidator>();
 
         return services;
     }
@@ -101,7 +101,7 @@ public static class IdentityEndpoints
         var group = app.MapGroup("/api/auth").WithTags("Authentication");
 
         group.MapPost("/register", RegisterAsync)
-            .AddEndpointFilter<ValidationFilter<RegisterUser>>()
+            .AddEndpointFilter<ValidationFilter<RegisterUserCommand>>()
             .AllowAnonymous()
             .WithName("Register")
             .WithSummary("Creates an account and signs the caller straight in.")
@@ -113,7 +113,7 @@ public static class IdentityEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/login", LoginAsync)
-            .AddEndpointFilter<ValidationFilter<LoginUser>>()
+            .AddEndpointFilter<ValidationFilter<LoginUserCommand>>()
             .AllowAnonymous()
             .WithName("Login")
             .WithSummary("Exchanges email and password for a token pair.")
@@ -125,7 +125,7 @@ public static class IdentityEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         group.MapPost("/refresh", RefreshAsync)
-            .AddEndpointFilter<ValidationFilter<RefreshSession>>()
+            .AddEndpointFilter<ValidationFilter<RefreshSessionCommand>>()
             .AllowAnonymous()
             .WithName("Refresh")
             .WithSummary("Exchanges a refresh token for a fresh token pair.")
@@ -147,7 +147,7 @@ public static class IdentityEndpoints
 
         group.MapGet("/me", GetCurrentUserAsync)
             .RequireAuthorization()
-            .WithName("GetCurrentUser")
+            .WithName("GetCurrentUserQuery")
             .WithSummary("Returns the identity behind the current access token.")
             .Produces<UserSummary>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
@@ -157,8 +157,8 @@ public static class IdentityEndpoints
 
     /// <summary>Creates an account and issues its first token pair.</summary>
     private static async Task<Results<Created<TokenPair>, ProblemHttpResult, ValidationProblem>> RegisterAsync(
-        RegisterUser command,
-        ICommandHandler<RegisterUser, RegisterResult> handler,
+        RegisterUserCommand command,
+        ICommandHandler<RegisterUserCommand, RegisterUserResult> handler,
         CancellationToken ct)
     {
         var result = await handler
@@ -177,8 +177,8 @@ public static class IdentityEndpoints
 
     /// <summary>Signs an existing account in.</summary>
     private static async Task<Results<Ok<TokenPair>, ProblemHttpResult>> LoginAsync(
-        LoginUser command,
-        ICommandHandler<LoginUser, LoginResult> handler,
+        LoginUserCommand command,
+        ICommandHandler<LoginUserCommand, LoginUserResult> handler,
         CancellationToken ct)
     {
         var result = await handler
@@ -192,8 +192,8 @@ public static class IdentityEndpoints
 
     /// <summary>Rotates a refresh token into a new pair.</summary>
     private static async Task<Results<Ok<TokenPair>, ProblemHttpResult>> RefreshAsync(
-        RefreshSession command,
-        ICommandHandler<RefreshSession, RefreshResult> handler,
+        RefreshSessionCommand command,
+        ICommandHandler<RefreshSessionCommand, RefreshSessionResult> handler,
         CancellationToken ct)
     {
         var result = await handler
@@ -207,8 +207,8 @@ public static class IdentityEndpoints
 
     /// <summary>Ends the session, revoking the refresh token when one is offered.</summary>
     private static async Task<NoContent> LogoutAsync(
-        RevokeSession? command,
-        ICommandHandler<RevokeSession, RevokeResult> handler,
+        RevokeSessionCommand? command,
+        ICommandHandler<RevokeSessionCommand, RevokeSessionResult> handler,
         CancellationToken ct)
     {
         // No body, or a body with no token: nothing is revocable. The access token is short-lived
@@ -232,7 +232,7 @@ public static class IdentityEndpoints
     /// <summary>Resolves the bearer token back to a user.</summary>
     private static async Task<Results<Ok<UserSummary>, ProblemHttpResult>> GetCurrentUserAsync(
         ClaimsPrincipal principal,
-        IQueryHandler<GetCurrentUser, CurrentUserResult> handler,
+        IQueryHandler<GetCurrentUserQuery, GetCurrentUserResult> handler,
         CancellationToken ct)
     {
         // A token that authenticated but carries no usable `sub` is a broken token, not a broken
@@ -243,7 +243,7 @@ public static class IdentityEndpoints
         }
 
         var result = await handler
-            .Handle(new GetCurrentUser(userId), ct)
+            .Handle(new GetCurrentUserQuery(userId), ct)
             .ConfigureAwait(false);
 
         return result.Match<Results<Ok<UserSummary>, ProblemHttpResult>>(

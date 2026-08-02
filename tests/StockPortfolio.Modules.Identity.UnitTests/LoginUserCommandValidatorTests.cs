@@ -1,7 +1,7 @@
 using Shouldly;
 using StockPortfolio.Modules.Identity.Api;
 using StockPortfolio.Modules.Identity.Api.Validators;
-using StockPortfolio.Modules.Identity.Application.Login;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
@@ -9,35 +9,35 @@ namespace StockPortfolio.Modules.Identity.UnitTests;
 /// Login validates presence and nothing else. The tests that assert what it does <i>not</i> reject
 /// matter as much as the ones that assert what it does.
 /// </summary>
-public sealed class LoginUserValidatorTests
+public sealed class LoginUserCommandValidatorTests
 {
-    private readonly LoginUserValidator _validator = new();
+    private readonly LoginUserCommandValidator _validator = new();
 
     [Fact]
     public void Validate_EmptyEmail_FailsNamingTheEmailField()
     {
-        var result = _validator.Validate(new LoginUser("", "correct horse battery staple"));
+        var result = _validator.Validate(new LoginUserCommand("", "correct horse battery staple"));
 
         result.IsValid.ShouldBeFalse();
-        result.Errors.ShouldHaveSingleItem().PropertyName.ShouldBe(nameof(LoginUser.Email));
+        result.Errors.ShouldHaveSingleItem().PropertyName.ShouldBe(nameof(LoginUserCommand.Email));
     }
 
     [Fact]
     public void Validate_EmptyPassword_FailsNamingThePasswordField()
     {
-        var result = _validator.Validate(new LoginUser("ada@example.com", ""));
+        var result = _validator.Validate(new LoginUserCommand("ada@example.com", ""));
 
         result.IsValid.ShouldBeFalse();
-        result.Errors.ShouldHaveSingleItem().PropertyName.ShouldBe(nameof(LoginUser.Password));
+        result.Errors.ShouldHaveSingleItem().PropertyName.ShouldBe(nameof(LoginUserCommand.Password));
     }
 
     [Fact]
     public void Validate_BothFieldsEmpty_FailsNamingBoth()
     {
-        var result = _validator.Validate(new LoginUser("", ""));
+        var result = _validator.Validate(new LoginUserCommand("", ""));
 
         result.Errors.Select(failure => failure.PropertyName)
-            .ShouldBe([nameof(LoginUser.Email), nameof(LoginUser.Password)], ignoreOrder: true);
+            .ShouldBe([nameof(LoginUserCommand.Email), nameof(LoginUserCommand.Password)], ignoreOrder: true);
     }
 
     [Fact]
@@ -46,7 +46,7 @@ public sealed class LoginUserValidatorTests
         // Deliberate: the registration policy is not applied at sign-in. Enforcing it here would
         // answer "does an account with a short password exist?" with a 400 instead of a 401, and
         // would lock out every account that predates a future policy change.
-        var result = _validator.Validate(new LoginUser("ada@example.com", "short"));
+        var result = _validator.Validate(new LoginUserCommand("ada@example.com", "short"));
 
         result.IsValid.ShouldBeTrue();
     }
@@ -57,7 +57,7 @@ public sealed class LoginUserValidatorTests
         // Also deliberate. An unparseable address matches no account, and the handler already
         // answers that with the same undifferentiated 401 it gives a wrong password. Rejecting it
         // here would make the failure shape depend on the input, which is the leak we are avoiding.
-        var result = _validator.Validate(new LoginUser("not-an-email", "correct horse battery staple"));
+        var result = _validator.Validate(new LoginUserCommand("not-an-email", "correct horse battery staple"));
 
         result.IsValid.ShouldBeTrue();
     }

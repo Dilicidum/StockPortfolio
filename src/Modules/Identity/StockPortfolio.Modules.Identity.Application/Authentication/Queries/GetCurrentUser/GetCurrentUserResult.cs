@@ -2,7 +2,7 @@ using OneOf;
 using StockPortfolio.Modules.Identity.Domain;
 using OneOf.Types;
 
-namespace StockPortfolio.Modules.Identity.Application.Me;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 
 /// <summary>
 /// Every way reading the current user can end: the summary, or a token whose account has gone.
@@ -12,6 +12,6 @@ namespace StockPortfolio.Modules.Identity.Application.Me;
 /// account keeps presenting a perfectly well-signed token until it expires.
 /// </remarks>
 [GenerateOneOf]
-public partial class CurrentUserResult : OneOfBase<UserSummary, NotFound>
+public partial class GetCurrentUserResult : OneOfBase<UserSummary, NotFound>
 {
 }

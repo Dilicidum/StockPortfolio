@@ -9,9 +9,9 @@ using System.Diagnostics.CodeAnalysis;
     "CA1716:Identifiers should not match keywords",
     Justification = "The `Me` segment is fixed by the frozen Identity contract and mirrors the /api/auth/me route; the solution is C#-only.",
     Scope = "namespaceanddescendants",
-    Target = "~N:StockPortfolio.Modules.Identity.Application.Me")]
+    Target = "~N:StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser")]
 
-namespace StockPortfolio.Modules.Identity.Application.Me;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 
 /// <summary>
 /// Read the signed-in user.
@@ -20,4 +20,4 @@ namespace StockPortfolio.Modules.Identity.Application.Me;
 /// The id from the access token's <c>sub</c> claim. A raw <see cref="Guid"/>, because the value
 /// arrives from the HTTP layer as a string and has not yet earned the strongly-typed id.
 /// </param>
-public sealed record GetCurrentUser(Guid UserId);
+public sealed record GetCurrentUserQuery(Guid UserId);

@@ -1,4 +1,4 @@
-namespace StockPortfolio.Modules.Identity.Application.Me;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 
 /// <summary>
 /// Everything the application will tell you about yourself.

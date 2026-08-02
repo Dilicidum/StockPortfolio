@@ -1,10 +1,10 @@
 using FluentValidation;
-using StockPortfolio.Modules.Identity.Application.Register;
+using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 
 namespace StockPortfolio.Modules.Identity.Api.Validators;
 
 /// <summary>
-/// Shape rules for <see cref="RegisterUser"/> — the only layer of validation that can answer
+/// Shape rules for <see cref="RegisterUserCommand"/> — the only layer of validation that can answer
 /// "is this even an email?" and "is this password long enough?" without touching the database.
 /// </summary>
 /// <remarks>
@@ -33,7 +33,7 @@ namespace StockPortfolio.Modules.Identity.Api.Validators;
 /// mapped to <c>409</c>, never as a <c>400</c> from here.
 /// </para>
 /// </remarks>
-public sealed class RegisterUserValidator : AbstractValidator<RegisterUser>
+public sealed class RegisterUserCommandValidator : AbstractValidator<RegisterUserCommand>
 {
     /// <summary>The shortest password accepted, in characters.</summary>
     public const int MinimumPasswordLength = 12;
@@ -45,7 +45,7 @@ public sealed class RegisterUserValidator : AbstractValidator<RegisterUser>
     public const int MaximumEmailLength = 254;
 
     /// <summary>Builds the rule set.</summary>
-    public RegisterUserValidator()
+    public RegisterUserCommandValidator()
     {
         // Cascade.Stop everywhere: an empty password should produce one actionable message,
         // not "required" and "too short" stacked on the same field.

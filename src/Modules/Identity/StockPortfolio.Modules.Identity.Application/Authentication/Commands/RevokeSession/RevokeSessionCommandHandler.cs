@@ -3,7 +3,7 @@ using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 using OneOf.Types;
 
-namespace StockPortfolio.Modules.Identity.Application.Revoke;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 
 /// <summary>
 /// Closes a session so its refresh token can never be used again.
@@ -17,15 +17,15 @@ namespace StockPortfolio.Modules.Identity.Application.Revoke;
 /// it stays valid until it expires — which is what makes
 /// <see cref="TokenPolicy.AccessTokenLifetime"/> the real revocation latency of this system.
 /// </remarks>
-public sealed class RevokeSessionHandler(
+public sealed class RevokeSessionCommandHandler(
     ITokenIssuer tokenIssuer,
     IRefreshTokenRepository refreshTokens,
     IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<RevokeSession, RevokeResult>
+    TimeProvider clock) : ICommandHandler<RevokeSessionCommand, RevokeSessionResult>
 {
     /// <inheritdoc/>
     /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
-    public async Task<RevokeResult> Handle(RevokeSession command, CancellationToken ct)
+    public async Task<RevokeSessionResult> Handle(RevokeSessionCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
 

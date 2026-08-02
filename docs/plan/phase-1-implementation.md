@@ -245,7 +245,7 @@ The two "no" columns are the point of the split and both are asserted by `Archit
 
 ### 4.2 DECISION — accessibility is onion-per-module, not internal-everywhere
 
-The design doc's rule is *"everything is `internal` outside `.Contracts`."* That rule does not survive contact with the project layout, because **`internal` is per-assembly and a module is three assemblies**. `Identity.Infrastructure` cannot see an `internal User` in `Identity.Domain`; `Identity.Application` cannot expose an `internal RegisterUser` to the endpoint that injects its handler. Making it work would need an `InternalsVisibleTo` matrix in every module — Domain → Application/Infrastructure/UnitTests, Application → Infrastructure/Api/UnitTests.
+The design doc's rule is *"everything is `internal` outside `.Contracts`."* That rule does not survive contact with the project layout, because **`internal` is per-assembly and a module is three assemblies**. `Identity.Infrastructure` cannot see an `internal User` in `Identity.Domain`; `Identity.Application` cannot expose an `internal RegisterUserCommand` to the endpoint that injects its handler. Making it work would need an `InternalsVisibleTo` matrix in every module — Domain → Application/Infrastructure/UnitTests, Application → Infrastructure/Api/UnitTests.
 
 **Settled: layer visibility follows the onion, enforced by ProjectReferences.**
 
@@ -322,8 +322,8 @@ Handlers are registered by `.Infrastructure` (it owns the concrete repositories 
 ```csharp
 internal static IServiceCollection AddIdentityHandlers(this IServiceCollection s)
 {
-    s.AddScoped<ICommandHandler<RegisterUser, RegisterResult>, RegisterUserHandler>();
-    s.AddScoped<ICommandHandler<LoginUser,    LoginResult>,    LoginUserHandler>();
+    s.AddScoped<ICommandHandler<RegisterUserCommand, RegisterUserResult>, RegisterUserCommandHandler>();
+    s.AddScoped<ICommandHandler<LoginUserCommand,    LoginUserResult>,    LoginUserCommandHandler>();
     // …
     return s;
 }
@@ -352,7 +352,7 @@ internal sealed class ValidationDecorator<TCommand, TResult>(
     IEnumerable<IValidator<TCommand>> validators) : ICommandHandler<TCommand, TResult>
 ```
 
-On failure it must return a `TResult`. `TResult` is unconstrained, and `[GenerateOneOf]`'s conversion from `ValidationFailed` is a **user-defined operator on a concrete type**, unreachable through a type parameter. `LoginResult` has no `ValidationFailed` case at all, so no amount of reflection could produce one either. The workaround was going to be throwing an exception and catching it in middleware.
+On failure it must return a `TResult`. `TResult` is unconstrained, and `[GenerateOneOf]`'s conversion from `ValidationFailed` is a **user-defined operator on a concrete type**, unreachable through a type parameter. `LoginUserResult` has no `ValidationFailed` case at all, so no amount of reflection could produce one either. The workaround was going to be throwing an exception and catching it in middleware.
 
 **Settled instead: a generic `IEndpointFilter` in `Shared.Api`.** A filter sits in the HTTP pipeline rather than the DI graph, so it can *return* a response and short-circuit — the unconstrained-`TResult` problem simply does not arise, and neither does the throw/catch round trip.
 
@@ -568,7 +568,7 @@ Three EF traps this shape avoids, each documented and each expensive:
 
 `User.ChangePasswordHash(string newHash)` **is built**, with tests. An earlier revision of this plan deferred it to Phase 5 on the grounds that "an untested public mutator is worse than none" — that objection dissolves once it is tested, and `identity-contracts.md` (which three agents built against) requires it. No endpoint calls it yet; the Phase 5 settings screen will.
 
-`RefreshToken.Revoke(TimeProvider)` was **added** beyond the original design, and had to be: `RevokeSessionHandler` must end a session with *no* replacement, while `Supersede` requires one. Without it, logout could only be expressed as `token.Supersede(token, clock)` — a self-link that corrupts the rotation chain replay detection depends on.
+`RefreshToken.Revoke(TimeProvider)` was **added** beyond the original design, and had to be: `RevokeSessionCommandHandler` must end a session with *no* replacement, while `Supersede` requires one. Without it, logout could only be expressed as `token.Supersede(token, clock)` — a self-link that corrupts the rotation chain replay detection depends on.
 
 ### 5.3 `Identity.Application`
 
@@ -576,13 +576,13 @@ One folder per use case: command, result union, handler. No validators — those
 
 ```csharp
 [GenerateOneOf]
-public partial class RegisterResult
+public partial class RegisterUserResult
     : OneOfBase<TokenPair, EmailAlreadyUsed, ValidationFailed>;
 ```
 
-**The refresh command is `RefreshSession(string RefreshToken)`, not `RefreshToken(string RefreshToken)`.** The design doc's name is **CS0542** — a positional record generates a member with the parameter's name, and a member cannot share the name of its enclosing type. It would also collide with the `RefreshToken` *entity* in `.Domain`, forcing `using` aliases in every file that touches both. Same for `RevokeSession`. Fix it in `phase-1-sign-in.md` §2.3 too.
+**The refresh command is `RefreshSessionCommand(string RefreshToken)`, not `RefreshToken(string RefreshToken)`.** The design doc's name is **CS0542** — a positional record generates a member with the parameter's name, and a member cannot share the name of its enclosing type. It would also collide with the `RefreshToken` *entity* in `.Domain`, forcing `using` aliases in every file that touches both. Same for `RevokeSessionCommand`. Fix it in `phase-1-sign-in.md` §2.3 too.
 
-`RegisterUserHandler`:
+`RegisterUserCommandHandler`:
 
 1. shape already validated by the endpoint filter — assume well-formed input
 2. hash the password (`IPasswordHasher`)
@@ -591,7 +591,7 @@ public partial class RegisterResult
 
 **The unique-violation catch belongs in the repository, not the handler.** Detecting SQLSTATE `23505` requires `Npgsql.PostgresException`, and `.Application` must not reference the driver. `UserRepository` (Infrastructure) catches `DbUpdateException`, inspects `PostgresException.SqlState`, and returns a provider-neutral result the handler maps. The *strategy* — rely on the unique index rather than check-then-insert, because check-then-insert is a race — is right and reappears in Phase 2 for `(user_id, ticker)` merges.
 
-`LoginUserHandler` must run hash verification **even when the user does not exist**, against a fixed dummy hash, and return one undifferentiated `InvalidCredentials`. Two cases would leak account existence through both the response body and the response time.
+`LoginUserCommandHandler` must run hash verification **even when the user does not exist**, against a fixed dummy hash, and return one undifferentiated `InvalidCredentials`. Two cases would leak account existence through both the response body and the response time.
 
 ### 5.4 `Identity.Infrastructure`
 

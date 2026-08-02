@@ -1,4 +1,4 @@
-namespace StockPortfolio.Modules.Identity.Application.Register;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 
 /// <summary>
 /// Create an account and sign in with it in one step.
@@ -9,4 +9,4 @@ namespace StockPortfolio.Modules.Identity.Application.Register;
 /// Shape — is this even an email, is the password long enough — has already been checked by the
 /// endpoint filter by the time a handler sees this command. What is left is context and invariant.
 /// </remarks>
-public sealed record RegisterUser(string Email, string Password);
+public sealed record RegisterUserCommand(string Email, string Password);

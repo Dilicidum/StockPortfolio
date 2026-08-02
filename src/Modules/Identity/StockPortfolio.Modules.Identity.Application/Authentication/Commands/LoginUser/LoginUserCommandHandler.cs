@@ -3,7 +3,7 @@ using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
-namespace StockPortfolio.Modules.Identity.Application.Login;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
 
 /// <summary>
 /// Verifies a password and opens a session.
@@ -14,13 +14,13 @@ namespace StockPortfolio.Modules.Identity.Application.Login;
 /// <param name="refreshTokens">Stores the new session.</param>
 /// <param name="unitOfWork">Commits it.</param>
 /// <param name="clock">Supplies every timestamp.</param>
-public sealed class LoginUserHandler(
+public sealed class LoginUserCommandHandler(
     IPasswordHasher passwordHasher,
     ITokenIssuer tokenIssuer,
     IUserRepository users,
     IRefreshTokenRepository refreshTokens,
     IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<LoginUser, LoginResult>
+    TimeProvider clock) : ICommandHandler<LoginUserCommand, LoginUserResult>
 {
     /// <inheritdoc/>
     /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
@@ -28,7 +28,7 @@ public sealed class LoginUserHandler(
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "Must reproduce exactly the lower-cased canonical form User.Create persisted, because that string is the lookup key of the unique index.")]
-    public async Task<LoginResult> Handle(LoginUser command, CancellationToken ct)
+    public async Task<LoginUserResult> Handle(LoginUserCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
 

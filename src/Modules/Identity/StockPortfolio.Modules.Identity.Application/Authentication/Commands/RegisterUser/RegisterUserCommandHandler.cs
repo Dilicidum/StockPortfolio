@@ -2,7 +2,7 @@ using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
-namespace StockPortfolio.Modules.Identity.Application.Register;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 
 /// <summary>
 /// Creates an account and opens the first session for it.
@@ -13,17 +13,17 @@ namespace StockPortfolio.Modules.Identity.Application.Register;
 /// <param name="refreshTokens">Stores the new session.</param>
 /// <param name="unitOfWork">Commits both.</param>
 /// <param name="clock">Supplies every timestamp. Never <c>DateTimeOffset.UtcNow</c>.</param>
-public sealed class RegisterUserHandler(
+public sealed class RegisterUserCommandHandler(
     IPasswordHasher passwordHasher,
     ITokenIssuer tokenIssuer,
     IUserRepository users,
     IRefreshTokenRepository refreshTokens,
     IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<RegisterUser, RegisterResult>
+    TimeProvider clock) : ICommandHandler<RegisterUserCommand, RegisterUserResult>
 {
     /// <inheritdoc/>
     /// <exception cref="ArgumentNullException"><paramref name="command"/> is <see langword="null"/>.</exception>
-    public async Task<RegisterResult> Handle(RegisterUser command, CancellationToken ct)
+    public async Task<RegisterUserResult> Handle(RegisterUserCommand command, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
 
@@ -34,11 +34,11 @@ public sealed class RegisterUserHandler(
         return await User.Create(command.Email, passwordHash, clock)
             .Match(
                 user => AddThenIssueAsync(user, ct),
-                failure => Task.FromResult<RegisterResult>(failure))
+                failure => Task.FromResult<RegisterUserResult>(failure))
             .ConfigureAwait(false);
     }
 
-    private async Task<RegisterResult> AddThenIssueAsync(User user, CancellationToken ct)
+    private async Task<RegisterUserResult> AddThenIssueAsync(User user, CancellationToken ct)
     {
         // No pre-SELECT for a duplicate address: two concurrent registrations would both see
         // nothing and both proceed. The unique index is the check, and the repository turns its

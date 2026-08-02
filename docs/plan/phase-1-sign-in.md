@@ -101,8 +101,8 @@ public sealed class User : AggregateRoot<UserId>
 
 | Type | Result cases |
 |---|---|
-| `RegisterUser(string Email, string Password)` | `Success(TokenPair)` · `EmailAlreadyUsed` · `ValidationFailed` |
-| `LoginUser(string Email, string Password)` | `Success(TokenPair)` · `InvalidCredentials` |
+| `RegisterUserCommand(string Email, string Password)` | `Success(TokenPair)` · `EmailAlreadyUsed` · `ValidationFailed` |
+| `LoginUserCommand(string Email, string Password)` | `Success(TokenPair)` · `InvalidCredentials` |
 | `RefreshToken(string RefreshToken)` | `Success(TokenPair)` · `InvalidOrExpired` |
 | `RevokeToken(string RefreshToken)` | `Success` · `NotFound` |
 
@@ -123,10 +123,10 @@ Mapping shape:
 ```csharp
 group.MapPost("/login", async (
     LoginRequest req,
-    ICommandHandler<LoginUser, LoginResult> handler,
+    ICommandHandler<LoginUserCommand, LoginUserResult> handler,
     CancellationToken ct) =>
 {
-    var result = await handler.Handle(new LoginUser(req.Email, req.Password), ct);
+    var result = await handler.Handle(new LoginUserCommand(req.Email, req.Password), ct);
     return result.Match<IResult>(
         success => TypedResults.Ok(success.Tokens),
         invalid => TypedResults.Problem(statusCode: 401, title: "Invalid credentials"));

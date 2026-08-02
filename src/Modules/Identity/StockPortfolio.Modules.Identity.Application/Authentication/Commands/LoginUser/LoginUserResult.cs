@@ -1,7 +1,7 @@
 using OneOf;
 using StockPortfolio.Modules.Identity.Domain;
 
-namespace StockPortfolio.Modules.Identity.Application.Login;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
 
 /// <summary>
 /// Every way signing in can end: signed in, or not.
@@ -14,6 +14,6 @@ namespace StockPortfolio.Modules.Identity.Application.Login;
 /// response that comes back faster leaks the same fact.
 /// </remarks>
 [GenerateOneOf]
-public partial class LoginResult : OneOfBase<TokenPair, InvalidCredentials>
+public partial class LoginUserResult : OneOfBase<TokenPair, InvalidCredentials>
 {
 }

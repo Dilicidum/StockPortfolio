@@ -2,7 +2,7 @@ using OneOf;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
-namespace StockPortfolio.Modules.Identity.Application.Register;
+namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 
 /// <summary>
 /// Every way registration can end: signed in, the address is taken, or the address is not an
@@ -14,6 +14,6 @@ namespace StockPortfolio.Modules.Identity.Application.Register;
 /// way to lose the guarantee.
 /// </remarks>
 [GenerateOneOf]
-public partial class RegisterResult : OneOfBase<TokenPair, EmailAlreadyUsed, ValidationFailed>
+public partial class RegisterUserResult : OneOfBase<TokenPair, EmailAlreadyUsed, ValidationFailed>
 {
 }
