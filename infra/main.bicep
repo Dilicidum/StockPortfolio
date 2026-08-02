@@ -249,7 +249,12 @@ module api 'modules/containerapp-api.bicep' = {
     jwtIssuer: jwtIssuer
     jwtAudience: jwtAudience
     finnhubApiKey: finnhubApiKey
-    minReplicas: 1
+    // 0, not the module's default of 1, and this is a cost decision with an expiry date.
+    // Scale-to-zero is only safe while nothing needs an always-on replica: there is no
+    // BackgroundService, IHostedService or PeriodicTimer anywhere in src/ yet. The moment
+    // MarketData ships its quote poller this must go back to 1, or ingestion stops whenever
+    // traffic does. See modules/containerapp-api.bicep for the original rationale.
+    minReplicas: 0
     maxReplicas: 2
     tags: tags
   }

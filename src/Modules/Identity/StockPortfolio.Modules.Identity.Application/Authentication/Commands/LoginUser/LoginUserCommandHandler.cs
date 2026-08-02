@@ -19,7 +19,7 @@ public sealed class LoginUserCommandHandler(
         if (user is null)
         {
             // Verify against a fixed hash of nothing rather than returning here, so both replies take the same time.
-            _ = passwordHasher.Verify(command.Password, passwordHasher.DummyHash);
+            passwordHasher.Verify(command.Password, passwordHasher.DummyHash);
             return new InvalidCredentials();
         }
 

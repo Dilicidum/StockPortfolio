@@ -36,6 +36,10 @@ env:
   NAME_PREFIX: stockp
   API_IMAGE_NAME: stockportfolio-api
   MIGRATOR_IMAGE_NAME: stockportfolio-migrator
+  # Days from each deploy until teardown.yml is allowed to delete the resource group. At roughly
+  # $1.26/day in Poland Central this bounds total spend near $18 -- the only hard guarantee
+  # available, since pay-as-you-go subscriptions cannot have an Azure spending limit.
+  TEARDOWN_DAYS: 14
 
 jobs:
   azure:
@@ -60,6 +64,27 @@ jobs:
         # Unpinned for the same reason as ci.yml: an older Bicep silently downgrades unknown
         # resource types to warnings instead of validating them.
         run: az bicep install
+
+      # -----------------------------------------------------------------------------------------
+      # 1b. Stamp the teardown deadline
+      #
+      # This subscription is pay-as-you-go, where Azure offers no spending limit and a budget only
+      # sends email -- it cannot stop anything. The cost ceiling is therefore enforced by bounding
+      # DURATION, and this tag is where the deadline lives. teardown.yml reads it daily.
+      #
+      # Stamped before the deploy, not after, so a run that fails halfway still leaves a resource
+      # group that will be cleaned up. Re-deploying pushes the date out, so the window extends by
+      # using it.
+      # -----------------------------------------------------------------------------------------
+      - name: Stamp teardown deadline
+        run: |
+          set -euo pipefail
+          DELETE_AFTER=$(date -u -d "+${{ env.TEARDOWN_DAYS }} days" +%Y-%m-%d)
+          echo "Resource group will be torn down on or after $DELETE_AFTER"
+          az group update \
+            --name '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --set "tags.deleteAfter=$DELETE_AFTER" \
+            --output none
 
       # -----------------------------------------------------------------------------------------
       # 2. Bootstrap the registry, then build and push the images
@@ -185,6 +210,65 @@ jobs:
           echo "containerAppName=$(echo "$OUT" | jq -r '.containerAppName.value')" >> "$GITHUB_OUTPUT"
           echo "migrateJobName=$(echo "$OUT"   | jq -r '.migrateJobName.value')"   >> "$GITHUB_OUTPUT"
           echo "apiUrl=$(echo "$OUT"           | jq -r '.apiUrl.value')"           >> "$GITHUB_OUTPUT"
+          echo "postgresFqdn=$(echo "$OUT"     | jq -r '.postgresFqdn.value')"     >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------------------------
+      # 3b. Create the Postgres roles, schemas and grants
+      #
+      # The migration job connects as `migrator`. On a fresh Flexible Server that role does not
+      # exist, so without this step the deploy dies one step below with an authentication failure.
+      #
+      # Compose and Testcontainers both get the roles from `docker-entrypoint-initdb.d`, which is a
+      # feature of the postgres *container image*. Azure Flexible Server is a managed service and
+      # has no equivalent hook, so this is the one environment that needs the step spelled out --
+      # and the one that cannot be rehearsed locally.
+      #
+      # This runs db/init/00-roles.sh unmodified: the same wrapper, feeding the same 01-roles.sql,
+      # that the other two environments run. That is the point. Reimplementing the role model in
+      # Bicep or inline SQL would create a fourth copy free to drift from the other three.
+      # 01-roles.sql is guarded throughout (\gexec over NOT EXISTS, CREATE SCHEMA IF NOT EXISTS),
+      # so running it on every deploy is safe and idempotent.
+      # -----------------------------------------------------------------------------------------
+      - name: Open Postgres firewall for this runner
+        id: pgfirewall
+        run: |
+          set -euo pipefail
+          RUNNER_IP=$(curl -s --fail https://api.ipify.org)
+          echo "Runner IP: $RUNNER_IP"
+          RULE="gh-runner-${{ github.run_id }}"
+          echo "rule=$RULE" >> "$GITHUB_OUTPUT"
+          az postgres flexible-server firewall-rule create \
+            --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
+            --rule-name "$RULE" \
+            --start-ip-address "$RUNNER_IP" \
+            --end-ip-address "$RUNNER_IP" \
+            --output none
+
+      - name: Apply roles, schemas and grants
+        env:
+          PGHOST: ${{ steps.deploy.outputs.postgresFqdn }}
+          PGPASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          PGSSLMODE: require
+          POSTGRES_USER: pgadmin
+          POSTGRES_DB: stockportfolio
+          MIGRATOR_PW: ${{ secrets.MIGRATOR_PW }}
+          IDENTITY_PW: ${{ secrets.IDENTITY_PW }}
+          PORTFOLIO_PW: ${{ secrets.PORTFOLIO_PW }}
+          MARKETDATA_PW: ${{ secrets.MARKETDATA_PW }}
+          ALERTS_PW: ${{ secrets.ALERTS_PW }}
+        run: bash db/init/00-roles.sh
+
+      - name: Close Postgres firewall for this runner
+        # always(): the rule must not outlive the job even when the step above fails, or every
+        # failed deploy leaves a permanent hole for a since-recycled runner address.
+        if: always() && steps.pgfirewall.outputs.rule != ''
+        run: |
+          az postgres flexible-server firewall-rule delete \
+            --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
+            --name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
+            --rule-name '${{ steps.pgfirewall.outputs.rule }}' \
+            --yes --output none || true
 
       # -----------------------------------------------------------------------------------------
       # 4. Apply migrations and WAIT. Nothing goes live until this succeeds.

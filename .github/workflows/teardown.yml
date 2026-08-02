@@ -1,0 +1,131 @@
+name: Teardown
+
+# Deletes the Azure resource group once its `deleteAfter` tag has passed.
+#
+# WHY THIS EXISTS. The subscription is pay-as-you-go. Azure offers no spending limit on that offer
+# type, and an Azure budget cannot stop spending -- it only sends email. So the cost ceiling is not
+# enforced by watching money, it is enforced by bounding time: deploy.yml stamps `deleteAfter` on
+# the resource group, and this workflow is what makes that stamp mean something.
+#
+# THIS WORKFLOW IS THE ONLY THING STANDING BETWEEN A FORGOTTEN DEPLOY AND AN OPEN-ENDED BILL.
+# If it silently stops working, nothing else notices. That is why the decide step below refuses to
+# run rather than guessing, and why the spec requires proving it against a throwaway group before
+# trusting it.
+#
+# Known limitation: GitHub disables scheduled workflows in repositories with 60 days of no
+# activity. Irrelevant at a 14-day window, but it is the reason a budget alert still exists as an
+# independent backstop.
+
+on:
+  schedule:
+    # 03:00 UTC daily. Cost accrues hourly, so the exact time does not matter; a daily granularity
+    # costs at most one extra day (~$1.26) versus checking continuously.
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Delete now, ignoring the deleteAfter tag'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: teardown
+  cancel-in-progress: false
+
+jobs:
+  teardown:
+    name: Delete resource group if past deadline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Read deadline
+        id: read
+        run: |
+          set -euo pipefail
+          RG='${{ vars.AZURE_RESOURCE_GROUP }}'
+
+          if ! az group show --name "$RG" --output none 2>/dev/null; then
+            echo "Resource group $RG does not exist. Nothing to do."
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          # Empty string if the tag is absent. Deliberately not defaulted to anything here -- what
+          # to do about a missing deadline is the decision below, not a default hidden in a shell
+          # parameter expansion.
+          DELETE_AFTER=$(az group show --name "$RG" --query "tags.deleteAfter" -o tsv 2>/dev/null || true)
+          [ "$DELETE_AFTER" = "None" ] && DELETE_AFTER=""
+
+          echo "deleteAfter=$DELETE_AFTER" >> "$GITHUB_OUTPUT"
+          echo "today=$(date -u +%Y-%m-%d)"  >> "$GITHUB_OUTPUT"
+          echo "Resource group : $RG"
+          echo "deleteAfter    : ${DELETE_AFTER:-<absent>}"
+          echo "today (UTC)    : $(date -u +%Y-%m-%d)"
+
+      # -------------------------------------------------------------------------------------------
+      # TODO(kosty): implement the teardown decision.
+      #
+      # Set `should_delete` to true or false on $GITHUB_OUTPUT. Available to you:
+      #
+      #   ${{ steps.read.outputs.deleteAfter }}   YYYY-MM-DD, or "" when the tag is absent
+      #   ${{ steps.read.outputs.today }}         YYYY-MM-DD, UTC
+      #   ${{ inputs.force }}                     true when manually dispatched with force
+      #
+      # Both dates are ISO-8601, so a plain string comparison orders them correctly -- no date
+      # parsing needed.
+      #
+      # THE DECISION THAT MATTERS: what happens when `deleteAfter` is empty or malformed?
+      #
+      #   Delete anyway (fail-safe for cost) -- a missing tag can never leave resources billing
+      #   forever. But a tag someone cleared by hand, or a `az group update` that dropped tags
+      #   during an unrelated change, destroys a deployment that was meant to survive.
+      #
+      #   Skip (fail-open) -- never destroys anything unexpectedly. But a single typo in the tag
+      #   name silently disables the only guarantee you have, and it fails in the quiet direction:
+      #   you find out when the bill arrives, not when the workflow runs.
+      #
+      # There is no neutral answer. Pick the direction you would rather be wrong in, and if you
+      # pick "skip", make the else branch shout loudly enough that a quiet failure is still visible.
+      #
+      # Replace the `exit 1` below with your implementation.
+      # -------------------------------------------------------------------------------------------
+      - name: Decide
+        id: decide
+        if: steps.read.outputs.exists == 'true'
+        run: |
+          set -euo pipefail
+          echo "::error::Teardown decision is not implemented -- see the TODO in .github/workflows/teardown.yml"
+          echo "Refusing to guess. This workflow is the only cost guarantee; a wrong default here"
+          echo "either deletes a live deployment or silently protects nothing."
+          exit 1
+
+      - name: Delete resource group
+        if: steps.decide.outputs.should_delete == 'true'
+        run: |
+          set -euo pipefail
+          RG='${{ vars.AZURE_RESOURCE_GROUP }}'
+          echo "Deleting resource group $RG"
+          # Not --no-wait: the run should stay red if the delete fails, rather than reporting
+          # success for an operation that was merely accepted.
+          az group delete --name "$RG" --yes --output none
+          echo "Deleted. Re-deploy with the Deploy workflow when needed."
+
+      - name: Report
+        if: always() && steps.read.outputs.exists == 'true'
+        run: |
+          echo "should_delete = ${{ steps.decide.outputs.should_delete }}"
+          echo "deleteAfter   = ${{ steps.read.outputs.deleteAfter }}"
+          echo "today         = ${{ steps.read.outputs.today }}"

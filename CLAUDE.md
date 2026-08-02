@@ -176,7 +176,11 @@ Each of these costs a day if you meet it cold.
 
 ## Deployment
 
-Three targets: `docker compose` (whole stack, local, the P0 gate), **GitHub Pages** (SPA, static, `VITE_API_BASE_URL` baked in at build), **Azure Container Apps** (API only, `minReplicas: 1` or ingestion stops). Postgres Flexible B1ms and Azure Managed Redis Balanced B0 with HA off — **not** Azure Cache for Redis, which is retiring.
+Three targets: `docker compose` (whole stack, local, the P0 gate), **GitHub Pages** (SPA, static, `VITE_API_BASE_URL` baked in at build), **Azure Container Apps** (API only).
+
+`main.bicep` currently passes **`minReplicas: 0`**, against the module default of 1, purely to cut cost — the subscription is personal and pay-as-you-go. That is only safe while nothing needs an always-on replica, which is true today: there is no `BackgroundService`, `IHostedService` or `PeriodicTimer` anywhere in `src/`. **Phase 3 must put it back to 1** when MarketData ships its quote poller, or ingestion stops whenever traffic does.
+
+Cost is bounded by **time, not by budget**. Pay-as-you-go has no Azure spending limit, and a budget only emails — it cannot stop anything. `deploy.yml` stamps a `deleteAfter` tag on the resource group and `teardown.yml` deletes the group once that date passes. Live deployment: resource group `stockportfolio-rg` in `polandcentral`, ~$1.26/day. Postgres Flexible B1ms and Azure Managed Redis Balanced B0 with HA off — **not** Azure Cache for Redis, which is retiring.
 
 Cross-origin is permanent, so the SSE endpoint uses a single-use 30-second ticket rather than a header. GitHub Pages needs `404.html` copied from `index.html` plus a Vite `base` and matching router `basepath`.
 
