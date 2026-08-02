@@ -32,11 +32,15 @@ public sealed class User
     /// <summary>Gets the instant the account was created, taken from the caller's clock.</summary>
     public DateTimeOffset CreatedAt { get; private set; }
 
-    /// <summary>Creates a user, normalising the email and rejecting a malformed one.</summary>
+    /// <summary>The canonical form of an address: what gets stored, and the only thing worth looking up by.</summary>
     [SuppressMessage(
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "Lower case is the stored canonical form of an email address and the key of the unique index; upper-casing would change what is persisted and looked up.")]
+    public static string NormaliseEmail(string? email) =>
+        (email ?? string.Empty).Trim().ToLowerInvariant();
+
+    /// <summary>Creates a user, normalising the email and rejecting a malformed one.</summary>
     public static OneOf<User, InvalidInput> Create(string email, string passwordHash, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
@@ -47,7 +51,7 @@ public sealed class User
             return new InvalidInput("email", "Email is required.");
         }
 
-        var normalised = email.Trim().ToLowerInvariant();
+        var normalised = NormaliseEmail(email);
 
         if (!IsWellFormedEmail(normalised))
         {

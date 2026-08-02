@@ -18,7 +18,15 @@ public sealed class RegisterUserCommandHandler(
         RegisterUserCommand command,
         CancellationToken ct)
     {
-        // Hash first, unconditionally.
+        // Asked before the password is hashed: Argon2id is deliberately slow, and a taken address is a
+        // 409 whatever the password was.
+        var taken = await users.FindByEmailAsync(User.NormaliseEmail(command.Email), ct);
+
+        if (taken is not null)
+        {
+            return new EmailAlreadyUsed();
+        }
+
         var passwordHash = passwordHasher.Hash(command.Password);
 
         return await User.Create(command.Email, passwordHash, clock)
@@ -31,13 +39,7 @@ public sealed class RegisterUserCommandHandler(
         User user,
         CancellationToken ct)
     {
-        // No pre-SELECT for a duplicate address: two concurrent registrations would both see nothing and both insert.
-        var outcome = await users.AddAsync(user, ct);
-
-        if (outcome is AddUserOutcome.EmailTaken)
-        {
-            return new EmailAlreadyUsed();
-        }
+        await users.AddAsync(user, ct);
 
         var now = clock.GetUtcNow();
         var accessExpiresAt = now + TokenPolicy.AccessTokenLifetime;

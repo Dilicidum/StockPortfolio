@@ -6,7 +6,7 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 150 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
+**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 153 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
 
 **`docs/plan/` predates the CQRS conventions below and has not been swept.** Its snippets still show `[GenerateOneOf]` union classes, `ValidationFailed`, `IUnitOfWork`, and commands bound straight off the wire — all four are now wrong. Where a plan file conflicts with the Conventions section here, **this file wins**; take the plan for its sequencing and its decisions, not its code.
 
@@ -19,7 +19,7 @@ Work phase by phase. A phase is done when it runs in a browser, not when tests p
 ```bash
 docker compose up                    # whole stack, from a clean clone, no API key needed
 dotnet build
-dotnet test                          # 150 tests; the integration suite needs Docker running
+dotnet test                          # 153 tests; the integration suite needs Docker running
 npm --prefix src/Web run dev
 npm --prefix src/Web test
 
@@ -108,7 +108,15 @@ The constructor must stay guard-free. EF's binder matches on parameter name and 
 | Context — does this user exist? allowed? | handler, `.Application` | OneOf result case |
 | Invariant — a User can never have a blank email | entity, `.Domain` | **throws** |
 
+**"Is this address taken?" is a context question, so the handler asks it.** `RegisterUserCommandHandler` does a `FindByEmailAsync` and returns `EmailAlreadyUsed`; it does not insert and read a unique-violation back out of the exception. The look-up is normalised through `User.NormaliseEmail` — the one place the canonical form is defined, used by `User.Create` on the way in and by both handlers on the way out, because a lookup that normalises differently from what was stored simply misses.
+
+Known and accepted: two simultaneous registrations of one address can both pass the check, and the loser then hits the unique index and surfaces as **500 rather than 409**. The index stays — it is what keeps the data correct — and the race is a millisecond wide. Reintroduce a `DbUpdateException` catch only if that 500 ever actually shows up.
+
 Shape validation is an **endpoint filter, not a DI decorator**. A decorator would have to return an unconstrained `TResult` and cannot manufacture a failure value; a filter sits in the HTTP pipeline and can `return TypedResults.ValidationProblem(...)` directly. Inject `IValidator<T>`, never `IEnumerable<IValidator<T>>` — the collection form silently validates nothing when a validator is missing. Validators do no I/O: "is this email taken?" is a context question and belongs in the handler as a result case. `LoggingDecorator` stays a decorator; it has no `TResult` problem. Do not use the built-in .NET 10 `AddValidation()` — it is DataAnnotations-attribute-driven and awkward for conditional or cross-field rules.
+
+**Endpoint handlers return `Task<IResult>`.** Not `Task<Results<Created<T>, ProblemHttpResult, …>>` — the typed union restates in the signature what `.Produces(...)` already declares, and it grows a generic argument every time a case is added. `.Match<IResult>(...)` keeps the exhaustiveness, since that comes from the union's arity, not from the return type.
+
+The trade is real and worth knowing: the typed union made the compiler reject a result the signature had not declared. `.Produces(...)` metadata is now the **only** description of what a route emits, so it can drift from the code silently. That is why the next rule says verify against a live response — this change was itself made by diffing `/openapi/v1.json` before and after and confirming the document was byte-identical.
 
 **Every endpoint declares every status it can emit.** `.Produces<T>(200)` for the success shape, then `.ProducesValidationProblem()` (400), plus `.ProducesProblem(...)` for each of 401 / 409 / 415 / 500 that the route can actually reach. `ProducesValidationProblem()` is metadata only — it documents the 400 that `ValidationFilter<T>` returns and is shorthand for `Produces<HttpValidationProblemDetails>(400, "application/problem+json")`.
 
@@ -122,7 +130,7 @@ Shape validation is an **endpoint filter, not a DI decorator**. A decorator woul
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** 150 of them: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** 153 of them: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was verified by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while reporting green. `ReferenceWalker_FindsEdgesThatDoExist` guards the same class of bug permanently: rules that pass by finding nothing need a companion that fails if the search finds nothing.
 
@@ -149,7 +157,7 @@ Each of these costs a day if you meet it cold.
 - **`beforeLoad` is synchronous; React effects run after first render.** Bootstrap the session *before* mounting `RouterProvider`, or a hard refresh of a guarded route always bounces to `/login` — which is the session-persistence requirement failing while every test passes.
 - **Vite `base` must come from the environment**, not be hardcoded to `/<repo>/`. nginx serves the compose SPA at `/`, so a baked-in base makes it request `/<repo>/assets/*.js` and render blank.
 - **ACA injects default TCP probes when ingress is on.** Declare `httpGet` liveness/readiness probes in Bicep or `/health/live` and `/health/ready` are never called and the split is decorative.
-- **`OneOf.Types.NotFound` collides with `Microsoft.AspNetCore.Http.HttpResults.NotFound`.** An endpoint file needs both namespaces, so the moment a handler's union case appears in an endpoint signature you get `CS0104`. Alias it — `using NotFound = OneOf.Types.NotFound;` after the using block. The named union classes used to hide this; returning `OneOf<…>` directly surfaces it.
+- **`OneOf.Types.NotFound` collides with `Microsoft.AspNetCore.Http.HttpResults.NotFound`.** Only bites a file that imports `HttpResults`, which endpoints no longer need now that they return `Task<IResult>`. If one ever does, alias it — `using NotFound = OneOf.Types.NotFound;` — rather than fully qualifying at each use.
 - **`[GenerateOneOf]` crashes on types in the global namespace.** It derives the generated filename from the namespace and emits `<global namespace>_Foo.g.cs`; `<` is illegal, so the generator throws `CS8785` and every implicit conversion then fails with unrelated-looking errors. Nothing uses the attribute now — handlers return `OneOf<…>` directly — but if one is ever reintroduced, declare it inside a namespace.
 - **Revoking and rotating a refresh token are not the same end.** Both stamp `SupersededAt`; only rotation sets `SupersededBy`. A grace-period check written against `SupersededAt` alone therefore keeps accepting a token the user just logged out with, for the whole window — logout silently does nothing for 30 seconds while every test stays green. `Refresh_AfterLogout_IsRejectedInsideTheGraceWindow` pins it.
 - **`OneOfDiagnosticSuppressor` does not exist on nuget.org** and is not needed. `.Match` takes one delegate per case, so exhaustiveness is enforced by arity — adding a case breaks every call site. `CS8509` only fires if you `switch` over `.Value`, which the convention forbids anyway.

@@ -2,7 +2,6 @@ using System.Security.Claims;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using OneOf;
@@ -17,9 +16,6 @@ using StockPortfolio.Modules.Identity.Application.Authentication.Commands.Revoke
 using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel.Cqrs;
-
-// HttpResults declares a NotFound of its own; every NotFound below is the union case.
-using NotFound = OneOf.Types.NotFound;
 
 namespace StockPortfolio.Modules.Identity.Api;
 
@@ -107,14 +103,14 @@ public static class IdentityEndpoints
     }
 
     /// <summary>Creates an account and issues its first token pair.</summary>
-    private static async Task<Results<Created<TokenPair>, ProblemHttpResult, ValidationProblem>> RegisterAsync(
+    private static async Task<IResult> RegisterAsync(
         RegisterUserRequest request,
         ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>> handler,
         CancellationToken ct)
     {
         var result = await handler.Handle(new RegisterUserCommand(request.Email, request.Password), ct);
 
-        return result.Match<Results<Created<TokenPair>, ProblemHttpResult, ValidationProblem>>(
+        return result.Match<IResult>(
             tokens => TypedResults.Created(CurrentUserPath, tokens),
             emailTaken => ProblemDetailsExtensions.ConflictProblem("An account with that email address already exists."),
 
@@ -123,33 +119,33 @@ public static class IdentityEndpoints
     }
 
     /// <summary>Signs an existing account in.</summary>
-    private static async Task<Results<Ok<TokenPair>, ProblemHttpResult>> LoginAsync(
+    private static async Task<IResult> LoginAsync(
         LoginUserRequest request,
         ICommandHandler<LoginUserCommand, OneOf<TokenPair, InvalidCredentials>> handler,
         CancellationToken ct)
     {
         var result = await handler.Handle(new LoginUserCommand(request.Email, request.Password), ct);
 
-        return result.Match<Results<Ok<TokenPair>, ProblemHttpResult>>(
+        return result.Match<IResult>(
             tokens => TypedResults.Ok(tokens),
             rejected => ProblemDetailsExtensions.UnauthorizedProblem("Invalid credentials."));
     }
 
     /// <summary>Rotates a refresh token into a new pair.</summary>
-    private static async Task<Results<Ok<TokenPair>, ProblemHttpResult>> RefreshAsync(
+    private static async Task<IResult> RefreshAsync(
         RefreshSessionRequest request,
         ICommandHandler<RefreshSessionCommand, OneOf<TokenPair, InvalidOrExpired>> handler,
         CancellationToken ct)
     {
         var result = await handler.Handle(new RefreshSessionCommand(request.RefreshToken), ct);
 
-        return result.Match<Results<Ok<TokenPair>, ProblemHttpResult>>(
+        return result.Match<IResult>(
             tokens => TypedResults.Ok(tokens),
             rejected => ProblemDetailsExtensions.UnauthorizedProblem("That refresh token is not valid."));
     }
 
     /// <summary>Ends the session, revoking the refresh token when one is offered.</summary>
-    private static async Task<NoContent> LogoutAsync(
+    private static async Task<IResult> LogoutAsync(
         RevokeSessionRequest? request,
         ICommandHandler<RevokeSessionCommand, OneOf<Success, NotFound>> handler,
         CancellationToken ct)
@@ -163,13 +159,13 @@ public static class IdentityEndpoints
         var result = await handler.Handle(new RevokeSessionCommand(request.RefreshToken), ct);
 
         // Both cases are 204: logging out twice is not an error.
-        return result.Match(
+        return result.Match<IResult>(
             closed => TypedResults.NoContent(),
             nothingToClose => TypedResults.NoContent());
     }
 
     /// <summary>Resolves the bearer token back to a user.</summary>
-    private static async Task<Results<Ok<GetCurrentUserResult>, ProblemHttpResult>> GetCurrentUserAsync(
+    private static async Task<IResult> GetCurrentUserAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetCurrentUserQuery, OneOf<GetCurrentUserResult, NotFound>> handler,
         CancellationToken ct)
@@ -182,7 +178,7 @@ public static class IdentityEndpoints
 
         var result = await handler.Handle(new GetCurrentUserQuery(userId), ct);
 
-        return result.Match<Results<Ok<GetCurrentUserResult>, ProblemHttpResult>>(
+        return result.Match<IResult>(
             user => TypedResults.Ok(user),
 
             // The JWT outlived the account it names — deleted, or issued by a previous database.

@@ -54,6 +54,34 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         second.Content.Headers.ContentType?.MediaType.ShouldBe(Wire.ProblemJson);
     }
 
+    /// <summary>The taken-address check normalises the same way the entity does, so a variant still conflicts.</summary>
+    [Theory]
+    [InlineData("uppercased")]
+    [InlineData("padded")]
+    [InlineData("both")]
+    public async Task Register_DuplicateEmailInAnotherCasing_Returns409NotAnUnhandledUniqueViolation(string style)
+    {
+        using var client = _fixture.CreateClient();
+
+        // Its own address per case: the fixture shares one database across the whole assembly.
+        var email = Wire.UniqueEmail("casing");
+
+        var variant = style switch
+        {
+            "uppercased" => email.ToUpperInvariant(),
+            "padded" => $"  {email}  ",
+            _ => $"  {email.ToUpperInvariant()}  ",
+        };
+
+        _ = await Wire.RegisterSucceedsAsync(client, email);
+
+        using var second = await Wire.RegisterAsync(client, variant, Wire.ValidPassword);
+
+        // If the handler's pre-check normalised differently from User.Create, the insert would reach the
+        // unique index instead and surface as a 500.
+        second.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(second));
+    }
+
     /// <summary>A password under the floor is a field-level 400, not a generic one.</summary>
     [Fact]
     public async Task Register_WeakPassword_Returns400WithProblemDetails()
