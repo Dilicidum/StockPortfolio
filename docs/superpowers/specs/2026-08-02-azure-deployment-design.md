@@ -1,7 +1,13 @@
 # Azure deployment — design
 
 **Date:** 2026-08-02
-**Status:** approved, not yet implemented
+**Status:** **deployed and verified.** Six attempts; every failure is recorded under Outcome.
+
+| | |
+|---|---|
+| API | `https://stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` |
+| SPA | `https://dilicidum.github.io/StockPortfolio/` |
+| Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-16` |
 
 Deploy the StockPortfolio API to Azure Container Apps and the SPA to GitHub Pages, driven by
 GitHub Actions, under a hard personal spending ceiling of **$100**.
@@ -170,3 +176,29 @@ The deploy is not "done" when the workflow is green. It is done when:
 5. The resource group carries a `deleteAfter` tag with the expected date
 6. The teardown workflow has been proven against a throwaway resource group — a teardown that has
    never run is not a guarantee, and this is the one control the $100 ceiling rests on
+
+All six passed. `/health/ready` returning 200 is the load-bearing one: it proves Postgres *and*
+Redis are reachable, so D4 worked. Beyond the listed checks, `POST /api/auth/register` returned 201
+with a token pair and `GET /api/auth/me` returned the user — which exercises the migrated schema,
+the service-role grants, Argon2 hashing and JWT signing in a way no health check does.
+
+## Outcome
+
+Six deploy attempts. Nothing here was predictable from reading the code; all of it came from a
+first contact with a real subscription.
+
+| # | Failure | Cause |
+|---|---|---|
+| 1–2 | `AADSTS700213` at login | GitHub issues **immutable OIDC subject claims** carrying numeric owner/repo IDs. The documented `repo:<owner>/<repo>:…` form matches nothing. |
+| 3 | `MissingSubscriptionRegistration` | A new pay-as-you-go subscription registers almost no resource providers. Six needed registering by hand. `az provider show` returns region lists regardless, so the availability check passed while the deploy could not. |
+| 4 | `AppLogsConfiguration.Destination is invalid` | `destination: 'none'` as a literal string is rejected by an error message that lists `none` as valid — it means the property *omitted*. |
+| 5 | `ParentResourceNotFound` on `redisEnterprise/databases` | `existing` + `listKeys()` creates no dependency on the module that builds the resource. Would have "passed" on retry and shipped as a guaranteed first-deploy failure. |
+| 6 | `--server-name` / `--name` | Two independently wrong CLI flags on `firewall-rule create`, surfacing one per deploy cycle. |
+
+The teardown workflow had its own bug, caught during step 11 and worth more than the deploy fixes:
+it treated *any* `az group show` failure as "the group is absent" and exited green, so a revoked
+role assignment or expired credential would have produced a passing run with nothing torn down.
+The first two teardown tests reported success without ever reaching the decision. Fixed to inspect
+the error and fail on anything that is not a clean not-found.
+
+Four traps from this exercise are recorded in `CLAUDE.md`.
