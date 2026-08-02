@@ -169,6 +169,67 @@ jobs:
           OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
           echo "origin=https://${OWNER}.github.io" >> "$GITHUB_OUTPUT"
 
+      # -----------------------------------------------------------------------------------------
+      # 2b. Build the parameter file
+      #
+      # Secrets reach `az` through a FILE, never through argv.
+      #
+      # Moving them into a step-level `env:` block and then writing
+      # `postgresAdminPassword="$PG_ADMIN_PASSWORD"` looks safer and changes nothing that matters:
+      # the shell expands the variable before exec, so the plaintext still lands in the process
+      # arguments, readable from /proc/<pid>/cmdline by anything running on the runner for as long
+      # as the command lives. The argument list is the exposure; the YAML is not.
+      #
+      # jq reads the values from its OWN environment through the `env` object, so they are not jq
+      # arguments either — there is no point in the chain where a secret sits in a command line.
+      # `umask 077` makes the file owner-only, and it is deleted right after the deploy regardless
+      # of outcome; the runner itself is destroyed when the job ends.
+      #
+      # NAME_PREFIX is not redeclared here: workflow-level `env:` is already in the process
+      # environment, so jq's `env.NAME_PREFIX` resolves without it.
+      # -----------------------------------------------------------------------------------------
+      - name: Write deployment parameters
+        env:
+          LOCATION: ${{ vars.AZURE_LOCATION }}
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          API_IMAGE: ${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}
+          MIGRATOR_IMAGE: ${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:${{ github.sha }}
+          PG_ADMIN_PASSWORD: ${{ secrets.PG_ADMIN_PASSWORD }}
+          MIGRATOR_PW: ${{ secrets.MIGRATOR_PW }}
+          IDENTITY_PW: ${{ secrets.IDENTITY_PW }}
+          PORTFOLIO_PW: ${{ secrets.PORTFOLIO_PW }}
+          MARKETDATA_PW: ${{ secrets.MARKETDATA_PW }}
+          ALERTS_PW: ${{ secrets.ALERTS_PW }}
+          JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
+          FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          jq -n '{
+            "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            contentVersion: "1.0.0.0",
+            parameters: {
+              namePrefix:            { value: env.NAME_PREFIX },
+              location:              { value: env.LOCATION },
+              pagesOrigin:           { value: env.PAGES_ORIGIN },
+              apiImage:              { value: env.API_IMAGE },
+              migratorImage:         { value: env.MIGRATOR_IMAGE },
+              postgresAdminPassword: { value: env.PG_ADMIN_PASSWORD },
+              migratorPassword:      { value: env.MIGRATOR_PW },
+              identityPassword:      { value: env.IDENTITY_PW },
+              portfolioPassword:     { value: env.PORTFOLIO_PW },
+              marketDataPassword:    { value: env.MARKETDATA_PW },
+              alertsPassword:        { value: env.ALERTS_PW },
+              jwtSigningKey:         { value: env.JWT_SIGNING_KEY },
+              finnhubApiKey:         { value: (env.FINNHUB_API_KEY // "") }
+            }
+          }' > "$RUNNER_TEMP/deploy-params.json"
+
+          # Shape check only — counts and key names, never values. A parameter silently missing
+          # here would surface as a confusing ARM validation error two steps later.
+          echo "parameters written: $(jq -r '.parameters | keys | length' "$RUNNER_TEMP/deploy-params.json")"
+          jq -r '.parameters | keys | join(", ")' "$RUNNER_TEMP/deploy-params.json"
+
       - name: What-if
         # Not a gate — it cannot be, because the deploy is unattended. It is here so the run log
         # records exactly what changed, which is the difference between a five-minute and a
@@ -177,20 +238,7 @@ jobs:
           az deployment group what-if \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
             --template-file infra/main.bicep \
-            --parameters \
-              namePrefix='${{ env.NAME_PREFIX }}' \
-              location='${{ vars.AZURE_LOCATION }}' \
-              pagesOrigin='${{ steps.pages.outputs.origin }}' \
-              apiImage='${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
-              migratorImage='${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:${{ github.sha }}' \
-              postgresAdminPassword='${{ secrets.PG_ADMIN_PASSWORD }}' \
-              migratorPassword='${{ secrets.MIGRATOR_PW }}' \
-              identityPassword='${{ secrets.IDENTITY_PW }}' \
-              portfolioPassword='${{ secrets.PORTFOLIO_PW }}' \
-              marketDataPassword='${{ secrets.MARKETDATA_PW }}' \
-              alertsPassword='${{ secrets.ALERTS_PW }}' \
-              jwtSigningKey='${{ secrets.JWT_SIGNING_KEY }}' \
-              finnhubApiKey='${{ secrets.FINNHUB_API_KEY }}'
+            --parameters "@$RUNNER_TEMP/deploy-params.json"
 
       - name: Deploy infrastructure
         id: deploy
@@ -200,26 +248,20 @@ jobs:
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
             --name "stockportfolio-${{ github.run_number }}" \
             --template-file infra/main.bicep \
-            --parameters \
-              namePrefix='${{ env.NAME_PREFIX }}' \
-              location='${{ vars.AZURE_LOCATION }}' \
-              pagesOrigin='${{ steps.pages.outputs.origin }}' \
-              apiImage='${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
-              migratorImage='${{ steps.registry.outputs.loginServer }}/${{ env.MIGRATOR_IMAGE_NAME }}:${{ github.sha }}' \
-              postgresAdminPassword='${{ secrets.PG_ADMIN_PASSWORD }}' \
-              migratorPassword='${{ secrets.MIGRATOR_PW }}' \
-              identityPassword='${{ secrets.IDENTITY_PW }}' \
-              portfolioPassword='${{ secrets.PORTFOLIO_PW }}' \
-              marketDataPassword='${{ secrets.MARKETDATA_PW }}' \
-              alertsPassword='${{ secrets.ALERTS_PW }}' \
-              jwtSigningKey='${{ secrets.JWT_SIGNING_KEY }}' \
-              finnhubApiKey='${{ secrets.FINNHUB_API_KEY }}' \
+            --parameters "@$RUNNER_TEMP/deploy-params.json" \
             --query properties.outputs -o json)
 
           echo "containerAppName=$(echo "$OUT" | jq -r '.containerAppName.value')" >> "$GITHUB_OUTPUT"
           echo "migrateJobName=$(echo "$OUT"   | jq -r '.migrateJobName.value')"   >> "$GITHUB_OUTPUT"
           echo "apiUrl=$(echo "$OUT"           | jq -r '.apiUrl.value')"           >> "$GITHUB_OUTPUT"
           echo "postgresFqdn=$(echo "$OUT"     | jq -r '.postgresFqdn.value')"     >> "$GITHUB_OUTPUT"
+
+      - name: Remove deployment parameters
+        # always(): a failed deploy must not leave a plaintext parameter file behind for the
+        # remaining steps to trip over. The runner is torn down at the end of the job anyway, so
+        # this guards the middle of the job rather than the end of it.
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy-params.json"
 
       # -----------------------------------------------------------------------------------------
       # 3b. Create the Postgres roles, schemas and grants
