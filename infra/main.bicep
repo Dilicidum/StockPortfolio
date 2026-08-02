@@ -174,17 +174,6 @@ module redis 'modules/redis.bicep' = {
   }
 }
 
-// Access key is read at deploy time rather than passed in. The container app module depends on
-// the redis module through hostName, so the cluster exists by the time this is evaluated.
-resource redisCluster 'Microsoft.Cache/redisEnterprise@2025-04-01' existing = {
-  name: redisName
-}
-
-resource redisDatabase 'Microsoft.Cache/redisEnterprise/databases@2025-04-01' existing = {
-  parent: redisCluster
-  name: 'default'
-}
-
 // ---------------------------------------------------------------------------------------------
 // Connection strings
 // ---------------------------------------------------------------------------------------------
@@ -215,7 +204,11 @@ var alertsConnectionString = '${pgPrefix};Username=alerts_svc;Password=${alertsP
 
 // Azure Managed Redis: TLS-only on port 10000, NOT 6379. abortConnect=false so the multiplexer
 // reconnects rather than staying permanently poisoned after one startup blip.
-var redisConnectionString = '${redis.outputs.hostName}:${redis.outputs.port},password=${redisDatabase.listKeys().primaryKey},ssl=True,abortConnect=False'
+//
+// Built inside modules/redis.bicep rather than here. Assembling it here required declaring the
+// cluster and database as `existing` and calling listKeys() on them, which creates no dependency
+// on the module that builds them -- see the comment on that module's connectionString output.
+var redisConnectionString = redis.outputs.connectionString
 
 // ---------------------------------------------------------------------------------------------
 // Compute

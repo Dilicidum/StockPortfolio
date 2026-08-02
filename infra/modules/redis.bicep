@@ -60,3 +60,17 @@ output name string = cluster.name
 output hostName string = cluster.properties.hostName
 output port int = database.properties.port
 output databaseName string = database.name
+
+// The access key is read HERE, not by main.bicep, and that placement is the whole point.
+//
+// main.bicep used to declare the cluster and database as `existing` and call listKeys() on them.
+// An `existing` reference creates no dependency on the module that builds the resource, so ARM was
+// free to evaluate the key before the cluster was queryable -- and did, failing a first deploy into
+// an empty resource group with ParentResourceNotFound every time. A retry then "fixed" it, because
+// by the second run the cluster existed, which is exactly the kind of bug that survives to
+// production by looking like a flake.
+//
+// Inside this module `database` is a real resource being created, so listKeys() cannot be hoisted
+// ahead of it. The ordering is structural rather than hopeful.
+@secure()
+output connectionString string = '${cluster.properties.hostName}:${database.properties.port},password=${database.listKeys().primaryKey},ssl=True,abortConnect=False'
