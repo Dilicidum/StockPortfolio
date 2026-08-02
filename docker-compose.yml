@@ -92,10 +92,11 @@ services:
         condition: service_healthy
     environment:
       DOTNET_ENVIRONMENT: Production
-      ConnectionStrings__Identity: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
-      ConnectionStrings__Portfolio: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
-      ConnectionStrings__MarketData: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
-      ConnectionStrings__Alerts: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
+      # ONE connection string, as `migrator`. The Migrator fans it out to every module's
+      # connection-string name itself, and refuses to start without this key - running DDL as a
+      # service role would fail at the first CREATE TABLE, since those roles have DML only.
+      # Same key name as the ACA migration job in infra/modules/job-migrate.bicep.
+      ConnectionStrings__Migrator: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=migrator;Password=${MIGRATOR_PW:-migrator_dev_only};Maximum Pool Size=2"
     restart: "no"
 
   # ---------------------------------------------------------------------------
