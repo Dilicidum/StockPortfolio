@@ -56,10 +56,25 @@ jobs:
           set -euo pipefail
           RG='${{ vars.AZURE_RESOURCE_GROUP }}'
 
-          if ! az group show --name "$RG" --output none 2>/dev/null; then
-            echo "Resource group $RG does not exist. Nothing to do."
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          # "Absent" and "cannot see it" are NOT the same answer, and conflating them is how this
+          # workflow reports success at exactly the moment it has stopped working. An expired
+          # credential or a revoked role assignment would look identical to a tidy, already-deleted
+          # resource group -- green run, no resources torn down, bill still accruing. So the error
+          # is inspected rather than swallowed, and anything that is not a clean not-found fails.
+          set +e
+          ERR=$(az group show --name "$RG" --output none 2>&1)
+          RC=$?
+          set -e
+
+          if [ $RC -ne 0 ]; then
+            if echo "$ERR" | grep -qiE "ResourceGroupNotFound|could not be found|was not found"; then
+              echo "Resource group $RG does not exist. Nothing to do."
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Cannot read resource group '$RG'. This is not the same as it being absent - the teardown guard is blind, not idle. Failing loudly so the cost ceiling does not silently stop being enforced."
+            echo "$ERR"
+            exit 1
           fi
           echo "exists=true" >> "$GITHUB_OUTPUT"
 
