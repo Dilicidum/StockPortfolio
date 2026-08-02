@@ -45,7 +45,7 @@ npm --prefix src/Web test
 ## Architecture
 
 Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each five projects, plus
-`Shared.Kernel`, `Shared.Presentation`, the `Api` host and a `Migrator`.
+`Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator`.
 
 ```
 Presentation  ──▶ Application ──▶ Domain ──▶ Shared.Kernel
@@ -54,7 +54,7 @@ Presentation  ──▶ Application ──▶ Domain ──▶ Shared.Kernel
 ```
 
 **Two reference rules are enforced by the compiler and asserted by tests:**
-`.Infrastructure` never references ASP.NET Core, and `.Presentation` never references EF Core or its
+`.Infrastructure` never references ASP.NET Core, and `.Api` never references EF Core or its
 own `.Infrastructure`. The two halves of a module meet only through `Application/Abstractions`, so a
 route physically cannot reach a `DbContext` — the reference does not exist.
 

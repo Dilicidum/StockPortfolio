@@ -1,6 +1,6 @@
 using FluentValidation;
 
-namespace StockPortfolio.Modules.Identity.Presentation.Validators;
+namespace StockPortfolio.Modules.Identity.Api.Validators;
 
 /// <summary>
 /// Shape rules for <see cref="LoginRequest"/>: both fields must be present, and nothing else.

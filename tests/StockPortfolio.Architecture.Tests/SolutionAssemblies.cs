@@ -35,11 +35,11 @@ internal static class SolutionAssemblies
 
     /// <summary>The five projects each module is built from, innermost first.</summary>
     public static ImmutableArray<string> LayerNames { get; } =
-        [ContractsLayer, "Domain", "Application", "Infrastructure", "Presentation"];
+        [ContractsLayer, "Domain", "Application", "Infrastructure", "Api"];
 
     /// <summary>
     /// The composition roots, exempt from the cross-module rule. Both reference every
-    /// <c>&lt;M&gt;.Infrastructure</c> and <c>&lt;M&gt;.Presentation</c> by design — that is what a
+    /// <c>&lt;M&gt;.Infrastructure</c> and <c>&lt;M&gt;.Api</c> by design — that is what a
     /// host is for. Without this exemption the rule is red the moment the host wires a module up.
     /// </summary>
     public static ImmutableArray<string> HostAssemblyNames { get; } =
@@ -174,7 +174,7 @@ internal static class SolutionAssemblies
     /// </returns>
     /// <remarks>
     /// Transitive, not just direct: <c>Infrastructure</c> pulling ASP.NET Core in by referencing
-    /// its own <c>Presentation</c> is the same violation as referencing the framework outright, and
+    /// its own <c>Api</c> is the same violation as referencing the framework outright, and
     /// a direct-only check would miss it. Traversal follows first-party edges only; the third-party
     /// closure is irrelevant and enormous.
     /// </remarks>
@@ -246,7 +246,7 @@ internal static class SolutionAssemblies
         }
 
         names.Add("StockPortfolio.Shared.Kernel");
-        names.Add("StockPortfolio.Shared.Presentation");
+        names.Add("StockPortfolio.Shared.Api");
 
         return names.ToImmutable();
     }

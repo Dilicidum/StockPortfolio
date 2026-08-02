@@ -2,7 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using Microsoft.AspNetCore.Routing;
 
 // CA1716 flags the `Shared` segment because it is a Visual Basic keyword. The name is fixed by the
-// project layout (StockPortfolio.Shared.Presentation is an assembly name, not just a namespace) and
+// project layout (StockPortfolio.Shared.Api is an assembly name, not just a namespace) and
 // this is a C#-only solution with no cross-language consumers, so the rule buys nothing here.
 // Suppressed for this assembly's namespaces only, never repo-wide.
 [assembly: SuppressMessage(
@@ -10,9 +10,9 @@ using Microsoft.AspNetCore.Routing;
     "CA1716:Identifiers should not match keywords",
     Justification = "The `Shared` segment is fixed by the assembly name; the solution is C#-only.",
     Scope = "namespaceanddescendants",
-    Target = "~N:StockPortfolio.Shared.Presentation")]
+    Target = "~N:StockPortfolio.Shared.Api")]
 
-namespace StockPortfolio.Shared.Presentation;
+namespace StockPortfolio.Shared.Api;
 
 /// <summary>
 /// A module's inbound HTTP surface, in one place.

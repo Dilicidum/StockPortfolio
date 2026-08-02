@@ -9,8 +9,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\StockPortfolio.Modules.Identity.Application\StockPortfolio.Modules.Identity.Application.csproj" />
-    <ProjectReference Include="..\..\..\Shared.Presentation\StockPortfolio.Shared.Presentation.csproj" />
+    <ProjectReference Include="..\StockPortfolio.Modules.Portfolio.Application\StockPortfolio.Modules.Portfolio.Application.csproj" />
+    <ProjectReference Include="..\..\..\Shared.Api\StockPortfolio.Shared.Api.csproj" />
   </ItemGroup>
 
 </Project>

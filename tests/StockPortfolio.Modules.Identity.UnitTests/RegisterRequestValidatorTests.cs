@@ -1,6 +1,6 @@
 using Shouldly;
-using StockPortfolio.Modules.Identity.Presentation;
-using StockPortfolio.Modules.Identity.Presentation.Validators;
+using StockPortfolio.Modules.Identity.Api;
+using StockPortfolio.Modules.Identity.Api.Validators;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 

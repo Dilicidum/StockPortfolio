@@ -1,4 +1,4 @@
-namespace StockPortfolio.Modules.Identity.Presentation;
+namespace StockPortfolio.Modules.Identity.Api;
 
 /// <summary>
 /// A freshly issued token pair. Returned by register, login and refresh alike.

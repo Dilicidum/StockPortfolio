@@ -79,7 +79,7 @@ React **19.2.8** · Vite **8.2.0** · `@tanstack/react-router` **1.170.18** (v1 
 ```
 src/
   Shared.Kernel/                 AggregateRoot<TId>, IDomainEvent, Money, CQRS interfaces
-  Shared.Presentation/           IEndpointModule, ValidationFilter<T>, ProblemDetails helpers
+  Shared.Api/           IEndpointModule, ValidationFilter<T>, ProblemDetails helpers
   Modules/
     Identity/    .Contracts · .Domain · .Application · .Infrastructure · .Presentation
     Portfolio/   same five
@@ -102,7 +102,7 @@ infra/                           Bicep
 
 Assumed by every phase file.
 
-**Architecture** — accessibility follows the onion, **not** a blanket `internal`: `.Domain`, `.Application` and `.Presentation` are `public`, `.Infrastructure` is `internal` except one `<Module>Module` seam. (`internal` is per-assembly and a module is five assemblies, so blanket-`internal` cannot compile.) A module references only other modules' `.Contracts`, enforced by `Architecture.Tests` rather than the compiler. `.Contracts` holds records of primitives only — no EF reference, no aggregates, no strongly-typed IDs, raw `Guid`. See `phase-1-implementation.md` §4.2.
+**Architecture** — accessibility follows the onion, **not** a blanket `internal`: `.Domain`, `.Application` and `.Api` are `public`, `.Infrastructure` is `internal` except one `<Module>Module` seam. (`internal` is per-assembly and a module is five assemblies, so blanket-`internal` cannot compile.) A module references only other modules' `.Contracts`, enforced by `Architecture.Tests` rather than the compiler. `.Contracts` holds records of primitives only — no EF reference, no aggregates, no strongly-typed IDs, raw `Guid`. See `phase-1-implementation.md` §4.2.
 
 **Four Postgres schemas + four roles, `Maximum Pool Size=2`.** Azure Postgres B1ms allows **35 user connections** (50 total, 15 reserved), and a different `Username` is a different Npgsql pool. Npgsql's default pool size of 100 × 4 roles × 2 replicas would request 800. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
 

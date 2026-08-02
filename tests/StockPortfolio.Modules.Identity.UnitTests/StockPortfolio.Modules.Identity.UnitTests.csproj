@@ -16,7 +16,7 @@
     <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Domain\StockPortfolio.Modules.Identity.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Application\StockPortfolio.Modules.Identity.Application.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Infrastructure\StockPortfolio.Modules.Identity.Infrastructure.csproj" />
-    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Presentation\StockPortfolio.Modules.Identity.Presentation.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Api\StockPortfolio.Modules.Identity.Api.csproj" />
   </ItemGroup>
 
 </Project>

@@ -6,7 +6,7 @@ Nothing exists yet. Every path below is created in this phase.
 
 **Scope reminder** — brief P0 req 1 (auth + session persistence), the auth half of req 3 (TanStack Router), req 6 (parameterised DB access), req 7 (`docker compose up`). Plus the whole build, test, container and deploy skeleton that phases 2–6 add deltas to.
 
-> **Revision note.** This document was reviewed before any code was written; the review found six blockers and eleven majors, all folded in below. Three decisions since then changed the shape of the design: **§4.2** accessibility follows the onion rather than blanket `internal`; **§4.5** shape validation is an `IEndpointFilter`, not a DI decorator; **§4.6** endpoints live in a new `.Presentation` project, not in `.Infrastructure`. §13 lists what they cost.
+> **Revision note.** This document was reviewed before any code was written; the review found six blockers and eleven majors, all folded in below. Three decisions since then changed the shape of the design: **§4.2** accessibility follows the onion rather than blanket `internal`; **§4.5** shape validation is an `IEndpointFilter`, not a DI decorator; **§4.6** endpoints live in a new `.Api` project, not in `.Infrastructure`. §13 lists what they cost.
 
 ---
 
@@ -54,7 +54,7 @@ src/
     Cqrs/IQueryHandler.cs
     Cqrs/ValidationFailed.cs
 
-  Shared.Presentation/           FrameworkReference Microsoft.AspNetCore.App
+  Shared.Api/           FrameworkReference Microsoft.AspNetCore.App
     IEndpointModule.cs
     ValidationFilter.cs          the generic IEndpointFilter — §4.5
     ProblemDetailsExtensions.cs
@@ -231,17 +231,17 @@ Putting `NU1901;NU1902;NU1903;NU1904` in `WarningsNotAsErrors` earned its keep o
 | Project | References |
 |---|---|
 | `Shared.Kernel` | — (`OneOf` only). **No ASP.NET Core** |
-| `Shared.Presentation` | `Shared.Kernel`, FluentValidation, `FrameworkReference Microsoft.AspNetCore.App` |
+| `Shared.Api` | `Shared.Kernel`, FluentValidation, `FrameworkReference Microsoft.AspNetCore.App` |
 | `<M>.Contracts` | — (nothing; records of primitives) |
 | `<M>.Domain` | `Shared.Kernel` |
 | `<M>.Application` | `<M>.Domain`, `<M>.Contracts`, other modules' `.Contracts` only |
 | `<M>.Infrastructure` | `<M>.Application`, EF Core, Npgsql. **No ASP.NET Core** |
-| `<M>.Presentation` | `<M>.Application`, `Shared.Presentation`. **No EF Core, no `.Infrastructure`** |
+| `<M>.Api` | `<M>.Application`, `Shared.Api`. **No EF Core, no `.Infrastructure`** |
 | `Migrator` | every `<M>.Infrastructure` |
-| `Api` | every `<M>.Infrastructure` *and* `<M>.Presentation`, `EFCore.Design` (`PrivateAssets="all"`) |
+| `Api` | every `<M>.Infrastructure` *and* `<M>.Api`, `EFCore.Design` (`PrivateAssets="all"`) |
 | `Architecture.Tests` | every project (it reflects over them) |
 
-The two "no" columns are the point of the split and both are asserted by `Architecture.Tests`: **`.Infrastructure` never sees HTTP, `.Presentation` never sees the database.** A route cannot reach a `DbContext` without going through a handler, because the reference does not exist.
+The two "no" columns are the point of the split and both are asserted by `Architecture.Tests`: **`.Infrastructure` never sees HTTP, `.Api` never sees the database.** A route cannot reach a `DbContext` without going through a handler, because the reference does not exist.
 
 ### 4.2 DECISION — accessibility is onion-per-module, not internal-everywhere
 
@@ -253,9 +253,9 @@ The design doc's rule is *"everything is `internal` outside `.Contracts`."* That
 |---|---|---|
 | `.Contracts` | `public` | every module |
 | `.Domain` | `public` | its own module only (by ProjectReference) |
-| `.Application` | `public` | `.Infrastructure`, `.Presentation` |
+| `.Application` | `public` | `.Infrastructure`, `.Api` |
 | `.Infrastructure` | **`internal`**, except `<M>Module` | the host, through one seam |
-| `.Presentation` | `public` | the host only — it is a leaf, nothing references it |
+| `.Api` | `public` | the host only — it is a leaf, nothing references it |
 
 Infrastructure stays internal because nothing outside the module has any business naming `IdentityDbContext`, `UserRepository` or `Argon2PasswordHasher` — that is the layer where leaks actually happen.
 
@@ -299,7 +299,7 @@ public static class IdentityModule
 `Presentation/IdentityEndpoints.cs` — everything the router needs:
 
 ```csharp
-namespace StockPortfolio.Modules.Identity.Presentation;
+namespace StockPortfolio.Modules.Identity.Api;
 
 public static class IdentityEndpoints
 {
@@ -313,7 +313,7 @@ public static class IdentityEndpoints
 
 `MigrationsAssembly(...)` is **dropped**: migrations land in `Persistence/Migrations` of the same assembly as the context, which is already the default. Leaving it in implies a split that does not exist.
 
-`IEndpointModule` moves to `Shared.Presentation` (§4.7) and stays unused in Phase 1 — `app.MapIdentityEndpoints()` is one line, trim-safe and explicitly ordered.
+`IEndpointModule` moves to `Shared.Api` (§4.7) and stays unused in Phase 1 — `app.MapIdentityEndpoints()` is one line, trim-safe and explicitly ordered.
 
 ### 4.4 Handler and validator registration
 
@@ -329,10 +329,10 @@ internal static IServiceCollection AddIdentityHandlers(this IServiceCollection s
 }
 ```
 
-Validators are registered by `.Presentation`, because that is where they and the records they check now live (§4.5):
+Validators are registered by `.Api`, because that is where they and the records they check now live (§4.5):
 
 ```csharp
-public static IServiceCollection AddIdentityPresentation(this IServiceCollection s)
+public static IServiceCollection AddIdentityApi(this IServiceCollection s)
     => s.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
 ```
 
@@ -354,10 +354,10 @@ internal sealed class ValidationDecorator<TCommand, TResult>(
 
 On failure it must return a `TResult`. `TResult` is unconstrained, and `[GenerateOneOf]`'s conversion from `ValidationFailed` is a **user-defined operator on a concrete type**, unreachable through a type parameter. `LoginResult` has no `ValidationFailed` case at all, so no amount of reflection could produce one either. The workaround was going to be throwing an exception and catching it in middleware.
 
-**Settled instead: a generic `IEndpointFilter` in `Shared.Presentation`.** A filter sits in the HTTP pipeline rather than the DI graph, so it can *return* a response and short-circuit — the unconstrained-`TResult` problem simply does not arise, and neither does the throw/catch round trip.
+**Settled instead: a generic `IEndpointFilter` in `Shared.Api`.** A filter sits in the HTTP pipeline rather than the DI graph, so it can *return* a response and short-circuit — the unconstrained-`TResult` problem simply does not arise, and neither does the throw/catch round trip.
 
 ```csharp
-// Shared.Presentation/ValidationFilter.cs
+// Shared.Api/ValidationFilter.cs
 public sealed class ValidationFilter<TRequest>(IValidator<TRequest> validator) : IEndpointFilter
     where TRequest : class
 {
@@ -390,29 +390,29 @@ The three-layer split is intact; only the top layer changed mechanism:
 
 | Failure kind | Where | Mechanism |
 |---|---|---|
-| Shape — "is this even an email?" | FluentValidation on the **request**, in `.Presentation` | filter returns **400** |
+| Shape — "is this even an email?" | FluentValidation on the **request**, in `.Api` | filter returns **400** |
 | Context — "does this user exist? allowed?" | handler, `.Application` | OneOf result case |
 | Invariant — "a User can never have a blank email" | entity, `.Domain` | **throws** |
 
-⚠️ **The filter runs on the request DTO, not the command.** That is correct now that `.Presentation` exists — a transport concern validated in the transport layer — but it means a hypothetical second, non-HTTP caller of a handler would bypass the rules. There is exactly one caller per handler today (the argument for CQRS without a dispatcher), so this costs nothing; if a background job ever calls a handler directly, its inputs need their own guard.
+⚠️ **The filter runs on the request DTO, not the command.** That is correct now that `.Api` exists — a transport concern validated in the transport layer — but it means a hypothetical second, non-HTTP caller of a handler would bypass the rules. There is exactly one caller per handler today (the argument for CQRS without a dispatcher), so this costs nothing; if a background job ever calls a handler directly, its inputs need their own guard.
 
 ⚠️ **`IValidator<TRequest>` is injected, not `IEnumerable<IValidator<TRequest>>`.** With the single-instance form, DI throws at request time if a validator is missing — loud, immediate, and it fails the integration test. Injecting the collection makes a missing validator silently validate nothing.
 
 **The built-in .NET 10 `AddValidation()` is still not used**, and the reason has changed now that we validate the DTO. It is driven by `System.ComponentModel.DataAnnotations` attributes, which are fine for `[Required]` and `[EmailAddress]` but awkward as soon as a rule is conditional, spans two fields, or needs a lookup. A FluentValidation `AbstractValidator` handles all three in ordinary C#. Say that in the README — it is a real evaluation, not an omission.
 
-### 4.6 DECISION — endpoints live in `.Presentation`
+### 4.6 DECISION — endpoints live in `.Api`
 
 An earlier draft put `IdentityEndpoints.cs` in `.Infrastructure` to avoid a fifth project. **That was wrong and is reversed.** Infrastructure means persistence and *outbound* integrations — the database, the quote provider, the hasher. Inbound HTTP is presentation. Parking routes next to `IdentityDbContext` forced one project to carry `FrameworkReference Microsoft.AspNetCore.App` *and* EF Core, which is precisely the mixing the layering exists to prevent.
 
-Moving them to `Api` would also have fixed the layering, but it makes the host the file every future feature edits and breaks the "a module is N folders away from being its own service" property. `.Presentation` fixes the layering *and* keeps the module whole.
+Moving them to `Api` would also have fixed the layering, but it makes the host the file every future feature edits and breaks the "a module is N folders away from being its own service" property. `.Api` fixes the layering *and* keeps the module whole.
 
 Cost: four extra projects, ten minutes in §12 step 1. In exchange, two reference rules become compiler-enforced (§4.1) rather than conventions.
 
-### 4.7 `Shared.Presentation` — and a bug it fixes
+### 4.7 `Shared.Api` — and a bug it fixes
 
 `Shared.Kernel` was carrying `Endpoints/IEndpointModule.cs`, whose signature takes `IEndpointRouteBuilder` — an ASP.NET Core type. That would have forced `FrameworkReference Microsoft.AspNetCore.App` onto `Shared.Kernel`, and therefore transitively onto every `.Domain` project. The kernel holds `Money` and `AggregateRoot`; it must stay framework-free.
 
-So HTTP-shaped shared code moves to a new `Shared.Presentation`:
+So HTTP-shaped shared code moves to a new `Shared.Api`:
 
 | File | Purpose |
 |---|---|
@@ -420,7 +420,7 @@ So HTTP-shaped shared code moves to a new `Shared.Presentation`:
 | `ValidationFilter.cs` | the generic filter (§4.5) |
 | `ProblemDetailsExtensions.cs` | shared `.Match` → `TypedResults` helpers |
 
-Each `<M>.Presentation` references it. `Shared.Kernel` references nothing but `OneOf`, and `Architecture.Tests` asserts it.
+Each `<M>.Api` references it. `Shared.Kernel` references nothing but `OneOf`, and `Architecture.Tests` asserts it.
 
 ---
 
@@ -572,7 +572,7 @@ Three EF traps this shape avoids, each documented and each expensive:
 
 ### 5.3 `Identity.Application`
 
-One folder per use case: command, result union, handler. No validators — those check the HTTP request and live in `.Presentation` (§4.5, §5.5).
+One folder per use case: command, result union, handler. No validators — those check the HTTP request and live in `.Api` (§4.5, §5.5).
 
 ```csharp
 [GenerateOneOf]
@@ -631,7 +631,7 @@ Development only:
 
 **`JwtTokenIssuer`** — `JsonWebTokenHandler`, not the legacy `JwtSecurityTokenHandler`. **Fail fast at startup** if the signing key is missing or under 32 bytes, not at first login. Refresh tokens are 32 random bytes, returned base64url, stored as a SHA-256 hash. SHA-256 without a work factor is correct precisely *because* the token is already high-entropy — Argon2 over a random 256-bit value buys nothing and costs 19 MiB per refresh.
 
-### 5.5 `Identity.Presentation`
+### 5.5 `Identity.Api`
 
 **`IdentityEndpoints.cs`**
 
@@ -694,7 +694,7 @@ builder.Services.AddCors(o => o.AddPolicy("spa", p => p
 
 // 5. Modules — Infrastructure registers handlers, Presentation registers validators
 builder.Services.AddIdentityModule(builder.Configuration);
-builder.Services.AddIdentityPresentation();
+builder.Services.AddIdentityApi();
 builder.Services.DecorateHandlers();      // logging only; must come after the modules
 
 // 6. Health — NOT AddDbContextCheck<IdentityDbContext>. See the correction below.
@@ -952,7 +952,7 @@ Two tests carry disproportionate weight:
 
 **Deviation:** `Migrations_ApplyCleanly_OnEmptyDatabase` in the design doc asserts "all four contexts migrate; four schemas exist". In Phase 1 only `IdentityDbContext` exists. Assert four **schemas** (created by the init SQL) and one **context**; widen as phases 2–4 land.
 
-`Architecture.Tests` uses plain reflection over `Assembly.GetReferencedAssemblies()` — no NetArchTest. Six rules, the last three new with the `.Presentation` split (§4.6, §4.7):
+`Architecture.Tests` uses plain reflection over `Assembly.GetReferencedAssemblies()` — no NetArchTest. Six rules, the last three new with the `.Api` split (§4.6, §4.7):
 
 | Rule | Catches |
 |---|---|
@@ -960,12 +960,12 @@ Two tests carry disproportionate weight:
 | No `.Contracts` assembly references EF Core | persistence leaking across a boundary |
 | No public settable property under `Modules.*.Domain` | anaemic entities |
 | **No `.Infrastructure` references `Microsoft.AspNetCore.App`** | HTTP creeping back into persistence |
-| **No `.Presentation` references EF Core or its own `.Infrastructure`** | a route reaching the database directly |
+| **No `.Api` references EF Core or its own `.Infrastructure`** | a route reaching the database directly |
 | **`Shared.Kernel` references nothing but `OneOf`** | the §4.7 bug returning |
 
 Two that will fail on a naive implementation:
 
-- The first rule must **exempt `Api` and `Migrator`** — they reference every `<M>.Infrastructure` and `<M>.Presentation` by design. Without the exemption, step 1 ends with a red test.
+- The first rule must **exempt `Api` and `Migrator`** — they reference every `<M>.Infrastructure` and `<M>.Api` by design. Without the exemption, step 1 ends with a red test.
 - The third must check `GetSetMethod(nonPublic: false) is not null`, or `private set` reads as a violation and every entity fails. This matters more now that Domain types are public.
 
 `Identity.UnitTests` also gains validator tests — `RegisterRequestValidator` rejects a short password, accepts a good one. They touch no infrastructure, so they stay unit tests.
@@ -1015,7 +1015,7 @@ Decide before writing the refresh integration test — the assertions encode the
 | 6 | `IdentityDbContext`, configurations, converter, design-time factory; `00-roles.sh` + `01-roles.sql` | `dotnet ef migrations add InitialIdentity` succeeds with no local config |
 | 7 | `Migrator` project | applies cleanly against a local Postgres container |
 | 8 | Handlers + `IdentityModule` seam | unit tests green |
-| 9 | `Shared.Presentation` (`ValidationFilter<T>`), then `Identity.Presentation` — endpoints, requests, validators | validator unit tests green |
+| 9 | `Shared.Api` (`ValidationFilter<T>`), then `Identity.Api` — endpoints, requests, validators | validator unit tests green |
 | 9b | `Api/Program.cs`, JWT, Problem Details, health split, `.http` file | manual `.http` run: register → login → me → refresh; a bad email returns 400 `ValidationProblemDetails` |
 | 10 | `Api.IntegrationTests` incl. role isolation **and the parameterisation interceptor** | `dotnet test` green |
 | — | *one day* | |
@@ -1037,11 +1037,11 @@ Steps 1–2 come before anything else because both set repo-wide switches that a
 
 **Accessibility diverges from `CLAUDE.md`.** That file states "everything is `internal` outside `.Contracts`" as a non-negotiable; §4.2 replaces it with onion-per-module. **`CLAUDE.md` needs updating** or the next reader follows a rule the code does not obey. The cost of the change: cross-module isolation is now enforced by `Architecture.Tests`, not the compiler.
 
-**Shape validation runs on the HTTP request, not the command** (§4.5). An `IEndpointFilter` in `.Presentation` returns 400 directly. The cost: a non-HTTP caller of a handler would bypass the rules. There is one caller per handler today, so it costs nothing now — but if a background job ever invokes a handler directly, its inputs need their own guard.
+**Shape validation runs on the HTTP request, not the command** (§4.5). An `IEndpointFilter` in `.Api` returns 400 directly. The cost: a non-HTTP caller of a handler would bypass the rules. There is one caller per handler today, so it costs nothing now — but if a background job ever invokes a handler directly, its inputs need their own guard.
 
 **`Identity.Contracts` ships empty.** Documented in the project's own README; evidence for the extraction-order argument.
 
-**Five projects per module, twenty in total** (§4.6). The `.Presentation` split buys two compiler-enforced reference rules — Infrastructure never sees HTTP, Presentation never sees the database — at the cost of four extra `.csproj`. Reversed from an earlier draft that put endpoints in `.Infrastructure`; that draft was wrong about which layer inbound HTTP belongs to.
+**Five projects per module, twenty in total** (§4.6). The `.Api` split buys two compiler-enforced reference rules — Infrastructure never sees HTTP, Presentation never sees the database — at the cost of four extra `.csproj`. Reversed from an earlier draft that put endpoints in `.Infrastructure`; that draft was wrong about which layer inbound HTTP belongs to.
 
 **Four schemas but one context in Phase 1.** Init SQL creates all four; only `identity` has tables.
 
@@ -1061,7 +1061,7 @@ Steps 1–2 come before anything else because both set repo-wide switches that a
 - [ ] Register → dashboard shell · **hard-refresh → still signed in** (bootstrap-then-mount, §8)
 - [ ] Log out → `/dashboard` bounces to `/login?redirect=…` → log in → back to `/dashboard`
 - [ ] `dotnet test` green, including `PortfolioRole_CannotReadIdentitySchema` **and `Queries_NeverInlineUserInput_IntoCommandText`**
-- [ ] All six `Architecture.Tests` green — including `.Infrastructure` has no ASP.NET Core and `.Presentation` has no EF Core
+- [ ] All six `Architecture.Tests` green — including `.Infrastructure` has no ASP.NET Core and `.Api` has no EF Core
 - [ ] `POST /api/auth/register` with a malformed email returns 400 `application/problem+json` with a field-level error, produced by the filter and not by an exception
 - [ ] `npm test` green, including the single-refresh counter
 - [ ] `bicep build` and `az deployment group what-if` clean; **ACA HTTP probes declared**

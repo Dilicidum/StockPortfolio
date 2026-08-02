@@ -27,7 +27,7 @@ public sealed class ModuleBoundaryTests
     {
         SolutionAssemblies.ExpectedNames.Length.ShouldBe(
             22,
-            "Four modules times five layers, plus Shared.Kernel and Shared.Presentation. "
+            "Four modules times five layers, plus Shared.Kernel and Shared.Api. "
                 + "If the project count changed, this list — and the rules below — must change with it.");
 
         var missing = SolutionAssemblies.ExpectedNames
@@ -52,11 +52,11 @@ public sealed class ModuleBoundaryTests
         string[] populated =
         [
             "StockPortfolio.Shared.Kernel",
-            "StockPortfolio.Shared.Presentation",
+            "StockPortfolio.Shared.Api",
             SolutionAssemblies.NameOf("Identity", "Domain"),
             SolutionAssemblies.NameOf("Identity", "Application"),
             SolutionAssemblies.NameOf("Identity", "Infrastructure"),
-            SolutionAssemblies.NameOf("Identity", "Presentation"),
+            SolutionAssemblies.NameOf("Identity", "Api"),
         ];
 
         var shells = populated
@@ -81,12 +81,12 @@ public sealed class ModuleBoundaryTests
         if (SolutionAssemblies.IsHost(assemblyName))
         {
             // Api and Migrator are the composition roots: they reference every <M>.Infrastructure
-            // and <M>.Presentation on purpose. Exempting them is not a loophole — it is the whole
+            // and <M>.Api on purpose. Exempting them is not a loophole — it is the whole
             // point of having a host.
             Assert.Skip(
                 assemblyName
                     + " is a composition root and is exempt by design: it wires every module's "
-                    + "Infrastructure and Presentation together, which is the one place that is allowed to.");
+                    + "Infrastructure and Api together, which is the one place that is allowed to.");
         }
 
         var assembly = SolutionAssemblies.Get(assemblyName);
@@ -112,13 +112,13 @@ public sealed class ModuleBoundaryTests
     }
 
     /// <summary>
-    /// Rule 1, second half. <c>Shared.Kernel</c> and <c>Shared.Presentation</c> are referenced *by*
+    /// Rule 1, second half. <c>Shared.Kernel</c> and <c>Shared.Api</c> are referenced *by*
     /// modules and must never reference one back, in any layer — not even <c>.Contracts</c>.
     /// </summary>
     /// <param name="assemblyName">The shared assembly under inspection.</param>
     [Theory]
     [InlineData("StockPortfolio.Shared.Kernel")]
-    [InlineData("StockPortfolio.Shared.Presentation")]
+    [InlineData("StockPortfolio.Shared.Api")]
     public void SharedAssembly_ReferencesNoModule_InAnyLayer(string assemblyName)
     {
         var violations = SolutionAssemblies.Get(assemblyName)
@@ -147,7 +147,7 @@ public sealed class ModuleBoundaryTests
     [InlineData("StockPortfolio.Modules.Portfolio.Domain", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Application", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Infrastructure", true)]
-    [InlineData("StockPortfolio.Modules.Portfolio.Presentation", true)]
+    [InlineData("StockPortfolio.Modules.Portfolio.Api", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Contracts", false)]
     [InlineData("StockPortfolio.Modules.Alerts.Domain", false)]
     [InlineData("StockPortfolio.Modules.Alerts.Infrastructure", false)]

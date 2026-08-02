@@ -30,7 +30,7 @@ With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a
 
 ## Architecture
 
-Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Presentation`. Plus `Shared.Kernel`, `Shared.Presentation` and the `Api` host. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api` and the `Api` host. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
 **Accessibility follows the onion, not a blanket `internal`.** `internal` is per-assembly and a module is five assemblies, so "everything internal outside `.Contracts`" cannot compile — `Identity.Infrastructure` could not see `User` in `Identity.Domain`.
 
@@ -40,12 +40,12 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 | `.Domain` | entities, invariants | `public`, own module only |
 | `.Application` | commands, results, handlers, abstractions | `public` |
 | `.Infrastructure` | DbContext, repositories, hashing, tokens | **`internal`** except `<Module>Module` |
-| `.Presentation` | endpoints, request/response records, validators | `public` (leaf project) |
+| `.Api` | endpoints, request/response records, validators | `public` (leaf project) |
 
-Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Presentation` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
+Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
 - Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into `Api` (makes the host the merge point for every feature).
-- `Shared.Kernel` must stay framework-free — `AggregateRoot`, `Money`, `IDomainEvent`, the CQRS interfaces. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Presentation`.
+- `Shared.Kernel` must stay framework-free — `AggregateRoot`, `Money`, `IDomainEvent`, the CQRS interfaces. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`.
 - Dependency direction is **Alerts → Portfolio → MarketData**. Identity has zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
@@ -64,7 +64,7 @@ Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: 
 
 | Layer | Where | Mechanism |
 |---|---|---|
-| Shape — is this even an email? | FluentValidation on the request record, `.Presentation` | generic `ValidationFilter<T>` : `IEndpointFilter` returns **400** |
+| Shape — is this even an email? | FluentValidation on the request record, `.Api` | generic `ValidationFilter<T>` : `IEndpointFilter` returns **400** |
 | Context — does this user exist? allowed? | handler, `.Application` | OneOf result case |
 | Invariant — a User can never have a blank email | entity, `.Domain` | **throws** |
 

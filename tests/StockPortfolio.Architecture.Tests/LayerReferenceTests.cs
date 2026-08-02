@@ -8,11 +8,11 @@ namespace StockPortfolio.Tests;
 /// <remarks>
 /// <para>
 /// <c>.Contracts</c> carries no persistence. <c>.Infrastructure</c> never sees HTTP.
-/// <c>.Presentation</c> never sees the database. <c>Shared.Kernel</c> sees neither.
+/// <c>.Api</c> never sees the database. <c>Shared.Kernel</c> sees neither.
 /// </para>
 /// <para>
 /// The reference checks are transitive over first-party edges, not merely direct: pulling ASP.NET
-/// Core into <c>.Infrastructure</c> by way of that module's own <c>.Presentation</c> is the same
+/// Core into <c>.Infrastructure</c> by way of that module's own <c>.Api</c> is the same
 /// violation as referencing the framework outright, and a direct-only test would wave it through.
 /// </para>
 /// </remarks>
@@ -24,10 +24,10 @@ public sealed class LayerReferenceTests
     /// <summary>The four <c>.Infrastructure</c> assemblies.</summary>
     public static TheoryData<string> InfrastructureAssemblies => AssembliesFor("Infrastructure");
 
-    /// <summary>The four <c>.Presentation</c> assemblies.</summary>
+    /// <summary>The four <c>.Api</c> assemblies.</summary>
     // Worth a second look when editing: passing "Infrastructure" here points rule 5 at the wrong
     // layer and it then enforces nothing, while still reporting green.
-    public static TheoryData<string> PresentationAssemblies => AssembliesFor("Presentation");
+    public static TheoryData<string> ApiAssemblies => AssembliesFor("Api");
 
     /// <summary>
     /// Rule 2. <c>.Contracts</c> is the assembly other modules compile against, so a persistence
@@ -81,7 +81,7 @@ public sealed class LayerReferenceTests
                 + "  - "
                 + path
                 + Environment.NewLine
-                + "Endpoints live in .Presentation. Infrastructure and Presentation meet only "
+                + "Endpoints live in .Api. Infrastructure and Api meet only "
                 + "through .Application/Abstractions — remove the FrameworkReference, or the "
                 + "project reference that leads to it.");
     }
@@ -90,10 +90,10 @@ public sealed class LayerReferenceTests
     /// Rule 5. A route that can construct a <c>DbContext</c> stops going through the handler, and
     /// the module's whole application layer becomes optional.
     /// </summary>
-    /// <param name="assemblyName">The <c>.Presentation</c> assembly under inspection.</param>
+    /// <param name="assemblyName">The <c>.Api</c> assembly under inspection.</param>
     [Theory]
-    [MemberData(nameof(PresentationAssemblies))]
-    public void PresentationAssembly_ReferencesNeitherPersistenceNorItsOwnInfrastructure(string assemblyName)
+    [MemberData(nameof(ApiAssemblies))]
+    public void ApiAssembly_ReferencesNeitherPersistenceNorItsOwnInfrastructure(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
 
@@ -154,13 +154,13 @@ public sealed class LayerReferenceTests
                 + Environment.NewLine
                 + ModuleBoundaryTests.Describe(violations)
                 + Environment.NewLine
-                + "Anything that needs IEndpointRouteBuilder belongs in Shared.Presentation; "
+                + "Anything that needs IEndpointRouteBuilder belongs in Shared.Api; "
                 + "anything that needs a DbContext belongs in a module's .Infrastructure.");
 
         // Named separately from the allow-list above so the two failures most worth preventing
         // read as themselves rather than as "an unexpected reference".
         SolutionAssemblies.FindForbiddenReferencePath(Name, IsAspNetCore).ShouldBeNull(
-            Name + " must never reach ASP.NET Core; that is what Shared.Presentation exists for.");
+            Name + " must never reach ASP.NET Core; that is what Shared.Api exists for.");
 
         SolutionAssemblies.FindForbiddenReferencePath(Name, IsPersistence).ShouldBeNull(
             Name
@@ -178,7 +178,7 @@ public sealed class LayerReferenceTests
     [Fact]
     public void ReferenceWalker_FindsEdgesThatDoExist_SoAnEmptyResultMeansSomething()
     {
-        var presentation = SolutionAssemblies.NameOf("Identity", "Presentation");
+        var presentation = SolutionAssemblies.NameOf("Identity", "Api");
         var infrastructure = SolutionAssemblies.NameOf("Identity", "Infrastructure");
 
         // Direct edges, legitimate where they are, forbidden one layer over.
@@ -190,8 +190,8 @@ public sealed class LayerReferenceTests
             infrastructure + " does reference EF Core — the DbContext lives there. Not finding that "
                 + "edge means rules 2 and 5 cannot find it either.");
 
-        // A three-hop edge: Presentation -> Application -> Domain -> Shared.Kernel. If the walk
-        // were direct-only, Infrastructure could pull ASP.NET Core in through its own Presentation
+        // A three-hop edge: Api -> Application -> Domain -> Shared.Kernel. If the walk
+        // were direct-only, Infrastructure could pull ASP.NET Core in through its own Api
         // and rule 4 would wave it through.
         var transitive = SolutionAssemblies.FindForbiddenReferencePath(
             presentation,

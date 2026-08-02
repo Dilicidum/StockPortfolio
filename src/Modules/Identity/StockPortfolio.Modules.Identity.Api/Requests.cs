@@ -1,4 +1,4 @@
-namespace StockPortfolio.Modules.Identity.Presentation;
+namespace StockPortfolio.Modules.Identity.Api;
 
 /// <summary>
 /// Credentials for creating a new account.

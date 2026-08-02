@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
-namespace StockPortfolio.Shared.Presentation;
+namespace StockPortfolio.Shared.Api;
 
 /// <summary>
 /// Turns a handler's failure case into an RFC 9457 problem response, so every module answers a

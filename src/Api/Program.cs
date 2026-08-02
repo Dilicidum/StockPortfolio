@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using StockPortfolio.Api.Extensions;
 using StockPortfolio.Api.Middleware;
 using StockPortfolio.Modules.Identity.Infrastructure;
-using StockPortfolio.Modules.Identity.Presentation;
+using StockPortfolio.Modules.Identity.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -48,10 +48,10 @@ builder.Services.AddCors(options => options.AddPolicy("spa", policy => policy
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 4. Modules. Infrastructure registers the DbContext, repositories and handlers
-//    (and validates Jwt:SigningKey eagerly); Presentation registers validators.
+//    (and validates Jwt:SigningKey eagerly); the Api layer registers validators.
 // ─────────────────────────────────────────────────────────────────────────────
 builder.Services.AddIdentityModule(builder.Configuration);
-builder.Services.AddIdentityPresentation();
+builder.Services.AddIdentityApi();
 
 // Must come AFTER the modules: a decorator only applies to descriptors that already exist.
 builder.Services.DecorateHandlers();

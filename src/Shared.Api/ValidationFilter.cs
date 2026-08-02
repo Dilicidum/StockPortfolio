@@ -1,7 +1,7 @@
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
 
-namespace StockPortfolio.Shared.Presentation;
+namespace StockPortfolio.Shared.Api;
 
 /// <summary>
 /// Runs FluentValidation over the request DTO of an endpoint and short-circuits with a

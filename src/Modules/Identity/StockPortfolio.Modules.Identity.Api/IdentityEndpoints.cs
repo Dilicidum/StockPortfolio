@@ -11,11 +11,11 @@ using StockPortfolio.Modules.Identity.Application.Me;
 using StockPortfolio.Modules.Identity.Application.Refresh;
 using StockPortfolio.Modules.Identity.Application.Register;
 using StockPortfolio.Modules.Identity.Application.Revoke;
-using StockPortfolio.Modules.Identity.Presentation.Validators;
+using StockPortfolio.Modules.Identity.Api.Validators;
 using StockPortfolio.Shared.Kernel.Cqrs;
-using StockPortfolio.Shared.Presentation;
+using StockPortfolio.Shared.Api;
 
-namespace StockPortfolio.Modules.Identity.Presentation;
+namespace StockPortfolio.Modules.Identity.Api;
 
 /// <summary>
 /// The Identity module's entire inbound HTTP surface: five routes under <c>/api/auth</c>, plus the
@@ -75,7 +75,7 @@ public static class IdentityEndpoints
     /// collection, so a validator that was never registered fails loudly at the first request
     /// instead of quietly validating nothing.
     /// </remarks>
-    public static IServiceCollection AddIdentityPresentation(this IServiceCollection services)
+    public static IServiceCollection AddIdentityApi(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 

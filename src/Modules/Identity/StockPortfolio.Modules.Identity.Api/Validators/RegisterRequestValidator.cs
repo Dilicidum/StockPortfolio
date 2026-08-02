@@ -1,6 +1,6 @@
 using FluentValidation;
 
-namespace StockPortfolio.Modules.Identity.Presentation.Validators;
+namespace StockPortfolio.Modules.Identity.Api.Validators;
 
 /// <summary>
 /// Shape rules for <see cref="RegisterRequest"/> — the only layer of validation that can answer

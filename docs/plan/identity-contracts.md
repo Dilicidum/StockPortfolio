@@ -43,7 +43,7 @@ public sealed record ValidationFailed(string Field, string Message);
 ```
 
 ```csharp
-namespace StockPortfolio.Shared.Presentation;
+namespace StockPortfolio.Shared.Api;
 
 public interface IEndpointModule { void MapEndpoints(IEndpointRouteBuilder app); }
 
@@ -216,14 +216,14 @@ Registers `IdentityDbContext` (connection string name `Identity`), the two repos
 
 ---
 
-## `StockPortfolio.Modules.Identity.Presentation`
+## `StockPortfolio.Modules.Identity.Api`
 
 ```csharp
-namespace StockPortfolio.Modules.Identity.Presentation;
+namespace StockPortfolio.Modules.Identity.Api;
 
 public static class IdentityEndpoints
 {
-    public static IServiceCollection AddIdentityPresentation(this IServiceCollection services);   // validators
+    public static IServiceCollection AddIdentityApi(this IServiceCollection services);   // validators
     public static IEndpointRouteBuilder MapIdentityEndpoints(this IEndpointRouteBuilder app);
 }
 ```
