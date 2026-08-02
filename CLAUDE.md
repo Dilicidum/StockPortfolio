@@ -6,7 +6,9 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 149 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
+**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 150 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
+
+**`docs/plan/` predates the CQRS conventions below and has not been swept.** Its snippets still show `[GenerateOneOf]` union classes, `ValidationFailed`, `IUnitOfWork`, and commands bound straight off the wire — all four are now wrong. Where a plan file conflicts with the Conventions section here, **this file wins**; take the plan for its sequencing and its decisions, not its code.
 
 Read before touching code: [docs/plan/00-overview.md](docs/plan/00-overview.md), then the phase file you're working in. Phase 1 additionally has [docs/plan/phase-1-implementation.md](docs/plan/phase-1-implementation.md) — the reviewed file-by-file build order; where it disagrees with `phase-1-sign-in.md`, the implementation plan wins. [docs/plan/er-diagram.md](docs/plan/er-diagram.md) and [docs/plan/module-interactions.md](docs/plan/module-interactions.md) are the reference diagrams. `docs/Initial.md` is the original architecture essay — **treat it as historical**; where it conflicts with `docs/plan/`, the plan wins, and three known errors in it are listed in the overview's open items.
 
@@ -17,7 +19,7 @@ Work phase by phase. A phase is done when it runs in a browser, not when tests p
 ```bash
 docker compose up                    # whole stack, from a clean clone, no API key needed
 dotnet build
-dotnet test                          # 149 tests; the integration suite needs Docker running
+dotnet test                          # 150 tests; the integration suite needs Docker running
 npm --prefix src/Web run dev
 npm --prefix src/Web test
 
@@ -44,7 +46,7 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 | `.Domain` | entities, invariants | `public`, own module only |
 | `.Application` | commands, results, handlers, abstractions | `public` |
 | `.Infrastructure` | DbContext, repositories, hashing, tokens | **`internal`** except `<Module>Module` |
-| `.Api` | endpoints and validators — no DTOs of its own | `public` (leaf project) |
+| `.Api` | endpoints, request records, validators | `public` (leaf project) |
 
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
@@ -69,7 +71,8 @@ Application/
       <UseCase>/            e.g. RegisterUser
         <UseCase>Command.cs
         <UseCase>CommandHandler.cs
-        <UseCase>Result.cs        only if the use case needs one
+        <UseCase>Result.cs        the SUCCESS shape, only if the use case needs its own
+        <Failure>.cs              e.g. EmailAlreadyUsed - one file per failure case
     Queries/
       <UseCase>/
         <UseCase>Query.cs
@@ -77,13 +80,15 @@ Application/
         <UseCase>Result.cs
 ```
 
-Every CQRS type in a module lives under one feature-area folder, split into `Commands/` and `Queries/`, then one folder per use case. Class names carry the role: `RegisterUserCommand`, `RegisterUserCommandHandler`, `RegisterUserResult`, `GetCurrentUserQuery`, `GetCurrentUserQueryHandler`. Never `RegisterUser` for a command or `RegisterUserHandler` for a handler — the suffix is not optional.
+Every CQRS type in a module lives under one feature-area folder, split into `Commands/` and `Queries/`, then one folder per use case. Class names carry the role: `RegisterUserCommand`, `RegisterUserCommandHandler`, `GetCurrentUserQuery`, `GetCurrentUserQueryHandler`. Never `RegisterUser` for a command or `RegisterUserHandler` for a handler — the suffix is not optional.
 
 The namespace matches the folder, so it stops at the use-case folder (`…Application.Authentication.Commands.RegisterUser`) and does **not** repeat the `Command` suffix.
 
-**The command is the request body.** Endpoints bind it directly off the wire; its validator lives in `.Api` as `<UseCase>CommandValidator`. Do not add a parallel `XxxRequest` record that copies the command field for field.
+**Requests live in `.Api`, not `.Application`.** An Application type never binds off the wire. `.Api/Requests/<UseCase>Request.cs` is the request body; the endpoint reads it and constructs the command with `new`. The validator sits beside it as `<UseCase>RequestValidator` and validates the **request**, so `ValidationFilter<T>` closes over the request type. The two records look alike today and that is fine — the wire contract and the use-case input are free to move apart, and only the request appears in `/openapi/v1.json`.
 
-**Results are `OneOf`** with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Exhaustiveness is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed.
+**A handler returns `OneOf<…>` of its outcomes directly.** No `[GenerateOneOf]`, no named union class — `Task<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>` says at the signature what a wrapper would hide behind a name, and the DI registration and the endpoint's injected `ICommandHandler<,>` both spell out the same closed generic. `<UseCase>Result` is the **success payload record**, never the union. Failure cases are records beside the use case that returns them, not pooled in an `Errors.cs`; `InvalidInput` (in `Shared.Kernel`) is the one shared failure, because every layer can produce a field-plus-message.
+
+Map to `TypedResults` via `.Match`. Exhaustiveness is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed. **Name every `.Match` lambda parameter** — `emailTaken =>`, not `_ =>`. The discard costs the one word that says which case this is.
 
 **Rich domain, and no base class.** There is no `AggregateRoot<TId>`; each entity declares its own `Id`. An entity has **exactly one constructor**: private, taking every mapped value, assigning and nothing else. No parameterless constructor, no object initialiser, no public setter — a half-built entity is not representable, and the static `Create(...)` returning a OneOf is the only way in.
 
@@ -91,11 +96,15 @@ The constructor must stay guard-free. EF's binder matches on parameter name and 
 
 **Use `OneOf.Types.Success` and `OneOf.Types.NotFound`.** They ship with the package. Do not redeclare them per module, and never put a `Success` type in an errors file.
 
+**No unit of work, and no `ConfigureAwait(false)`.** `DbContext` already *is* a unit of work, so a second one over it only adds a name; a repository write method persists before it returns, and because every repository in a module shares one scoped `DbContext`, one commit carries whatever else the handler changed. Where two writes must land together, order them so the last repository call is the one that commits. `ConfigureAwait(false)` is for general-purpose libraries — ASP.NET Core has no `SynchronizationContext`, so it is noise here.
+
+**No defensive null checks where the compiler already answered.** `ArgumentNullException.ThrowIfNull(app)` in an endpoint-mapping extension, or `ThrowIfNull(command)` in a handler the API constructs the command for, guards against a caller that cannot exist. Keep the guards on genuinely public seams that take user-shaped input.
+
 **Validation has three layers, and only one uses result types.**
 
 | Layer | Where | Mechanism |
 |---|---|---|
-| Shape — is this even an email? | FluentValidation on the **command**, `.Api` | generic `ValidationFilter<T>` : `IEndpointFilter` returns **400** |
+| Shape — is this even an email? | FluentValidation on the **request**, `.Api` | generic `ValidationFilter<T>` : `IEndpointFilter` returns **400** |
 | Context — does this user exist? allowed? | handler, `.Application` | OneOf result case |
 | Invariant — a User can never have a blank email | entity, `.Domain` | **throws** |
 
@@ -113,7 +122,7 @@ Shape validation is an **endpoint filter, not a DI decorator**. A decorator woul
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** 149 of them: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** 150 of them: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was verified by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while reporting green. `ReferenceWalker_FindsEdgesThatDoExist` guards the same class of bug permanently: rules that pass by finding nothing need a companion that fails if the search finds nothing.
 
@@ -140,7 +149,9 @@ Each of these costs a day if you meet it cold.
 - **`beforeLoad` is synchronous; React effects run after first render.** Bootstrap the session *before* mounting `RouterProvider`, or a hard refresh of a guarded route always bounces to `/login` — which is the session-persistence requirement failing while every test passes.
 - **Vite `base` must come from the environment**, not be hardcoded to `/<repo>/`. nginx serves the compose SPA at `/`, so a baked-in base makes it request `/<repo>/assets/*.js` and render blank.
 - **ACA injects default TCP probes when ingress is on.** Declare `httpGet` liveness/readiness probes in Bicep or `/health/live` and `/health/ready` are never called and the split is decorative.
-- **`[GenerateOneOf]` crashes on types in the global namespace.** It derives the generated filename from the namespace and emits `<global namespace>_Foo.g.cs`; `<` is illegal, so the generator throws `CS8785` and every implicit conversion then fails with unrelated-looking errors. Always declare unions inside a namespace.
+- **`OneOf.Types.NotFound` collides with `Microsoft.AspNetCore.Http.HttpResults.NotFound`.** An endpoint file needs both namespaces, so the moment a handler's union case appears in an endpoint signature you get `CS0104`. Alias it — `using NotFound = OneOf.Types.NotFound;` after the using block. The named union classes used to hide this; returning `OneOf<…>` directly surfaces it.
+- **`[GenerateOneOf]` crashes on types in the global namespace.** It derives the generated filename from the namespace and emits `<global namespace>_Foo.g.cs`; `<` is illegal, so the generator throws `CS8785` and every implicit conversion then fails with unrelated-looking errors. Nothing uses the attribute now — handlers return `OneOf<…>` directly — but if one is ever reintroduced, declare it inside a namespace.
+- **Revoking and rotating a refresh token are not the same end.** Both stamp `SupersededAt`; only rotation sets `SupersededBy`. A grace-period check written against `SupersededAt` alone therefore keeps accepting a token the user just logged out with, for the whole window — logout silently does nothing for 30 seconds while every test stays green. `Refresh_AfterLogout_IsRejectedInsideTheGraceWindow` pins it.
 - **`OneOfDiagnosticSuppressor` does not exist on nuget.org** and is not needed. `.Match` takes one delegate per case, so exhaustiveness is enforced by arity — adding a case breaks every call site. `CS8509` only fires if you `switch` over `.Value`, which the convention forbids anyway.
 - **`CA1707` makes every `Method_Scenario_Expectation` test a build error** under `TreatWarningsAsErrors`. `tests/Directory.Build.props` suppresses it — and must explicitly `<Import>` the root props, because MSBuild only auto-imports the first `Directory.Build.props` it finds walking up.
 - **`GetPathOfFileAbove` inside `Exists(...)` fails to parse** with `MSB4092` — the nested single quotes break the condition parser. Hoist the path into a property first, then condition on the property.

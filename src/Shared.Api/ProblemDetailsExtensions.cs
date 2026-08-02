@@ -8,7 +8,7 @@ namespace StockPortfolio.Shared.Api;
 public static class ProblemDetailsExtensions
 {
     /// <summary>Maps a rule failure decided by a handler or an entity to 400.</summary>
-    public static ValidationProblem ToValidationProblem(this ValidationFailed failure)
+    public static ValidationProblem ToValidationProblem(this InvalidInput failure)
     {
         ArgumentNullException.ThrowIfNull(failure);
 

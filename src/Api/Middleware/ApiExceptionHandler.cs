@@ -36,6 +36,6 @@ internal sealed partial class ApiExceptionHandler(
                 Type = "https://datatracker.ietf.org/doc/html/rfc9110#section-15.6.1",
                 // Deliberately no Detail: never surface exception text to a caller.
             },
-        }).ConfigureAwait(false);
+        });
     }
 }

@@ -1,10 +1,10 @@
 using FluentValidation;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
+using StockPortfolio.Modules.Identity.Api.Requests;
 
 namespace StockPortfolio.Modules.Identity.Api.Validators;
 
-/// <summary>Shape rules for RegisterUserCommand — the only layer of validation that can answer "is this even an.</summary>
-public sealed class RegisterUserCommandValidator : AbstractValidator<RegisterUserCommand>
+/// <summary>Shape rules for RegisterUserRequest — the only layer that can answer "is this even an email?".</summary>
+public sealed class RegisterUserRequestValidator : AbstractValidator<RegisterUserRequest>
 {
     /// <summary>The shortest password accepted, in characters.</summary>
     public const int MinimumPasswordLength = 12;
@@ -16,7 +16,7 @@ public sealed class RegisterUserCommandValidator : AbstractValidator<RegisterUse
     public const int MaximumEmailLength = 254;
 
     /// <summary>Builds the rule set.</summary>
-    public RegisterUserCommandValidator()
+    public RegisterUserRequestValidator()
     {
         // Cascade.Stop everywhere: an empty password should produce one actionable message, not "required".
         RuleFor(request => request.Email)

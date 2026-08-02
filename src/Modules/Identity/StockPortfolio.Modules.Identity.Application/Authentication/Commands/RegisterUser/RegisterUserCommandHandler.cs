@@ -1,3 +1,4 @@
+using OneOf;
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
@@ -10,28 +11,28 @@ public sealed class RegisterUserCommandHandler(
     ITokenIssuer tokenIssuer,
     IUserRepository users,
     IRefreshTokenRepository refreshTokens,
-    IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<RegisterUserCommand, RegisterUserResult>
+    TimeProvider clock) : ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>
 {
     /// <inheritdoc/>
-    public async Task<RegisterUserResult> Handle(RegisterUserCommand command, CancellationToken ct)
+    public async Task<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>> Handle(
+        RegisterUserCommand command,
+        CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(command);
-
         // Hash first, unconditionally.
         var passwordHash = passwordHasher.Hash(command.Password);
 
         return await User.Create(command.Email, passwordHash, clock)
             .Match(
                 user => AddThenIssueAsync(user, ct),
-                failure => Task.FromResult<RegisterUserResult>(failure))
-            .ConfigureAwait(false);
+                invalid => Task.FromResult<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>(invalid));
     }
 
-    private async Task<RegisterUserResult> AddThenIssueAsync(User user, CancellationToken ct)
+    private async Task<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>> AddThenIssueAsync(
+        User user,
+        CancellationToken ct)
     {
-        // No pre-SELECT for a duplicate address: two concurrent registrations would both see nothing and both.
-        var outcome = await users.AddAsync(user, ct).ConfigureAwait(false);
+        // No pre-SELECT for a duplicate address: two concurrent registrations would both see nothing and both insert.
+        var outcome = await users.AddAsync(user, ct);
 
         if (outcome is AddUserOutcome.EmailTaken)
         {
@@ -49,8 +50,7 @@ public sealed class RegisterUserCommandHandler(
             now + TokenPolicy.RefreshTokenLifetime,
             clock);
 
-        await refreshTokens.AddAsync(session, ct).ConfigureAwait(false);
-        await unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        await refreshTokens.AddAsync(session, ct);
 
         return new TokenPair(accessToken, refreshToken, accessExpiresAt);
     }

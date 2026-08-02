@@ -1,16 +1,16 @@
 using FluentValidation;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
+using StockPortfolio.Modules.Identity.Api.Requests;
 
 namespace StockPortfolio.Modules.Identity.Api.Validators;
 
-/// <summary>Shape rules for RefreshSessionCommand: the token must be present and of a plausible size.</summary>
-public sealed class RefreshSessionCommandValidator : AbstractValidator<RefreshSessionCommand>
+/// <summary>Shape rules for RefreshSessionRequest: the token must be present and of a plausible size.</summary>
+public sealed class RefreshSessionRequestValidator : AbstractValidator<RefreshSessionRequest>
 {
     /// <summary>The longest refresh token accepted, in characters.</summary>
     public const int MaximumRefreshTokenLength = 256;
 
     /// <summary>Builds the rule set.</summary>
-    public RefreshSessionCommandValidator()
+    public RefreshSessionRequestValidator()
     {
         RuleFor(request => request.RefreshToken)
             .Cascade(CascadeMode.Stop)

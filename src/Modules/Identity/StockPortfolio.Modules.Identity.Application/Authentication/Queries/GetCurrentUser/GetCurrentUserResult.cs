@@ -1,11 +1,4 @@
-using OneOf;
-using StockPortfolio.Modules.Identity.Domain;
-using OneOf.Types;
-
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 
-/// <summary>Every way reading the current user can end: the summary, or a token whose account has gone.</summary>
-[GenerateOneOf]
-public partial class GetCurrentUserResult : OneOfBase<UserSummary, NotFound>
-{
-}
+/// <summary>Everything the application will tell you about yourself.</summary>
+public sealed record GetCurrentUserResult(Guid Id, string Email);

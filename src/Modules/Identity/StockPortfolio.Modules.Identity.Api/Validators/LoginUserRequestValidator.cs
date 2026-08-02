@@ -1,13 +1,13 @@
 using FluentValidation;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
+using StockPortfolio.Modules.Identity.Api.Requests;
 
 namespace StockPortfolio.Modules.Identity.Api.Validators;
 
-/// <summary>Shape rules for LoginUserCommand: both fields must be present, and nothing else.</summary>
-public sealed class LoginUserCommandValidator : AbstractValidator<LoginUserCommand>
+/// <summary>Shape rules for LoginUserRequest: both fields must be present, and nothing else.</summary>
+public sealed class LoginUserRequestValidator : AbstractValidator<LoginUserRequest>
 {
     /// <summary>Builds the rule set.</summary>
-    public LoginUserCommandValidator()
+    public LoginUserRequestValidator()
     {
         RuleFor(request => request.Email)
             .NotEmpty()

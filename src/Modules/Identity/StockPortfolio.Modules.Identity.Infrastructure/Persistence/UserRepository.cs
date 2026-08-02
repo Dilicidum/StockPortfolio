@@ -12,13 +12,11 @@ internal sealed class UserRepository(IdentityDbContext context) : IUserRepositor
 {
     public async Task<User?> FindByEmailAsync(string normalisedEmail, CancellationToken ct)
         => await context.Users
-            .FirstOrDefaultAsync(u => u.Email == normalisedEmail, ct)
-            .ConfigureAwait(false);
+            .FirstOrDefaultAsync(u => u.Email == normalisedEmail, ct);
 
     public async Task<User?> FindByIdAsync(UserId id, CancellationToken ct)
         => await context.Users
-            .FirstOrDefaultAsync(u => u.Id == id, ct)
-            .ConfigureAwait(false);
+            .FirstOrDefaultAsync(u => u.Id == id, ct);
 
     public async Task<AddUserOutcome> AddAsync(User user, CancellationToken ct)
     {
@@ -26,7 +24,7 @@ internal sealed class UserRepository(IdentityDbContext context) : IUserRepositor
 
         try
         {
-            await context.SaveChangesAsync(ct).ConfigureAwait(false);
+            await context.SaveChangesAsync(ct);
             return AddUserOutcome.Added;
         }
         catch (DbUpdateException ex) when (IsEmailUniqueViolation(ex))

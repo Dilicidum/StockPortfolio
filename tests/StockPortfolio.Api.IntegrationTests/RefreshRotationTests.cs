@@ -79,6 +79,31 @@ public sealed class RefreshRotationTests(ApiFixture fixture)
         current.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(current));
     }
 
+    /// <summary>Logging out ends the session immediately — the grace window is for rotation, not for revocation.</summary>
+    [Fact]
+    public async Task Refresh_AfterLogout_IsRejectedInsideTheGraceWindow()
+    {
+        var clock = new TestClock(DateTimeOffset.UtcNow);
+        await using var host = _fixture.CreateHostWithClock(clock);
+        using var client = host.CreateClient();
+
+        var issued = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("logout-then-refresh"));
+
+        using var loggedOut = await Wire.LogoutAsync(client, issued.AccessToken, issued.RefreshToken);
+        loggedOut.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(loggedOut));
+
+        // Deliberately still inside the window: a revoked token must not ride the rotation grace period.
+        clock.Advance(TokenPolicy.RotationGracePeriod / 2);
+
+        using var replayed = await Wire.RefreshAsync(client, issued.RefreshToken);
+
+        replayed.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized,
+            "A refresh token presented after logout must be dead immediately, or logging out does nothing "
+            + "for the length of the grace period. "
+            + await Wire.Describe(replayed));
+    }
+
     /// <summary>A refresh token that was never issued is rejected.</summary>
     [Fact]
     public async Task Refresh_WithUnknownToken_Returns401()

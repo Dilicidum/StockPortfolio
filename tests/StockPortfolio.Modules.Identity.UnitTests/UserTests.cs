@@ -22,7 +22,7 @@ public sealed class UserTests
     [InlineData("trailing-dot@example.com.")]
     [InlineData("")]
     [InlineData("   ")]
-    public void Create_MalformedEmail_ReturnsValidationFailed(string email)
+    public void Create_MalformedEmail_ReturnsInvalidInput(string email)
     {
         var result = User.Create(email, ValidHash, new FakeTimeProvider(Noon));
 

@@ -1,3 +1,4 @@
+using OneOf;
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
@@ -9,23 +10,20 @@ public sealed class RefreshSessionCommandHandler(
     ITokenIssuer tokenIssuer,
     IUserRepository users,
     IRefreshTokenRepository refreshTokens,
-    IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<RefreshSessionCommand, RefreshSessionResult>
+    TimeProvider clock) : ICommandHandler<RefreshSessionCommand, OneOf<TokenPair, InvalidOrExpired>>
 {
     /// <inheritdoc/>
-    public async Task<RefreshSessionResult> Handle(RefreshSessionCommand command, CancellationToken ct)
+    public async Task<OneOf<TokenPair, InvalidOrExpired>> Handle(RefreshSessionCommand command, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(command);
-
         var presentedHash = tokenIssuer.HashRefreshToken(command.RefreshToken);
-        var session = await refreshTokens.FindByHashAsync(presentedHash, ct).ConfigureAwait(false);
+        var session = await refreshTokens.FindByHashAsync(presentedHash, ct);
 
         if (session is null || !IsAcceptable(session))
         {
             return new InvalidOrExpired();
         }
 
-        var user = await users.FindByIdAsync(session.UserId, ct).ConfigureAwait(false);
+        var user = await users.FindByIdAsync(session.UserId, ct);
 
         if (user is null)
         {
@@ -39,7 +37,7 @@ public sealed class RefreshSessionCommandHandler(
 
         if (!TokenPolicy.RotateOnUse)
         {
-            // Nothing changed, so nothing to commit: the same session keeps running and only the short-lived.
+            // Nothing changed, so nothing to commit: the same session keeps running.
             return new TokenPair(accessToken, command.RefreshToken, accessExpiresAt);
         }
 
@@ -51,15 +49,14 @@ public sealed class RefreshSessionCommandHandler(
             now + TokenPolicy.RefreshTokenLifetime,
             clock);
 
-        await refreshTokens.AddAsync(replacement, ct).ConfigureAwait(false);
-
-        // Guarded, not assumed: Supersede throws on a second call, and the branch below admits.
+        // Guarded, not assumed: Supersede throws on a second call, and the grace period admits a superseded session.
         if (session.SupersededAt is null)
         {
             session.Supersede(replacement, clock);
         }
 
-        await unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        // Stamped before the insert so one commit covers both — losing the supersede would leave two live sessions.
+        await refreshTokens.AddAsync(replacement, ct);
 
         return new TokenPair(accessToken, replacementToken, accessExpiresAt);
     }
@@ -72,7 +69,11 @@ public sealed class RefreshSessionCommandHandler(
             return true;
         }
 
-        if (!TokenPolicy.RotateOnUse || session.SupersededAt is not { } supersededAt)
+        // SupersededBy separates the two ways a session ends: rotation names its replacement, logout leaves it
+        // null. Only rotation earns the grace window — otherwise logging out would not take effect for 30s.
+        if (!TokenPolicy.RotateOnUse
+            || session.SupersededBy is null
+            || session.SupersededAt is not { } supersededAt)
         {
             return false;
         }

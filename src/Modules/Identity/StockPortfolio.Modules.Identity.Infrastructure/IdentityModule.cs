@@ -19,7 +19,7 @@ public static class IdentityModule
     /// <summary>The ConnectionStrings key this module reads.</summary>
     public const string ConnectionStringName = "Identity";
 
-    /// <summary>Registers the Identity module: its DbContext, repositories, unit of work, password hasher, token.</summary>
+    /// <summary>Registers the Identity module: its DbContext, repositories, password hasher, token issuer, handlers.</summary>
     public static IServiceCollection AddIdentityModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -46,7 +46,6 @@ public static class IdentityModule
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
-        services.AddScoped<IUnitOfWork, UnitOfWork>();
 
         // Singletons: both are stateless and hold expensive pre-computed state.
         services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();

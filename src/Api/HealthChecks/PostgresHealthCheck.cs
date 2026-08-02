@@ -26,10 +26,10 @@ internal sealed class PostgresHealthCheck(IConfiguration configuration) : IHealt
         }
 
         await using var connection = new NpgsqlConnection(connectionString);
-        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
+        await connection.OpenAsync(cancellationToken);
 
         await using var command = new NpgsqlCommand(ProbeSql, connection);
-        _ = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
+        _ = await command.ExecuteScalarAsync(cancellationToken);
 
         return HealthCheckResult.Healthy("Postgres accepted a connection and answered SELECT 1.");
     }

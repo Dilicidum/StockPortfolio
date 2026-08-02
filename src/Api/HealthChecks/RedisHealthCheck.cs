@@ -16,7 +16,7 @@ internal sealed class RedisHealthCheck(IConnectionMultiplexer multiplexer) : IHe
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var latency = await multiplexer.GetDatabase().PingAsync().ConfigureAwait(false);
+        var latency = await multiplexer.GetDatabase().PingAsync();
 
         return HealthCheckResult.Healthy(string.Create(
             CultureInfo.InvariantCulture,

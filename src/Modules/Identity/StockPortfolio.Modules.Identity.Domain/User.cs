@@ -37,21 +37,21 @@ public sealed class User
         "Globalization",
         "CA1308:Normalize strings to uppercase",
         Justification = "Lower case is the stored canonical form of an email address and the key of the unique index; upper-casing would change what is persisted and looked up.")]
-    public static OneOf<User, ValidationFailed> Create(string email, string passwordHash, TimeProvider clock)
+    public static OneOf<User, InvalidInput> Create(string email, string passwordHash, TimeProvider clock)
     {
         ArgumentNullException.ThrowIfNull(clock);
         ArgumentException.ThrowIfNullOrWhiteSpace(passwordHash);
 
         if (string.IsNullOrWhiteSpace(email))
         {
-            return new ValidationFailed("email", "Email is required.");
+            return new InvalidInput("email", "Email is required.");
         }
 
         var normalised = email.Trim().ToLowerInvariant();
 
         if (!IsWellFormedEmail(normalised))
         {
-            return new ValidationFailed("email", "Not a valid email address.");
+            return new InvalidInput("email", "Not a valid email address.");
         }
 
         return new User(UserId.New(), normalised, passwordHash, clock.GetUtcNow());

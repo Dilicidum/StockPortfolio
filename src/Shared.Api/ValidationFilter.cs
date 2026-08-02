@@ -17,15 +17,14 @@ public sealed class ValidationFilter<TRequest>(IValidator<TRequest> validator) :
 
         if (context.Arguments.OfType<TRequest>().FirstOrDefault() is not { } request)
         {
-            return await next(context).ConfigureAwait(false);
+            return await next(context);
         }
 
         var result = await validator
-            .ValidateAsync(request, context.HttpContext.RequestAborted)
-            .ConfigureAwait(false);
+            .ValidateAsync(request, context.HttpContext.RequestAborted);
 
         return result.IsValid
-            ? await next(context).ConfigureAwait(false)
+            ? await next(context)
             : TypedResults.ValidationProblem(result.ToDictionary());
     }
 }

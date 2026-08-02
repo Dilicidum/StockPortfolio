@@ -58,7 +58,7 @@ internal sealed class LoggingCommandHandler<TCommand, TResult>(
 
         try
         {
-            var result = await inner.Handle(command, ct).ConfigureAwait(false);
+            var result = await inner.Handle(command, ct);
             logger.HandlerCompleted(name, ElapsedMilliseconds(started));
             return result;
         }
@@ -89,7 +89,7 @@ internal sealed class LoggingQueryHandler<TQuery, TResult>(
 
         try
         {
-            var result = await inner.Handle(query, ct).ConfigureAwait(false);
+            var result = await inner.Handle(query, ct);
             logger.HandlerCompleted(name, ElapsedMilliseconds(started));
             return result;
         }

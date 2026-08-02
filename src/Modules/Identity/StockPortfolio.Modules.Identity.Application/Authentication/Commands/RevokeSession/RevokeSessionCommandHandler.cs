@@ -1,7 +1,7 @@
-using StockPortfolio.Modules.Identity.Application.Abstractions;
-using StockPortfolio.Modules.Identity.Domain;
-using StockPortfolio.Shared.Kernel.Cqrs;
+using OneOf;
 using OneOf.Types;
+using StockPortfolio.Modules.Identity.Application.Abstractions;
+using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 
@@ -9,16 +9,13 @@ namespace StockPortfolio.Modules.Identity.Application.Authentication.Commands.Re
 public sealed class RevokeSessionCommandHandler(
     ITokenIssuer tokenIssuer,
     IRefreshTokenRepository refreshTokens,
-    IUnitOfWork unitOfWork,
-    TimeProvider clock) : ICommandHandler<RevokeSessionCommand, RevokeSessionResult>
+    TimeProvider clock) : ICommandHandler<RevokeSessionCommand, OneOf<Success, NotFound>>
 {
     /// <inheritdoc/>
-    public async Task<RevokeSessionResult> Handle(RevokeSessionCommand command, CancellationToken ct)
+    public async Task<OneOf<Success, NotFound>> Handle(RevokeSessionCommand command, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(command);
-
         var presentedHash = tokenIssuer.HashRefreshToken(command.RefreshToken);
-        var session = await refreshTokens.FindByHashAsync(presentedHash, ct).ConfigureAwait(false);
+        var session = await refreshTokens.FindByHashAsync(presentedHash, ct);
 
         // An already-closed session is reported the same as an unknown one: there is nothing left to revoke.
         if (session is null || session.SupersededAt is not null)
@@ -28,7 +25,7 @@ public sealed class RevokeSessionCommandHandler(
 
         session.Revoke(clock);
 
-        await unitOfWork.SaveChangesAsync(ct).ConfigureAwait(false);
+        await refreshTokens.UpdateAsync(session, ct);
 
         return new Success();
     }

@@ -61,7 +61,7 @@ if (app.Environment.IsDevelopment())
 app.MapIdentityEndpoints();
 app.MapStockPortfolioHealthChecks();
 
-await app.RunAsync().ConfigureAwait(false);
+await app.RunAsync();
 
 // NEVER add UseResponseCompression().
 

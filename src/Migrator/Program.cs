@@ -64,7 +64,7 @@ foreach (var contextType in contextTypes)
 {
     var context = (DbContext)scope.ServiceProvider.GetRequiredService(contextType);
 
-    var pending = (await context.Database.GetPendingMigrationsAsync().ConfigureAwait(false)).ToList();
+    var pending = (await context.Database.GetPendingMigrationsAsync()).ToList();
     if (pending.Count == 0)
     {
         Console.WriteLine($"migrator: {contextType.Name} is up to date.");
@@ -72,7 +72,7 @@ foreach (var contextType in contextTypes)
     }
 
     Console.WriteLine($"migrator: {contextType.Name} applying {pending.Count} migration(s): {string.Join(", ", pending)}");
-    await context.Database.MigrateAsync().ConfigureAwait(false);
+    await context.Database.MigrateAsync();
     Console.WriteLine($"migrator: {contextType.Name} done.");
 }
 

@@ -36,6 +36,13 @@ internal static class Wire
     public static Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
         client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken });
 
+    /// <summary>Posts to /api/auth/logout, which needs the access token as well as the refresh token.</summary>
+    public static Task<HttpResponseMessage> LogoutAsync(
+        HttpClient client,
+        string accessToken,
+        string refreshToken) =>
+        SendAsync(client, HttpMethod.Post, "/api/auth/logout", accessToken, new { refreshToken });
+
     /// <summary>Registers a new account and returns its tokens, asserting the 201 on the way.</summary>
     public static async Task<AuthPayload> RegisterSucceedsAsync(
         HttpClient client,
