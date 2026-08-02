@@ -213,7 +213,14 @@ public static class IdentityEndpoints
     {
         // No body, or a body with no token: nothing is revocable. The access token is short-lived
         // and self-contained, so there is nothing to invalidate server-side either. 204 is honest.
-        if (string.IsNullOrWhiteSpace(command?.RefreshToken))
+        //
+        // Written as an explicit `command is null` rather than `command?.RefreshToken`. Both compile
+        // — `string.IsNullOrWhiteSpace` is annotated [NotNullWhen(false)], and Roslyn propagates
+        // that back through the conditional access, so `command` narrows to non-null past the
+        // guard. But that inference is invisible at a glance, and a reader (or an IDE running a
+        // different analyzer version) sees a `RevokeSessionCommand?` handed to a parameter that is
+        // not nullable and reasonably flinches. This form needs no inference at all.
+        if (command is null || string.IsNullOrWhiteSpace(command.RefreshToken))
         {
             return TypedResults.NoContent();
         }
