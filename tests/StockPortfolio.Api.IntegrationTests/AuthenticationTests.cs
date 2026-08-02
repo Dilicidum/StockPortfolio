@@ -69,7 +69,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
     /// <summary>A password under the floor is a field-level 400, not a generic one.</summary>
     /// <returns>A task that completes when the assertions have run.</returns>
     /// <remarks>
-    /// This asserts the whole shape-validation path: the <c>ValidationFilter&lt;RegisterRequest&gt;</c>
+    /// This asserts the whole shape-validation path: the <c>ValidationFilter&lt;RegisterUser&gt;</c>
     /// endpoint filter short-circuits before the handler, and <c>AddProblemDetails</c> renders RFC 7807.
     /// The <c>errors</c> key is <c>Password</c> with a capital P — FluentValidation names the property
     /// from the member expression, and it is not run through the JSON naming policy.

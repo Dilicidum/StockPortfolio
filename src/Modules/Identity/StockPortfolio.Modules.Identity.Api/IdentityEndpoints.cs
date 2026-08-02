@@ -79,7 +79,7 @@ public static class IdentityEndpoints
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
+        services.AddValidatorsFromAssemblyContaining<LoginUserValidator>();
 
         return services;
     }
@@ -101,38 +101,38 @@ public static class IdentityEndpoints
         var group = app.MapGroup("/api/auth").WithTags("Authentication");
 
         group.MapPost("/register", RegisterAsync)
-            .AddEndpointFilter<ValidationFilter<RegisterRequest>>()
+            .AddEndpointFilter<ValidationFilter<RegisterUser>>()
             .AllowAnonymous()
             .WithName("Register")
             .WithSummary("Creates an account and signs the caller straight in.")
             .WithDescription(
                 "Returns the same token pair as login, so the SPA never has to post the password " +
                 "twice. Location points at /api/auth/me, the only address the new account has.")
-            .Produces<AuthResponse>(StatusCodes.Status201Created)
+            .Produces<TokenPair>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict);
 
         group.MapPost("/login", LoginAsync)
-            .AddEndpointFilter<ValidationFilter<LoginRequest>>()
+            .AddEndpointFilter<ValidationFilter<LoginUser>>()
             .AllowAnonymous()
             .WithName("Login")
             .WithSummary("Exchanges email and password for a token pair.")
             .WithDescription(
                 "A wrong password and an unknown email give the identical 401. The distinction is " +
                 "withheld on purpose: telling them apart turns the endpoint into an account enumerator.")
-            .Produces<AuthResponse>(StatusCodes.Status200OK)
+            .Produces<TokenPair>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         group.MapPost("/refresh", RefreshAsync)
-            .AddEndpointFilter<ValidationFilter<RefreshRequest>>()
+            .AddEndpointFilter<ValidationFilter<RefreshSession>>()
             .AllowAnonymous()
             .WithName("Refresh")
             .WithSummary("Exchanges a refresh token for a fresh token pair.")
             .WithDescription(
                 "Anonymous by design — the caller reaches here precisely because its access token " +
                 "has expired, so requiring a valid bearer would make the endpoint unreachable.")
-            .Produces<AuthResponse>(StatusCodes.Status200OK)
+            .Produces<TokenPair>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
@@ -149,24 +149,24 @@ public static class IdentityEndpoints
             .RequireAuthorization()
             .WithName("GetCurrentUser")
             .WithSummary("Returns the identity behind the current access token.")
-            .Produces<UserResponse>(StatusCodes.Status200OK)
+            .Produces<UserSummary>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         return app;
     }
 
     /// <summary>Creates an account and issues its first token pair.</summary>
-    private static async Task<Results<Created<AuthResponse>, ProblemHttpResult, ValidationProblem>> RegisterAsync(
-        RegisterRequest request,
+    private static async Task<Results<Created<TokenPair>, ProblemHttpResult, ValidationProblem>> RegisterAsync(
+        RegisterUser command,
         ICommandHandler<RegisterUser, RegisterResult> handler,
         CancellationToken ct)
     {
         var result = await handler
-            .Handle(new RegisterUser(request.Email, request.Password), ct)
+            .Handle(command, ct)
             .ConfigureAwait(false);
 
-        return result.Match<Results<Created<AuthResponse>, ProblemHttpResult, ValidationProblem>>(
-            tokens => TypedResults.Created(CurrentUserPath, ToResponse(tokens)),
+        return result.Match<Results<Created<TokenPair>, ProblemHttpResult, ValidationProblem>>(
+            tokens => TypedResults.Created(CurrentUserPath, tokens),
             _ => ProblemDetailsExtensions.ConflictProblem("An account with that email address already exists."),
 
             // The handler's own ValidationFailed case, not the filter's. The filter has already
@@ -176,50 +176,50 @@ public static class IdentityEndpoints
     }
 
     /// <summary>Signs an existing account in.</summary>
-    private static async Task<Results<Ok<AuthResponse>, ProblemHttpResult>> LoginAsync(
-        LoginRequest request,
+    private static async Task<Results<Ok<TokenPair>, ProblemHttpResult>> LoginAsync(
+        LoginUser command,
         ICommandHandler<LoginUser, LoginResult> handler,
         CancellationToken ct)
     {
         var result = await handler
-            .Handle(new LoginUser(request.Email, request.Password), ct)
+            .Handle(command, ct)
             .ConfigureAwait(false);
 
-        return result.Match<Results<Ok<AuthResponse>, ProblemHttpResult>>(
-            tokens => TypedResults.Ok(ToResponse(tokens)),
+        return result.Match<Results<Ok<TokenPair>, ProblemHttpResult>>(
+            tokens => TypedResults.Ok(tokens),
             _ => ProblemDetailsExtensions.UnauthorizedProblem("Invalid credentials."));
     }
 
     /// <summary>Rotates a refresh token into a new pair.</summary>
-    private static async Task<Results<Ok<AuthResponse>, ProblemHttpResult>> RefreshAsync(
-        RefreshRequest request,
+    private static async Task<Results<Ok<TokenPair>, ProblemHttpResult>> RefreshAsync(
+        RefreshSession command,
         ICommandHandler<RefreshSession, RefreshResult> handler,
         CancellationToken ct)
     {
         var result = await handler
-            .Handle(new RefreshSession(request.RefreshToken), ct)
+            .Handle(command, ct)
             .ConfigureAwait(false);
 
-        return result.Match<Results<Ok<AuthResponse>, ProblemHttpResult>>(
-            tokens => TypedResults.Ok(ToResponse(tokens)),
+        return result.Match<Results<Ok<TokenPair>, ProblemHttpResult>>(
+            tokens => TypedResults.Ok(tokens),
             _ => ProblemDetailsExtensions.UnauthorizedProblem("That refresh token is not valid."));
     }
 
     /// <summary>Ends the session, revoking the refresh token when one is offered.</summary>
     private static async Task<NoContent> LogoutAsync(
-        LogoutRequest? request,
+        RevokeSession? command,
         ICommandHandler<RevokeSession, RevokeResult> handler,
         CancellationToken ct)
     {
         // No body, or a body with no token: nothing is revocable. The access token is short-lived
         // and self-contained, so there is nothing to invalidate server-side either. 204 is honest.
-        if (string.IsNullOrWhiteSpace(request?.RefreshToken))
+        if (string.IsNullOrWhiteSpace(command?.RefreshToken))
         {
             return TypedResults.NoContent();
         }
 
         var result = await handler
-            .Handle(new RevokeSession(request.RefreshToken), ct)
+            .Handle(command, ct)
             .ConfigureAwait(false);
 
         // Both cases are 204. Sign-out is idempotent, and answering 404 for an unknown token would
@@ -230,7 +230,7 @@ public static class IdentityEndpoints
     }
 
     /// <summary>Resolves the bearer token back to a user.</summary>
-    private static async Task<Results<Ok<UserResponse>, ProblemHttpResult>> GetCurrentUserAsync(
+    private static async Task<Results<Ok<UserSummary>, ProblemHttpResult>> GetCurrentUserAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetCurrentUser, CurrentUserResult> handler,
         CancellationToken ct)
@@ -246,14 +246,11 @@ public static class IdentityEndpoints
             .Handle(new GetCurrentUser(userId), ct)
             .ConfigureAwait(false);
 
-        return result.Match<Results<Ok<UserResponse>, ProblemHttpResult>>(
-            user => TypedResults.Ok(new UserResponse(user.Id, user.Email)),
+        return result.Match<Results<Ok<UserSummary>, ProblemHttpResult>>(
+            user => TypedResults.Ok(user),
 
             // The JWT outlived the account it names — deleted, or issued by a previous database.
             _ => ProblemDetailsExtensions.UnauthorizedProblem("This session no longer refers to a valid account."));
     }
 
-    /// <summary>Projects the application's token pair onto the wire shape.</summary>
-    private static AuthResponse ToResponse(TokenPair pair) =>
-        new(pair.AccessToken, pair.RefreshToken, pair.AccessExpiresAt);
 }
