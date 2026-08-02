@@ -22,37 +22,37 @@ COPY global.json Directory.Build.props Directory.Build.targets Directory.Package
 
 # Project files only, so restore stays cached.
 COPY src/Shared.Kernel/StockPortfolio.Shared.Kernel.csproj                 src/Shared.Kernel/
-COPY src/Shared.Presentation/StockPortfolio.Shared.Presentation.csproj     src/Shared.Presentation/
+COPY src/Shared.Api/StockPortfolio.Shared.Api.csproj     src/Shared.Api/
 COPY src/Migrator/StockPortfolio.Migrator.csproj                           src/Migrator/
 
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Contracts/StockPortfolio.Modules.Identity.Contracts.csproj             src/Modules/Identity/StockPortfolio.Modules.Identity.Contracts/
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Domain/StockPortfolio.Modules.Identity.Domain.csproj                   src/Modules/Identity/StockPortfolio.Modules.Identity.Domain/
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Application/StockPortfolio.Modules.Identity.Application.csproj         src/Modules/Identity/StockPortfolio.Modules.Identity.Application/
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Infrastructure/StockPortfolio.Modules.Identity.Infrastructure.csproj   src/Modules/Identity/StockPortfolio.Modules.Identity.Infrastructure/
-COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Presentation/StockPortfolio.Modules.Identity.Presentation.csproj       src/Modules/Identity/StockPortfolio.Modules.Identity.Presentation/
+COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Api/StockPortfolio.Modules.Identity.Api.csproj       src/Modules/Identity/StockPortfolio.Modules.Identity.Api/
 
 COPY src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/StockPortfolio.Modules.Portfolio.Contracts.csproj          src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/
 COPY src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Domain/StockPortfolio.Modules.Portfolio.Domain.csproj                src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Domain/
 COPY src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Application/StockPortfolio.Modules.Portfolio.Application.csproj      src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Application/
 COPY src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Infrastructure/StockPortfolio.Modules.Portfolio.Infrastructure.csproj src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Infrastructure/
-COPY src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Presentation/StockPortfolio.Modules.Portfolio.Presentation.csproj    src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Presentation/
+COPY src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Api/StockPortfolio.Modules.Portfolio.Api.csproj    src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Api/
 
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Contracts/StockPortfolio.Modules.MarketData.Contracts.csproj       src/Modules/MarketData/StockPortfolio.Modules.MarketData.Contracts/
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Domain/StockPortfolio.Modules.MarketData.Domain.csproj             src/Modules/MarketData/StockPortfolio.Modules.MarketData.Domain/
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Application/StockPortfolio.Modules.MarketData.Application.csproj   src/Modules/MarketData/StockPortfolio.Modules.MarketData.Application/
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Infrastructure/StockPortfolio.Modules.MarketData.Infrastructure.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Infrastructure/
-COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Presentation/StockPortfolio.Modules.MarketData.Presentation.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Presentation/
+COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Api/StockPortfolio.Modules.MarketData.Api.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Api/
 
 COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/StockPortfolio.Modules.Alerts.Contracts.csproj                   src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/
 COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/StockPortfolio.Modules.Alerts.Domain.csproj                         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/
 COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/StockPortfolio.Modules.Alerts.Application.csproj               src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/
 COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/StockPortfolio.Modules.Alerts.Infrastructure.csproj         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/
-COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Presentation/StockPortfolio.Modules.Alerts.Presentation.csproj             src/Modules/Alerts/StockPortfolio.Modules.Alerts.Presentation/
+COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/StockPortfolio.Modules.Alerts.Api.csproj             src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/
 
 RUN dotnet restore src/Migrator/StockPortfolio.Migrator.csproj
 
 COPY src/Shared.Kernel/       src/Shared.Kernel/
-COPY src/Shared.Presentation/ src/Shared.Presentation/
+COPY src/Shared.Api/ src/Shared.Api/
 COPY src/Modules/            src/Modules/
 COPY src/Migrator/           src/Migrator/
 

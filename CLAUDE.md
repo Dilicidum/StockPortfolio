@@ -40,7 +40,7 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 | `.Domain` | entities, invariants | `public`, own module only |
 | `.Application` | commands, results, handlers, abstractions | `public` |
 | `.Infrastructure` | DbContext, repositories, hashing, tokens | **`internal`** except `<Module>Module` |
-| `.Api` | endpoints, request/response records, validators | `public` (leaf project) |
+| `.Api` | endpoints and validators — no DTOs of its own | `public` (leaf project) |
 
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
@@ -56,15 +56,21 @@ Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: 
 
 **CQRS without a dispatcher.** `ICommandHandler<,>` / `IQueryHandler<,>` injected straight into Minimal API endpoints. There is one caller per handler, so a mediator has nothing to decouple. Cross-cutting concerns are DI decorators.
 
+**A use-case folder holds exactly three things**: the command (or query), the result record if one is needed, and the handler. Queries follow the same shape. **The command is the request body** — endpoints bind it directly off the wire, and its validator sits in `.Api` next to the endpoint. Do not add a parallel `XxxRequest` record that copies it field for field.
+
 **Results are `OneOf`** with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Exhaustiveness is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed.
 
-**Rich domain.** Private setters, private parameterless EF constructor, static `Create(...)` returning a OneOf, instance methods enforcing invariants. `Id` is declared once on `AggregateRoot<TId>` and never re-declared on a derived entity (CS0108 is an error here).
+**Rich domain, and no base class.** There is no `AggregateRoot<TId>`; each entity declares its own `Id`. An entity has **exactly one constructor**: private, taking every mapped value, assigning and nothing else. No parameterless constructor, no object initialiser, no public setter — a half-built entity is not representable, and the static `Create(...)` returning a OneOf is the only way in.
+
+The constructor must stay guard-free. EF's binder matches on parameter name and *will* select it for materialisation, so anything it does runs on every row of every `SELECT`. That is the real trap — not the constructor itself. Validation lives in the factory, which EF never calls.
+
+**Use `OneOf.Types.Success` and `OneOf.Types.NotFound`.** They ship with the package. Do not redeclare them per module, and never put a `Success` type in an errors file.
 
 **Validation has three layers, and only one uses result types.**
 
 | Layer | Where | Mechanism |
 |---|---|---|
-| Shape — is this even an email? | FluentValidation on the request record, `.Api` | generic `ValidationFilter<T>` : `IEndpointFilter` returns **400** |
+| Shape — is this even an email? | FluentValidation on the **command**, `.Api` | generic `ValidationFilter<T>` : `IEndpointFilter` returns **400** |
 | Context — does this user exist? allowed? | handler, `.Application` | OneOf result case |
 | Invariant — a User can never have a blank email | entity, `.Domain` | **throws** |
 
@@ -83,8 +89,8 @@ Shape validation is an **endpoint filter, not a DI decorator**. A decorator woul
 Each of these costs a day if you meet it cold.
 
 - **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Every context needs `MigrationsHistoryTable("__EFMigrationsHistory", "<schema>")` or all four share one table and corrupt each other's bookkeeping. Never put `SearchPath=` in a connection string.
-- **A constructor whose parameter names match mapped properties gets hijacked by EF for materialisation**, running your guards on every `SELECT`. Binding is by convention and cannot be configured. Use a private parameterless constructor and a static factory.
-- **`PropertyAccessMode.PreferField` is the default**, so EF writes the backing field and never calls your setter. Validation in a setter silently never runs.
+- **A constructor whose parameter names match mapped properties gets hijacked by EF for materialisation.** Binding is by convention and cannot be configured. This is *fine and intended* here — the single private all-args constructor only assigns. It becomes a trap the moment a guard is added inside it, because EF then re-runs that guard on every row of every `SELECT`. Guards belong in the static factory.
+- **`PropertyAccessMode.PreferField` is the default**, so EF writes the backing field and never calls your setter. Validation in a setter silently never runs — which is moot now that entities have no settable surface, but it is why they don't.
 - **`Maximum Pool Size=2` on every connection string.** Azure Postgres B1ms allows 35 user connections and a different username is a different Npgsql pool; the default of 100 × 4 roles × 2 replicas requests 800. PgBouncer is unavailable on Burstable.
 - **An unhandled exception in a `BackgroundService` kills the host** (`StopHost` is the default). The poll loop needs an in-loop `try/catch`.
 - **Assigning a `DelayGenerator` silently disables `Retry-After` handling**, which is honoured by default.
