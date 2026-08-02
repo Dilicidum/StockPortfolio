@@ -14,20 +14,9 @@ Covers P0 req 1 (auth incl. session persistence), the auth half of req 3 (routin
 
 ### 2.1 Shared.Kernel
 
+`Shared.Kernel` is framework-free and deliberately small. An `AggregateRoot<TId>` base and an `IDomainEvent` were written here and then **deleted**: nothing raised an event, so the event list was always empty and the type parameter existed only to satisfy the base. Phase 2 brings an event type back, at `HoldingRemoved` — the first one anything actually raises.
+
 ```csharp
-public abstract class AggregateRoot<TId> where TId : struct
-{
-    private readonly List<IDomainEvent> _domainEvents = [];
-
-    [NotMapped]                                        // ← or EF tries to map it and model building throws
-    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents;
-
-    protected void Raise(IDomainEvent e) => _domainEvents.Add(e);
-    public void ClearDomainEvents() => _domainEvents.Clear();
-}
-
-public interface IDomainEvent { DateTimeOffset OccurredAt { get; } }
-
 public readonly record struct Money(decimal Amount, string Currency)
 {
     public static Money Usd(decimal amount) => new(amount, "USD");
@@ -48,26 +37,26 @@ public interface IQueryHandler<in TQuery, TResult> {
 }
 ```
 
-Endpoint registration, so each module contributes its own group:
+and the one shared failure case:
 
 ```csharp
-public interface IEndpointModule { void MapEndpoints(IEndpointRouteBuilder app); }
+public sealed record InvalidInput(string Field, string Message);
 ```
 
-Registered manually in `Api/Program.cs` — one line per module. Assembly scanning works but is not trim-safe and hides ordering.
+Endpoint registration is a plain extension method per module — `app.MapIdentityEndpoints()` — called manually in `Api/Program.cs`, one line each. An earlier draft had an `IEndpointModule` interface for this; it was deleted, because a single-method interface implemented once per module and called once per module by the host is the same list written twice. Assembly scanning works but is not trim-safe and hides ordering.
 
 ### 2.2 Decorators (the reason CQRS earns its keep without a dispatcher)
 
 ```csharp
-internal sealed class ValidationDecorator<TCommand, TResult>(
+internal sealed class LoggingCommandHandler<TCommand, TResult>(
     ICommandHandler<TCommand, TResult> inner,
-    IEnumerable<IValidator<TCommand>> validators)
+    ILogger<LoggingCommandHandler<TCommand, TResult>> logger)
     : ICommandHandler<TCommand, TResult> { … }
-
-internal sealed class LoggingDecorator<TCommand, TResult> …
 ```
 
-Register with explicit `AddScoped` + `Decorate` per handler. When a handler is injected into an endpoint, DI hands it the decorated chain — no mediator involved.
+**Validation is not among them.** A `ValidationDecorator` was planned and cannot work: on failure it must return a `TResult`, which is unconstrained, and no reflection can manufacture a failure case for an arbitrary union. It became a generic `IEndpointFilter` in `Shared.Api` instead, which sits in the HTTP pipeline and can simply *return* a 400. See `phase-1-implementation.md` §4.5.
+
+Register with `Decorate` over the open generic. When a handler is injected into an endpoint, DI hands it the decorated chain — no mediator involved.
 
 ⚠️ If you later enable `EnableRetryOnFailure`, a transaction decorator **must** wrap its work in `context.Database.CreateExecutionStrategy().ExecuteAsync(...)`, and the handler must be safe to re-run.
 
@@ -76,22 +65,24 @@ Register with explicit `AddScoped` + `Decorate` per handler. When a handler is i
 **`User` aggregate** — `Identity.Domain/User.cs`
 
 ```csharp
-public sealed class User : AggregateRoot<UserId>
+public sealed class User
 {
-    private User() { }                                  // EF only. No validation here.
+    // The only way to build one. Assigns; guards nothing.
+    private User(UserId id, string email, string passwordHash, DateTimeOffset createdAt) { … }
 
     public UserId Id { get; private set; }
-    public string Email { get; private set; } = null!;   // stored lowercase, normalised in Create
-    public string PasswordHash { get; private set; } = null!;
+    public string Email { get; private set; }            // stored lowercase, normalised in Create
+    public string PasswordHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
-    public static OneOf<User, ValidationFailed> Create(string email, string passwordHash) { … }
+    public static string NormaliseEmail(string? email);
+    public static OneOf<User, InvalidInput> Create(string email, string passwordHash, TimeProvider clock);
 
-    public void ChangePassword(string newHash) { … }
+    public void ChangePasswordHash(string newHash) { … }
 }
 ```
 
-⚠️ **Do not** add a `private User(UserId id, string email, string passwordHash)`. Those parameter names match mapped properties, so EF's constructor binder will use it for materialisation and run any guards inside it on every `SELECT`. Construct via object initialiser inside `Create`.
+⚠️ **This reverses an earlier instruction in this file**, which said never to write a constructor whose parameter names match mapped properties. EF's binder *will* select it for materialisation, by name, ignoring accessibility — but that is fine and intended, because the constructor only assigns. The trap is putting a **guard inside it**: EF then re-runs that guard on every row of every `SELECT`. Guards live in the factory, which EF never calls. Taking the constructor is what makes a half-built entity unrepresentable. See `phase-1-implementation.md` §5.2.
 
 **Password hashing** — Argon2id via `Konscious.Security.Cryptography.Argon2`. There is no in-box Argon2 in .NET 10 and there won't be. OWASP parameters: `m=19456` (19 MiB), `t=2`, `p=1`, 16-byte salt, 32-byte output. Encode as a PHC string (`$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`) so the parameters travel with the hash and you can rehash on upgrade.
 
@@ -101,36 +92,40 @@ public sealed class User : AggregateRoot<UserId>
 
 | Type | Result cases |
 |---|---|
-| `RegisterUserCommand(string Email, string Password)` | `Success(TokenPair)` · `EmailAlreadyUsed` · `ValidationFailed` |
-| `LoginUserCommand(string Email, string Password)` | `Success(TokenPair)` · `InvalidCredentials` |
-| `RefreshToken(string RefreshToken)` | `Success(TokenPair)` · `InvalidOrExpired` |
-| `RevokeToken(string RefreshToken)` | `Success` · `NotFound` |
+| `RegisterUserCommand(string Email, string Password)` | `OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>` |
+| `LoginUserCommand(string Email, string Password)` | `OneOf<TokenPair, InvalidCredentials>` |
+| `RefreshSessionCommand(string RefreshToken)` | `OneOf<TokenPair, InvalidOrExpired>` |
+| `RevokeSessionCommand(string RefreshToken)` | `OneOf<Success, NotFound>` (both `OneOf.Types`) |
+| `GetCurrentUserQuery(Guid UserId)` | `OneOf<GetCurrentUserResult, NotFound>` |
+
+The handler returns the union directly — there is no `<UseCase>Result` union class. `RefreshToken`/`RevokeToken` as command names would be **CS0542** (a positional record generates a member named after the parameter, and a member cannot share its type's name) and would collide with the `RefreshToken` entity besides.
 
 `InvalidCredentials` is deliberately one case, not "no such user" plus "wrong password" — enumeration disclosure. Also run the hash verification even when the user doesn't exist, against a dummy hash, so the timing doesn't leak.
 
-**Endpoints** — `Identity.Infrastructure/IdentityEndpoints.cs`
+**Endpoints** — `Identity.Api/IdentityEndpoints.cs`, returning `Task<IResult>`
 
 ```
 POST /api/auth/register   201 + TokenPair | 409 Problem | 400 Problem
 POST /api/auth/login      200 + TokenPair | 401 Problem
 POST /api/auth/refresh    200 + TokenPair | 401 Problem
-POST /api/auth/logout     204                                     [Authorize]
-GET  /api/auth/me         200 + { id, email }                     [Authorize]
+POST /api/auth/logout     204                                     .RequireAuthorization()
+GET  /api/auth/me         200 + { id, email }                     .RequireAuthorization()
 ```
 
 Mapping shape:
 
 ```csharp
 group.MapPost("/login", async (
-    LoginRequest req,
-    ICommandHandler<LoginUserCommand, LoginUserResult> handler,
+    LoginUserRequest request,
+    ICommandHandler<LoginUserCommand, OneOf<TokenPair, InvalidCredentials>> handler,
     CancellationToken ct) =>
 {
-    var result = await handler.Handle(new LoginUserCommand(req.Email, req.Password), ct);
+    var result = await handler.Handle(new LoginUserCommand(request.Email, request.Password), ct);
     return result.Match<IResult>(
-        success => TypedResults.Ok(success.Tokens),
-        invalid => TypedResults.Problem(statusCode: 401, title: "Invalid credentials"));
-});
+        tokens => TypedResults.Ok(tokens),
+        rejected => ProblemDetailsExtensions.UnauthorizedProblem("Invalid credentials."));
+})
+.AddEndpointFilter<ValidationFilter<LoginUserRequest>>();
 ```
 
 ### 2.4 Persistence
@@ -281,7 +276,7 @@ services:
 
 | Test | Asserts |
 |---|---|
-| `Create_WithMalformedEmail_ReturnsValidationFailed` | Email shape rejected, no exception thrown |
+| `Create_MalformedEmail_ReturnsInvalidInput` | Email shape rejected, no exception thrown |
 | `Create_NormalisesEmailToLowercase` | `Foo@Bar.com` stored as `foo@bar.com` |
 | `Argon2_VerifyRoundTrip_Succeeds` | Hash then verify returns true |
 | `Argon2_WrongPassword_Fails` | Returns false, not an exception |

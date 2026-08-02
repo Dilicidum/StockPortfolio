@@ -25,19 +25,25 @@ Update `docs/Initial.md:22` to match. Shipping a design doc that contradicts its
 ### 2.1 `AlertSettings` — `Alerts.Domain`
 
 ```csharp
-public sealed class AlertSettings : AggregateRoot<AlertSettingsId>
+public sealed class AlertSettings
 {
-    private AlertSettings() { }
+    // The only constructor: every mapped value, assign and nothing else.
+    private AlertSettings(
+        AlertSettingsId id, UserId userId, bool enabled,
+        decimal thresholdPercent, TimeSpan window);
 
+    public AlertSettingsId Id { get; private set; }
     public UserId UserId { get; private set; }
     public bool Enabled { get; private set; }
     public decimal ThresholdPercent { get; private set; }   // 0.1 .. 50
     public TimeSpan Window { get; private set; }            // 1 min .. 1 hour
 
-    public static OneOf<AlertSettings, ValidationFailed> Create(UserId userId);
-    public OneOf<Success, ValidationFailed> Update(bool enabled, decimal thresholdPercent, TimeSpan window);
+    public static OneOf<AlertSettings, InvalidInput> Create(UserId userId);
+    public OneOf<Success, InvalidInput> Update(bool enabled, decimal thresholdPercent, TimeSpan window);
 }
 ```
+
+No base class, and the entity declares its own `Id` — see `phase-1-implementation.md` §5.2.
 
 One threshold and one window **per user**, applied to every ticker they hold. Not a per-ticker rules engine — the brief describes a single user-configured threshold, and a rules table would be a richer product than was asked for.
 
@@ -46,8 +52,14 @@ The window is capped at 1 hour: "moved sharply" is a minutes-to-an-hour concept,
 ### 2.2 `FiredAlert` — history, not a cursor
 
 ```csharp
-public sealed class FiredAlert : AggregateRoot<FiredAlertId>
+public sealed class FiredAlert
 {
+    private FiredAlert(
+        FiredAlertId id, UserId userId, Ticker ticker, AlertDirection direction,
+        decimal changePercent, Money triggerPrice, Money referencePrice,
+        DateTimeOffset firedAt, bool isSimulated);
+
+    public FiredAlertId Id { get; private set; }
     public UserId UserId { get; private set; }
     public Ticker Ticker { get; private set; }
     public AlertDirection Direction { get; private set; }   // Drawdown | RunUp

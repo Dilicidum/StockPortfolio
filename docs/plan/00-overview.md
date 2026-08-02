@@ -78,10 +78,10 @@ React **19.2.8** · Vite **8.2.0** · `@tanstack/react-router` **1.170.18** (v1 
 
 ```
 src/
-  Shared.Kernel/                 AggregateRoot<TId>, IDomainEvent, Money, CQRS interfaces
-  Shared.Api/           IEndpointModule, ValidationFilter<T>, ProblemDetails helpers
+  Shared.Kernel/                 Money, CQRS interfaces, InvalidInput — framework-free
+  Shared.Api/           ValidationFilter<T>, ProblemDetails helpers
   Modules/
-    Identity/    .Contracts · .Domain · .Application · .Infrastructure · .Presentation
+    Identity/    .Contracts · .Domain · .Application · .Infrastructure · .Api
     Portfolio/   same five
     MarketData/  same five
     Alerts/      same five
@@ -108,15 +108,15 @@ Assumed by every phase file.
 
 **CQRS** — `ICommandHandler<,>` / `IQueryHandler<,>` injected directly into Minimal API endpoints. **No dispatcher**: one caller per handler, in the same module, so there is nothing to decouple — and the concrete type gives better OpenAPI metadata. Cross-cutting concerns are DI decorators, which work without a mediator. Add a dispatcher only if a second caller appears.
 
-**Results** — OneOf with `[GenerateOneOf]`, mapped to `TypedResults` via `.Match`. Exhaustiveness comes from `.Match`'s arity, not from an analyzer: add a case and every call site breaks. Never `switch` over `.Value` and never silence CS8509 with `_ => throw`.
+**Results** — a handler returns `OneOf<…>` of its outcomes **directly**, mapped to `TypedResults` via `.Match`. No `[GenerateOneOf]` and no named union class: the wrapper hides the outcome list behind a name for no gain. `<UseCase>Result` means the *success payload*, and each failure record lives beside the use case that returns it; `InvalidInput` in `Shared.Kernel` is the one shared failure. Exhaustiveness comes from `.Match`'s arity, not from an analyzer: add a case and every call site breaks. Never `switch` over `.Value`, never silence CS8509 with `_ => throw`, and name every `.Match` lambda parameter.
 
-**Rich domain** — private setters, private EF constructor, static `Create(…)` returning a OneOf, instance methods enforcing invariants. Three EF rules that bite otherwise:
+**Rich domain, and no base class** — there is no `AggregateRoot<TId>` and no `IDomainEvent`; both were written, found to carry nothing, and deleted. Each entity declares its own `Id` and has **exactly one constructor**: private, taking every mapped value, assigning and nothing else. No parameterless constructor, no object initialiser, no public setter — so a half-built entity is not representable and the static `Create(…)` returning a OneOf is the only way in. Instance methods enforce invariants and **throw**. Three EF rules that bite otherwise:
 
 - `PropertyAccessMode.PreferField` is the default since EF Core 3.0, so **EF never calls your setter**. Validation placed in a setter silently never runs.
-- A constructor whose **parameter names match mapped property names gets hijacked for materialisation**, running your guards on every `SELECT`. Constructor binding is by convention and accessibility-blind, and cannot be configured.
+- A constructor whose **parameter names match mapped property names is selected for materialisation**. Binding is by convention and accessibility-blind, and cannot be configured. That is fine and intended here — the constructor only assigns — and becomes a trap the moment a guard is added inside it, because EF re-runs that guard on every row of every `SELECT`. Guards belong in the factory, which EF never calls. Renaming a parameter without renaming its property leaves no bindable constructor and the **whole model fails to build at startup**.
 - **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Without `MigrationsHistoryTable(name, schema)` per context, all four contexts share one history table and corrupt each other's bookkeeping in ways that look like data corruption.
 
-**Validation placement** — shape → DTO (FluentValidation decorator); context (exists? allowed?) → handler; invariant → entity, and entity guards **throw** rather than returning result cases. Do not use the built-in Minimal API `AddValidation()`: it needs public types and a per-assembly source generator, which fights the `internal`-everything rule.
+**Validation placement** — shape → the request record in `.Api` (FluentValidation, run by a generic `IEndpointFilter`, **not** a DI decorator); context (exists? allowed?) → handler, as a result case; invariant → entity, and entity guards **throw** rather than returning result cases. Requests live in `.Api/Requests/` and the endpoint builds the command with `new`; an `.Application` type never binds off the wire. Do not use the built-in Minimal API `AddValidation()`: it is DataAnnotations-attribute-driven and awkward for conditional or cross-field rules.
 
 **Testing** — xUnit v3. Unit tests touch no infrastructure. Integration tests share one Testcontainers collection fixture across the assembly and need `public partial class Program { }` in the API. `FakeTimeProvider` for anything timer-driven. Architecture tests assert module boundaries by reflection over assembly references — no NetArchTest.
 

@@ -8,7 +8,7 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 **Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 153 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
 
-**`docs/plan/` predates the CQRS conventions below and has not been swept.** Its snippets still show `[GenerateOneOf]` union classes, `ValidationFailed`, `IUnitOfWork`, and commands bound straight off the wire — all four are now wrong. Where a plan file conflicts with the Conventions section here, **this file wins**; take the plan for its sequencing and its decisions, not its code.
+`docs/plan/` was swept to match the conventions below — its snippets are current, and where a decision was reversed the plan says so and why, rather than quietly showing the new shape. `docs/Initial.md` is the exception and stays historical.
 
 Read before touching code: [docs/plan/00-overview.md](docs/plan/00-overview.md), then the phase file you're working in. Phase 1 additionally has [docs/plan/phase-1-implementation.md](docs/plan/phase-1-implementation.md) — the reviewed file-by-file build order; where it disagrees with `phase-1-sign-in.md`, the implementation plan wins. [docs/plan/er-diagram.md](docs/plan/er-diagram.md) and [docs/plan/module-interactions.md](docs/plan/module-interactions.md) are the reference diagrams. `docs/Initial.md` is the original architecture essay — **treat it as historical**; where it conflicts with `docs/plan/`, the plan wins, and three known errors in it are listed in the overview's open items.
 
@@ -51,7 +51,7 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
 - Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **`Api` host** (makes the host the merge point for every feature). `StockPortfolio.Api` is the host; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, no collision.
-- `Shared.Kernel` must stay framework-free — `Money` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no `IDomainEvent`; both were deleted as unused, and Phase 4 adds an event type where one is actually raised. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
+- `Shared.Kernel` must stay framework-free — `Money` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no `IDomainEvent`; both were deleted as unused, and Phase 2 adds an event type at `HoldingRemoved`, the first one anything actually raises. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`.
 - Dependency direction is **Alerts → Portfolio → MarketData**. Identity has zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.

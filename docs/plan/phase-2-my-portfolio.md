@@ -17,9 +17,12 @@ Covers P0 req 4.
 One row per `(UserId, Ticker)`. A unique index enforces it in the database, because a C# guard alone cannot survive two concurrent requests.
 
 ```csharp
-public sealed class Holding : AggregateRoot<HoldingId>
+public sealed class Holding
 {
-    private Holding() { }                               // EF only
+    // The only constructor: every mapped value, assign and nothing else. Guards live in Create.
+    private Holding(
+        HoldingId id, UserId userId, Ticker ticker, decimal quantity,
+        Money averagePrice, DateTimeOffset createdAt, DateTimeOffset updatedAt);
 
     public HoldingId Id { get; private set; }
     public UserId UserId { get; private set; }
@@ -29,17 +32,19 @@ public sealed class Holding : AggregateRoot<HoldingId>
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    public static OneOf<Holding, ValidationFailed> Create(
-        UserId userId, Ticker ticker, decimal quantity, Money purchasePrice);
+    public static OneOf<Holding, InvalidInput> Create(
+        UserId userId, Ticker ticker, decimal quantity, Money purchasePrice, TimeProvider clock);
 
     /// Merges a new purchase into this position: quantities sum, price becomes the
     /// weighted average. 10 @ $100 then 10 @ $150 → 20 @ $125.
-    public OneOf<Success, ValidationFailed> Merge(decimal quantity, Money purchasePrice);
+    public OneOf<Success, InvalidInput> Merge(decimal quantity, Money purchasePrice);
 
     /// Direct correction of a mistyped entry. Not a purchase — replaces, never averages.
-    public OneOf<Success, ValidationFailed> Correct(decimal quantity, Money purchasePrice);
+    public OneOf<Success, InvalidInput> Correct(decimal quantity, Money purchasePrice);
 }
 ```
+
+No base class — see `phase-1-implementation.md` §5.2. `Holding` declares its own `Id`, has exactly one private all-args constructor that only assigns, and no settable surface, so `Create` is the only way in.
 
 `Merge` and `Correct` are deliberately separate operations. Overloading one method with a flag is how a "fix my typo" silently becomes a second purchase.
 
@@ -52,6 +57,8 @@ The dispatch machinery below is still worth building for that single consumer �
 `Ticker` is a `readonly record struct Ticker(string Value)` with a `ValueConverter`, normalised to uppercase, validated against `^[A-Z]{1,5}$` on construction.
 
 ### 2.2 Domain event dispatch
+
+**This phase reintroduces the event type.** `Shared.Kernel` has no `IDomainEvent` — one was written in Phase 1 and deleted because nothing raised it, and an empty abstraction is worse than an absent one. `HoldingRemoved` is the first real event, so Phase 2 is where `IDomainEvent` (and whatever an entity needs to raise one) gets added, with a consumer waiting in Phase 4. Add the minimum the single consumer needs; do not restore the deleted `AggregateRoot<TId>` base along with it.
 
 A `SaveChangesInterceptor`, not a `SaveChangesAsync` override — the interceptor keeps `DbContext` free of application-layer dependencies and is registered once per module context rather than duplicated.
 
@@ -73,6 +80,8 @@ Dispatch **before** save so handler writes join the same transaction. Drain in a
 
 Handlers must not call `SaveChangesAsync` themselves. They mutate tracked aggregates; the outer save persists everything. Enforce it in the architecture tests.
 
+⚠️ This is the one place Portfolio departs from Identity, where there is no unit of work and each repository write commits (`phase-1-implementation.md` §5.3). Dispatch-before-save needs handler writes inside the same transaction, so Portfolio's repositories must **not** commit per call. Decide this explicitly when writing `IHoldingRepository` — a repository that commits and an interceptor that assumes it has not are silently incompatible.
+
 Registered per context so scoped dependencies resolve correctly:
 
 ```csharp
@@ -85,10 +94,12 @@ services.AddDbContext<PortfolioDbContext>((sp, o) => o
 
 | Type | Result cases |
 |---|---|
-| `AddHolding(UserId, string Ticker, decimal Quantity, decimal Price)` | `Created(HoldingDto)` · `Merged(HoldingDto)` · `ValidationFailed` · `UnknownTicker` |
-| `UpdateHolding(UserId, HoldingId, decimal Quantity, decimal Price)` | `Success(HoldingDto)` · `NotFound` · `ValidationFailed` |
-| `RemoveHolding(UserId, HoldingId)` | `Success` · `NotFound` |
-| `GetHoldings(UserId)` | `IReadOnlyList<HoldingDto>` |
+| `AddHoldingCommand(UserId, string Ticker, decimal Quantity, decimal Price)` | `OneOf<HoldingCreated, HoldingMerged, InvalidInput, UnknownTicker>` |
+| `UpdateHoldingCommand(UserId, HoldingId, decimal Quantity, decimal Price)` | `OneOf<HoldingSummary, NotFound, InvalidInput>` |
+| `RemoveHoldingCommand(UserId, HoldingId)` | `OneOf<Success, NotFound>` |
+| `GetHoldingsQuery(UserId)` | `IReadOnlyList<HoldingSummary>` |
+
+Names carry the role — `AddHoldingCommand`, `AddHoldingCommandHandler` — and each lives in `Application/Portfolio/Commands/AddHolding/`. The handler returns the union directly; there is no result-union class. `Success` and `NotFound` come from `OneOf.Types`. The request records the endpoints bind live in `Portfolio.Api/Requests/`, and a query with a single success shape needs no union at all.
 
 `AddHolding` returns **two distinct success cases**. The UI needs to say "added" versus "merged into your existing position, new average $125" — collapsing them loses the one interaction where the domain rule is visible to the user.
 
@@ -190,9 +201,9 @@ This is the point of front-loading infrastructure: a whole feature phase costs z
 | `Merge_TenAtHundredPlusTenAtOneFifty_GivesTwentyAtOneTwentyFive` | The canonical case from `Initial.md:104` |
 | `Merge_ThreeSuccessivePurchases_WeightsCorrectly` | 10@$100 + 5@$200 + 5@$50 → 20@$112.50 |
 | `Merge_PreservesPrecision_NoPrematureRounding` | 1@$0.333333 + 2@$0.666667 keeps six decimals |
-| `Merge_ZeroQuantity_ReturnsValidationFailed` | Not a silent no-op |
-| `Merge_NegativeQuantity_ReturnsValidationFailed` | |
-| `Merge_DifferentCurrency_ReturnsValidationFailed` | |
+| `Merge_ZeroQuantity_ReturnsInvalidInput` | Not a silent no-op |
+| `Merge_NegativeQuantity_ReturnsInvalidInput` | |
+| `Merge_DifferentCurrency_ReturnsInvalidInput` | |
 | `Correct_ReplacesRatherThanAverages` | 20@$125 corrected to 10@$100 → 10@$100, not an average |
 | `Remove_RaisesHoldingRemoved_Once` | Exactly one event |
 | `Create_And_Merge_RaiseNoEvents` | The poll set is read live; nothing needs telling |
@@ -263,7 +274,7 @@ The interceptor from the second test is worth keeping registered in the test fix
 ### The merge rule — `Portfolio.Domain/Holding.cs`
 
 ```csharp
-public OneOf<Success, ValidationFailed> Merge(decimal quantity, Money purchasePrice)
+public OneOf<Success, InvalidInput> Merge(decimal quantity, Money purchasePrice)
 {
     // TODO(you): weighted average is specified; the edges are yours.
     //

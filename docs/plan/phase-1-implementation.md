@@ -47,20 +47,17 @@ db/
 
 src/
   Shared.Kernel/                 no ASP.NET Core reference — see §4.7
-    AggregateRoot.cs
-    IDomainEvent.cs
     Money.cs
     Cqrs/ICommandHandler.cs
     Cqrs/IQueryHandler.cs
-    Cqrs/ValidationFailed.cs
+    Cqrs/InvalidInput.cs
 
   Shared.Api/           FrameworkReference Microsoft.AspNetCore.App
-    IEndpointModule.cs
     ValidationFilter.cs          the generic IEndpointFilter — §4.5
     ProblemDetailsExtensions.cs
 
   Modules/
-    Identity/     Contracts + Domain + Application + Infrastructure + Presentation — §5.0
+    Identity/     Contracts + Domain + Application + Infrastructure + Api — §5.0
     Portfolio/    same five projects — empty shells
     MarketData/   empty shells
     Alerts/       empty shells
@@ -192,7 +189,7 @@ Three things the first draft of this file got wrong:
 
 `Microsoft.EntityFrameworkCore.Design` goes on the **`Api`** project (the `--startup-project`) with `PrivateAssets="all"`, not on the Infrastructure projects.
 
-`GlobalPackageReference` for the two OneOf analyzers is the right tool — they must be present in every project that declares or matches a union, and CPM applies `PrivateAssets="All"` to them automatically.
+`GlobalPackageReference` for the OneOf source generator is the right tool — it must be present in every project that declares or matches a union, and CPM applies `PrivateAssets="All"` to it automatically. (As built, no code uses `[GenerateOneOf]` at all — handlers return `OneOf<…>` directly — so the generator earns its place only if a named union is ever reintroduced.)
 
 ### The step-2 spike — done, and it changed this section
 
@@ -209,6 +206,8 @@ error CS8785: Generator 'OneOfGenerator' failed to generate source.
 ```
 
 and every downstream implicit conversion then fails with confusing `CS7036`/`CS0029` errors that point nowhere near the cause. Inside a namespace it works cleanly on Roslyn 5. All our code is namespaced, so this is a trap for scratch files and spikes rather than production code — but it cost twenty minutes to diagnose once.
+
+**As built, the attribute is not used.** Named union classes were written, then removed: a handler now returns `OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>` directly, which puts the outcomes in the signature instead of behind a name that has to be looked up. `<UseCase>Result` became the success payload record. The trap above is kept because it is real and the generator is still referenced.
 
 **Three build-configuration bugs surfaced immediately**, each fixed in the files above:
 
@@ -259,7 +258,7 @@ The design doc's rule is *"everything is `internal` outside `.Contracts`."* That
 
 Infrastructure stays internal because nothing outside the module has any business naming `IdentityDbContext`, `UserRepository` or `Argon2PasswordHasher` — that is the layer where leaks actually happen.
 
-Presentation is public rather than internal, deliberately. It is a leaf project that only `Api` references, so there is no encapsulation to protect; and minimal API model binding, `System.Text.Json` and the OpenAPI document generator all behave better with public request/response records. Trading a theoretical boundary for a class of serializer bugs is a bad trade in a 1.25-day phase.
+`.Api` is public rather than internal, deliberately. It is a leaf project that only the host references, so there is no encapsulation to protect; and minimal API model binding, `System.Text.Json` and the OpenAPI document generator all behave better with public request/response records. Trading a theoretical boundary for a class of serializer bugs is a bad trade in a 1.25-day phase.
 
 **What this costs, stated plainly:** the compiler no longer prevents `Portfolio.Application` from using `Identity.Domain.User` if someone adds the ProjectReference. `Architecture.Tests.Modules_DoNotReferenceOtherModulesInternals` becomes the only enforcement, so it is now load-bearing rather than decorative. That is a real trade and belongs in the README.
 
@@ -270,7 +269,7 @@ Presentation is public rather than internal, deliberately. It is a leaf project 
 
 ### 4.3 The public seam
 
-A module now has **two** public entry points, one per direction, because registration needs Infrastructure types and routing needs Presentation types.
+A module now has **two** public entry points, one per direction, because registration needs Infrastructure types and routing needs `.Api` types.
 
 `Infrastructure/IdentityModule.cs` — everything the DI container needs:
 
@@ -296,7 +295,7 @@ public static class IdentityModule
 }
 ```
 
-`Presentation/IdentityEndpoints.cs` — everything the router needs:
+`Api/IdentityEndpoints.cs` — everything the router needs:
 
 ```csharp
 namespace StockPortfolio.Modules.Identity.Api;
@@ -313,7 +312,7 @@ public static class IdentityEndpoints
 
 `MigrationsAssembly(...)` is **dropped**: migrations land in `Persistence/Migrations` of the same assembly as the context, which is already the default. Leaving it in implies a split that does not exist.
 
-`IEndpointModule` moves to `Shared.Api` (§4.7) and stays unused in Phase 1 — `app.MapIdentityEndpoints()` is one line, trim-safe and explicitly ordered.
+**There is no `IEndpointModule`.** An earlier draft had one in `Shared.Api`, unused. An interface with a single method, implemented once per module and called once per module by the host, is the same registration list written twice; `app.MapIdentityEndpoints()` is one line, trim-safe and explicitly ordered. It was deleted rather than left defined-and-unused.
 
 ### 4.4 Handler and validator registration
 
@@ -322,8 +321,12 @@ Handlers are registered by `.Infrastructure` (it owns the concrete repositories 
 ```csharp
 internal static IServiceCollection AddIdentityHandlers(this IServiceCollection s)
 {
-    s.AddScoped<ICommandHandler<RegisterUserCommand, RegisterUserResult>, RegisterUserCommandHandler>();
-    s.AddScoped<ICommandHandler<LoginUserCommand,    LoginUserResult>,    LoginUserCommandHandler>();
+    s.AddScoped<
+        ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>,
+        RegisterUserCommandHandler>();
+    s.AddScoped<
+        ICommandHandler<LoginUserCommand, OneOf<TokenPair, InvalidCredentials>>,
+        LoginUserCommandHandler>();
     // …
     return s;
 }
@@ -333,10 +336,10 @@ Validators are registered by `.Api`, because that is where they and the records 
 
 ```csharp
 public static IServiceCollection AddIdentityApi(this IServiceCollection s)
-    => s.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();
+    => s.AddValidatorsFromAssemblyContaining<LoginUserRequestValidator>();
 ```
 
-With Presentation types public, `includeInternalTypes: true` is not required on the FluentValidation scanner. If a validator is ever made internal, that flag comes back — and the failure mode is silent (zero validators registered, zero errors), which is the second reason §4.5 injects `IValidator<T>` rather than `IEnumerable<IValidator<T>>`.
+With `.Api` types public, `includeInternalTypes: true` is not required on the FluentValidation scanner. If a validator is ever made internal, that flag comes back — and the failure mode is silent (zero validators registered, zero errors), which is the second reason §4.5 injects `IValidator<T>` rather than `IEnumerable<IValidator<T>>`.
 
 **`LoggingDecorator` survives; `ValidationDecorator` does not.** Logging is genuinely cross-cutting over handlers and has no `TResult` problem — it passes the result straight through. Register it with `Decorate<,>` in `Api/Extensions/DecoratorExtensions.cs`, after the modules so the concrete registrations exist.
 
@@ -352,7 +355,9 @@ internal sealed class ValidationDecorator<TCommand, TResult>(
     IEnumerable<IValidator<TCommand>> validators) : ICommandHandler<TCommand, TResult>
 ```
 
-On failure it must return a `TResult`. `TResult` is unconstrained, and `[GenerateOneOf]`'s conversion from `ValidationFailed` is a **user-defined operator on a concrete type**, unreachable through a type parameter. `LoginUserResult` has no `ValidationFailed` case at all, so no amount of reflection could produce one either. The workaround was going to be throwing an exception and catching it in middleware.
+On failure it must return a `TResult`. `TResult` is unconstrained, and `OneOf`'s conversion from `InvalidInput` is a **user-defined operator on a concrete type**, unreachable through a type parameter. Login's result union has no `InvalidInput` case at all, so no amount of reflection could produce one either. The workaround was going to be throwing an exception and catching it in middleware.
+
+The argument survived the switch to returning `OneOf<…>` directly — losing the named wrapper changed nothing about it, because the obstacle was the type parameter, not the wrapper.
 
 **Settled instead: a generic `IEndpointFilter` in `Shared.Api`.** A filter sits in the HTTP pipeline rather than the DI graph, so it can *return* a response and short-circuit — the unconstrained-`TResult` problem simply does not arise, and neither does the throw/catch round trip.
 
@@ -379,12 +384,12 @@ Applied per endpoint, so the HTTP contract of a route is readable in one place:
 
 ```csharp
 group.MapPost("/login", LoginAsync)
-     .AddEndpointFilter<ValidationFilter<LoginRequest>>()
+     .AddEndpointFilter<ValidationFilter<LoginUserRequest>>()
      .WithName("Login");
 ```
 
 Register the validators once in `MapIdentityEndpoints`' companion DI call:
-`services.AddValidatorsFromAssemblyContaining<LoginRequestValidator>();`
+`services.AddValidatorsFromAssemblyContaining<LoginUserRequestValidator>();`
 
 The three-layer split is intact; only the top layer changed mechanism:
 
@@ -394,7 +399,7 @@ The three-layer split is intact; only the top layer changed mechanism:
 | Context — "does this user exist? allowed?" | handler, `.Application` | OneOf result case |
 | Invariant — "a User can never have a blank email" | entity, `.Domain` | **throws** |
 
-⚠️ **The filter runs on the request DTO, not the command.** That is correct now that `.Api` exists — a transport concern validated in the transport layer — but it means a hypothetical second, non-HTTP caller of a handler would bypass the rules. There is exactly one caller per handler today (the argument for CQRS without a dispatcher), so this costs nothing; if a background job ever calls a handler directly, its inputs need their own guard.
+⚠️ **The filter runs on the request record, not the command.** As built, `.Api/Requests/` holds `RegisterUserRequest`, `LoginUserRequest`, `RefreshSessionRequest` and `RevokeSessionRequest`; the endpoint binds one of those and constructs the command with `new`. That is correct — a transport concern validated in the transport layer, and only the request records reach `/openapi/v1.json` — but it means a hypothetical second, non-HTTP caller of a handler would bypass the rules. There is exactly one caller per handler today (the argument for CQRS without a dispatcher), so this costs nothing; if a background job ever calls a handler directly, its inputs need their own guard.
 
 ⚠️ **`IValidator<TRequest>` is injected, not `IEnumerable<IValidator<TRequest>>`.** With the single-instance form, DI throws at request time if a validator is missing — loud, immediate, and it fails the integration test. Injecting the collection makes a missing validator silently validate nothing.
 
@@ -410,15 +415,16 @@ Cost: four extra projects, ten minutes in §12 step 1. In exchange, two referenc
 
 ### 4.7 `Shared.Api` — and a bug it fixes
 
-`Shared.Kernel` was carrying `Endpoints/IEndpointModule.cs`, whose signature takes `IEndpointRouteBuilder` — an ASP.NET Core type. That would have forced `FrameworkReference Microsoft.AspNetCore.App` onto `Shared.Kernel`, and therefore transitively onto every `.Domain` project. The kernel holds `Money` and `AggregateRoot`; it must stay framework-free.
+`Shared.Kernel` was carrying `Endpoints/IEndpointModule.cs`, whose signature takes `IEndpointRouteBuilder` — an ASP.NET Core type. That would have forced `FrameworkReference Microsoft.AspNetCore.App` onto `Shared.Kernel`, and therefore transitively onto every `.Domain` project. The kernel holds `Money` and the CQRS interfaces; it must stay framework-free.
 
 So HTTP-shaped shared code moves to a new `Shared.Api`:
 
 | File | Purpose |
 |---|---|
-| `IEndpointModule.cs` | defined, unused in Phase 1 (§4.3) |
 | `ValidationFilter.cs` | the generic filter (§4.5) |
 | `ProblemDetailsExtensions.cs` | shared `.Match` → `TypedResults` helpers |
+
+`IEndpointModule.cs` was listed here in an earlier draft as "defined, unused in Phase 1". It is not defined at all — see §4.3.
 
 Each `<M>.Api` references it. `Shared.Kernel` references nothing but `OneOf`, and `Architecture.Tests` asserts it.
 
@@ -437,32 +443,35 @@ Identity/
 │
 ├── Domain/                           the rules. no database, no HTTP
 │   ├── UserId.cs                     the id type for a user
+│   ├── RefreshTokenId.cs
 │   ├── User.cs                       email + password hash
-│   ├── RefreshToken.cs               one login session
-│   └── Errors.cs                     the named failure cases
+│   └── RefreshToken.cs               one login session
 │
-├── Application/                      one folder per user action
+├── Application/                      one feature area, split by direction
 │   ├── Abstractions/                 interfaces the outer layers fill in
 │   │   ├── IPasswordHasher.cs
 │   │   ├── ITokenIssuer.cs
 │   │   ├── IUserRepository.cs
-│   │   ├── IRefreshTokenRepository.cs
-│   │   └── IUnitOfWork.cs
+│   │   └── IRefreshTokenRepository.cs
 │   ├── TokenPair.cs                  what login hands back
 │   ├── TokenPolicy.cs                <- YOURS: how long tokens live
-│   ├── Register/                     command . result . handler
-│   ├── Login/                        same three files
-│   ├── Refresh/                      trade refresh token for a new pair
-│   ├── Revoke/                       log out
-│   └── Me/                           read the signed-in user
+│   └── Authentication/
+│       ├── Commands/
+│       │   ├── RegisterUser/         command . handler . EmailAlreadyUsed
+│       │   ├── LoginUser/            command . handler . InvalidCredentials
+│       │   ├── RefreshSession/       command . handler . InvalidOrExpired
+│       │   └── RevokeSession/        command . handler (Success/NotFound are OneOf.Types)
+│       └── Queries/
+│           └── GetCurrentUser/       query . handler . GetCurrentUserResult
 │
 ├── Infrastructure/                   database, hashing, tokens
 │   ├── IdentityModule.cs             * wires the module into DI
+│   ├── DependencyInjection.cs        handler registrations, kept off the seam
 │   ├── Persistence/                  the database
 │   │   ├── IdentityDbContext.cs      owns the 'identity' schema
 │   │   ├── Configurations/           tables, columns, indexes
 │   │   ├── Converters/               UserId <-> a plain database guid
-│   │   ├── UserRepository.cs         insert; duplicate email -> result
+│   │   ├── UserRepository.cs         find and insert; each write commits
 │   │   ├── RefreshTokenRepository.cs
 │   │   ├── DesignTimeFactory.cs      lets dotnet ef run without config
 │   │   └── Migrations/               generated by dotnet ef
@@ -472,21 +481,28 @@ Identity/
 │       ├── JwtTokenIssuer.cs         signs the access token
 │       └── JwtOptions.cs             signing key, read from config
 │
-└── Presentation/                     the HTTP surface. no database
+└── Api/                              the HTTP surface. no database
     ├── IdentityEndpoints.cs          * the five /api/auth/* routes
-    ├── Requests.cs                   what comes in
-    ├── Responses.cs                  what goes back
+    ├── Requests/                     what comes in off the wire
+    │   ├── RegisterUserRequest.cs
+    │   ├── LoginUserRequest.cs
+    │   ├── RefreshSessionRequest.cs
+    │   └── RevokeSessionRequest.cs
     └── Validators/                   run by the filter, before the route
-        ├── RegisterRequestValidator.cs
-        ├── LoginRequestValidator.cs
-        └── RefreshRequestValidator.cs
+        ├── RegisterUserRequestValidator.cs
+        ├── LoginUserRequestValidator.cs
+        └── RefreshSessionRequestValidator.cs
 ```
 
-Read it top to bottom as one slice: a route in `Presentation/` calls a handler in `Application/`, which asks `Domain/` whether the operation is legal and `Infrastructure/` to store the result. `Presentation` has no reference to `Infrastructure` and vice versa — they meet only through the interfaces in `Application/Abstractions/`.
+Read it top to bottom as one slice: a route in `Api/` calls a handler in `Application/`, which asks `Domain/` whether the operation is legal and `Infrastructure/` to store the result. `Api` has no reference to `Infrastructure` and vice versa — they meet only through the interfaces in `Application/Abstractions/`.
 
-`Register/`, `Login/`, `Refresh/`, `Revoke/` and `Me/` each hold three files: the command, its result union, and the handler. Validators are **not** there — they validate the HTTP request, so they sit in `Presentation/Validators/` next to the records they check (§4.5).
+Each use-case folder holds the command or query, its handler, and any record the outcome needs. **There is no result-union file**: the handler's signature carries the outcomes as `OneOf<…>`, and `<UseCase>Result` — where one exists — is the success payload. Failure records live in the folder of the use case that returns them, not in a shared `Errors.cs`; a common bag puts `EmailAlreadyUsed` in front of everyone who will never return it.
 
-`Domain`, `Application` and `Presentation` are `public`; everything under `Infrastructure` is `internal` apart from `IdentityModule` (§4.2). The two files marked `*` are the module's entire public surface to the host.
+There is no `IUnitOfWork` either. `DbContext` is one already; repository writes commit, and a module's repositories share one scoped context, so a single commit carries everything the handler changed.
+
+Validators are **not** in `Application/` — they validate the HTTP request, so they sit in `Api/Validators/` next to the records they check (§4.5). There is no `Responses.cs`: `TokenPair` and `GetCurrentUserResult` are serialised straight out of `.Application`, which is the one direction an Application type still crosses the wire.
+
+`Domain`, `Application` and `Api` are `public`; everything under `Infrastructure` is `internal` apart from `IdentityModule` (§4.2). The two files marked `*` are the module's entire public surface to the host.
 
 ### 5.1 `Identity.Contracts` is empty — and that is the finding
 
@@ -496,26 +512,9 @@ Nothing calls Identity at runtime; the JWT carries the user id. So the Contracts
 
 ### 5.2 `Identity.Domain`
 
-`AggregateRoot` declares the Id — the type parameter must earn its place:
+**There is no `AggregateRoot<TId>` base class, and no `IDomainEvent`.** Both were written — the base declared `Id`, held a `List<IDomainEvent>`, and exposed `Raise`/`ClearDomainEvents` — and both were deleted before the phase closed. Nothing raised an event, so the collection was always empty, `[NotMapped]` was guarding nothing, and the type parameter existed only to satisfy the base. A base class earns its place by removing duplication; this one added a CS0108 hazard (`User` must not re-declare `Id`) in exchange for nothing.
 
-```csharp
-public abstract class AggregateRoot<TId> where TId : struct
-{
-    private readonly List<IDomainEvent> _domainEvents = [];
-
-    public TId Id { get; protected set; } = default!;
-
-    [NotMapped]
-    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents;
-
-    protected void Raise(IDomainEvent e) => _domainEvents.Add(e);
-    public void ClearDomainEvents() => _domainEvents.Clear();
-}
-```
-
-The design doc's version declares no `Id` at all, leaving `TId` decorative — `AggregateRoot` and `AggregateRoot<TId>` would behave identically. Declaring it on the base is not cosmetic: **`User` must then not re-declare `Id`**, because a re-declaration is CS0108 (hides inherited member) which, under `TreatWarningsAsErrors`, is a build error. EF maps the inherited property normally.
-
-`[NotMapped]` needs no EF reference — `NotMappedAttribute` lives in `System.ComponentModel.Annotations`, part of the shared framework. `Shared.Kernel` stays EF-free.
+Each entity declares its own `Id`. Phase 2 brings an event type back, at `HoldingRemoved` — the first one anything actually raises, and the point at which the design can say what it is for.
 
 `UserId.cs`
 
@@ -532,37 +531,55 @@ public readonly record struct UserId(Guid Value)
 `User.cs`
 
 ```csharp
-public sealed class User : AggregateRoot<UserId>
+public sealed class User
 {
-    private User() { }                    // EF only. No validation.
+    // The only constructor: takes every mapped value, assigns, and does nothing else.
+    private User(UserId id, string email, string passwordHash, DateTimeOffset createdAt)
+    {
+        Id = id;
+        Email = email;
+        PasswordHash = passwordHash;
+        CreatedAt = createdAt;
+    }
 
-    public string Email { get; private set; } = null!;
-    public string PasswordHash { get; private set; } = null!;
+    public UserId Id { get; private set; }
+    public string Email { get; private set; }
+    public string PasswordHash { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
 
-    public static OneOf<User, ValidationFailed> Create(
+    public static string NormaliseEmail(string? email) =>
+        (email ?? string.Empty).Trim().ToLowerInvariant();
+
+    public static OneOf<User, InvalidInput> Create(
         string email, string passwordHash, TimeProvider clock)
     {
-        var normalised = email.Trim().ToLowerInvariant();
-        if (!IsWellFormedEmail(normalised))
-            return new ValidationFailed("email", "Not a valid email address.");
+        if (string.IsNullOrWhiteSpace(email))
+            return new InvalidInput("email", "Email is required.");
 
-        return new User
-        {
-            Id = UserId.New(),
-            Email = normalised,
-            PasswordHash = passwordHash,
-            CreatedAt = clock.GetUtcNow(),
-        };
+        var normalised = NormaliseEmail(email);
+
+        if (!IsWellFormedEmail(normalised))
+            return new InvalidInput("email", "Not a valid email address.");
+
+        return new User(UserId.New(), normalised, passwordHash, clock.GetUtcNow());
     }
 }
 ```
 
-Three EF traps this shape avoids, each documented and each expensive:
+**An earlier revision of this section had exactly the opposite rule**, and the correction is the interesting part. It said: never write a constructor whose parameter names match mapped properties, because EF's binder will hijack it — build with an object initialiser inside `Create` instead.
 
-1. **No constructor with matching parameter names.** EF's constructor binder is convention-based and accessibility-blind; `private User(UserId id, string email, …)` would be picked for materialisation and run your guards on every `SELECT`. Object-initialiser construction inside `Create` sidesteps it.
-2. **No validation in setters.** `PropertyAccessMode.PreferField` has been the default since EF Core 3.0, so EF writes the backing field and never calls the setter. Validation there is dead code that looks alive.
-3. **`TimeProvider` injected, not `DateTimeOffset.UtcNow`.** Makes `CreatedAt` assertable, and matches the Phase 3 poller which needs `FakeTimeProvider`.
+The hazard is real but the conclusion was wrong. EF *will* select that constructor for materialisation, by parameter name, without caring that it is private. That is fine, and here it is intended: the constructor only assigns. What makes it a trap is putting a **guard inside it** — the guard then runs on every row of every `SELECT`. So the rule is not "avoid the constructor", it is "keep the constructor guard-free and put validation in the factory, which EF never calls".
+
+Taking the constructor makes a half-built entity unrepresentable: no parameterless constructor, no object initialiser, no settable property, so `Create` is the only way in. The object-initialiser version could not say that.
+
+The cost is a sharper failure mode, and it is worth knowing: EF binds **by name**, so renaming a constructor parameter without renaming its property leaves no bindable constructor, and with no parameterless fallback the **entire model fails to build at startup** rather than on first query. `EfConstructorBindingTests` pins it.
+
+Two traps the shape still avoids:
+
+1. **No validation in setters.** `PropertyAccessMode.PreferField` has been the default since EF Core 3.0, so EF writes the backing field and never calls the setter. Validation there is dead code that looks alive — moot now that there is no settable surface, but it is why there isn't one.
+2. **`TimeProvider` injected, not `DateTimeOffset.UtcNow`.** Makes `CreatedAt` assertable, and matches the Phase 3 poller which needs `FakeTimeProvider`.
+
+`NormaliseEmail` is public because it is the single definition of the canonical stored form. Handlers use it to look up by address; a lookup that normalises differently from what `Create` stored simply misses.
 
 `RefreshToken.cs` — `Id`, `UserId`, `TokenHash` (`byte[]`), `ExpiresAt`, `CreatedAt`, `SupersededAt`, `SupersededBy`, plus `Supersede(RefreshToken replacement, TimeProvider clock)` which **throws** if already superseded.
 
@@ -572,24 +589,42 @@ Three EF traps this shape avoids, each documented and each expensive:
 
 ### 5.3 `Identity.Application`
 
-One folder per use case: command, result union, handler. No validators — those check the HTTP request and live in `.Api` (§4.5, §5.5).
+Everything sits under one feature-area folder, `Authentication/`, split into `Commands/` and `Queries/`, then one folder per use case. No validators — those check the HTTP request and live in `.Api` (§4.5, §5.5).
+
+The handler declares its outcomes in its own signature:
 
 ```csharp
-[GenerateOneOf]
-public partial class RegisterUserResult
-    : OneOfBase<TokenPair, EmailAlreadyUsed, ValidationFailed>;
+public sealed class RegisterUserCommandHandler
+    : ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>;
 ```
+
+An earlier revision wrapped that union in a `[GenerateOneOf] partial class RegisterUserResult : OneOfBase<…>`. The wrapper was removed: it is an allocation and a name to look up in exchange for hiding the very thing the reader wants to see. Exhaustiveness is unaffected — it comes from `.Match` taking one delegate per case, not from the wrapper. `<UseCase>Result` now means the *success payload*, and only exists where a use case needs its own (`GetCurrentUserResult`); register, login and refresh all succeed with `TokenPair`.
+
+Name every `.Match` lambda parameter. `emailTaken =>` says which case is being handled; `_ =>` throws that away.
 
 **The refresh command is `RefreshSessionCommand(string RefreshToken)`, not `RefreshToken(string RefreshToken)`.** The design doc's name is **CS0542** — a positional record generates a member with the parameter's name, and a member cannot share the name of its enclosing type. It would also collide with the `RefreshToken` *entity* in `.Domain`, forcing `using` aliases in every file that touches both. Same for `RevokeSessionCommand`. Fix it in `phase-1-sign-in.md` §2.3 too.
 
 `RegisterUserCommandHandler`:
 
 1. shape already validated by the endpoint filter — assume well-formed input
-2. hash the password (`IPasswordHasher`)
-3. `User.Create(...)` → propagate `ValidationFailed`
-4. `IUserRepository.AddAsync(...)` → `AlreadyExists` → map to `EmailAlreadyUsed`
+2. `IUserRepository.FindByEmailAsync(User.NormaliseEmail(command.Email))` → not null → `EmailAlreadyUsed`
+3. hash the password (`IPasswordHasher`)
+4. `User.Create(...)` → propagate `InvalidInput`
+5. `IUserRepository.AddAsync(...)`, then issue the first session
 
-**The unique-violation catch belongs in the repository, not the handler.** Detecting SQLSTATE `23505` requires `Npgsql.PostgresException`, and `.Application` must not reference the driver. `UserRepository` (Infrastructure) catches `DbUpdateException`, inspects `PostgresException.SqlState`, and returns a provider-neutral result the handler maps. The *strategy* — rely on the unique index rather than check-then-insert, because check-then-insert is a race — is right and reappears in Phase 2 for `(user_id, ticker)` merges.
+**The duplicate check is a `SELECT` in the handler — this reverses an earlier decision, and the trade is worth stating.**
+
+The original design had `AddAsync` return an `AddUserOutcome` enum: insert, catch `DbUpdateException`, inspect `PostgresException.SqlState` for `23505`, report a provider-neutral outcome. `.Application` never saw the driver, and it was genuinely race-free — the unique index is the only real guarantee.
+
+What it cost was legibility, and legibility of the wrong thing: the rule "an address may be used once" lived in `.Infrastructure`, expressed as an exception filter, while the handler — the file you read to learn what registration does — never mentioned it. That also contradicts §4.5's own table, which puts context questions in `.Application` as a result case.
+
+So the handler now asks. Asking before hashing is a second, smaller win: Argon2id is deliberately slow and a taken address is a 409 whatever the password was.
+
+**Accepted cost, stated rather than hidden:** two simultaneous registrations of one address can both pass the check, and the loser then hits the unique index and surfaces as **500 rather than 409**. The index stays — it is what keeps the data correct — and the window is milliseconds. Reintroduce the catch only if that 500 is ever actually observed in a log.
+
+The check normalises through `User.NormaliseEmail`, and that is load-bearing: normalise differently from what was stored and the lookup misses, which under this design means a 500 instead of a 409. `Register_DuplicateEmailInAnotherCasing` covers uppercase, padded and both.
+
+Phase 2's `(user_id, ticker)` merge is a different problem — an upsert, not a uniqueness question — and should use `ON CONFLICT` semantics rather than either approach here.
 
 `LoginUserCommandHandler` must run hash verification **even when the user does not exist**, against a fixed dummy hash, and return one undifferentiated `InvalidCredentials`. Two cases would leak account existence through both the response body and the response time.
 
@@ -636,28 +671,36 @@ Development only:
 **`IdentityEndpoints.cs`**
 
 ```
-POST /api/auth/register   201 + TokenPair | 409 | 400   filter: RegisterRequest
-POST /api/auth/login      200 + TokenPair | 401         filter: LoginRequest
-POST /api/auth/refresh    200 + TokenPair | 401         filter: RefreshRequest
+POST /api/auth/register   201 + TokenPair | 409 | 400   filter: RegisterUserRequest
+POST /api/auth/login      200 + TokenPair | 401         filter: LoginUserRequest
+POST /api/auth/refresh    200 + TokenPair | 401         filter: RefreshSessionRequest
 POST /api/auth/logout     204                           .RequireAuthorization()
 GET  /api/auth/me         200 + { id, email }           .RequireAuthorization()
 ```
 
 Three of the five take a body, so three carry `.AddEndpointFilter<ValidationFilter<T>>()`. `/logout` and `/me` take nothing but a bearer token, so there is nothing to validate — do not add an empty validator for symmetry.
 
-**`Validators/`** — one `AbstractValidator<T>` per request record. This is where "some logic" belongs: `RegisterRequestValidator` checks email shape, password length and character classes, and can express conditional or cross-field rules that DataAnnotations attributes cannot. Keep them free of I/O — "is this email already taken?" is a *context* question and belongs in the handler, where the answer is a `EmailAlreadyUsed` result case, not a 400.
+**`Requests/`** — one `sealed record` per body, named `<UseCase>Request`. The endpoint binds it and builds the command with `new`; an `.Application` type never binds off the wire, and only these records reach `/openapi/v1.json`.
+
+**`Validators/`** — one `AbstractValidator<T>` per request record, named `<UseCase>RequestValidator`. This is where "some logic" belongs: `RegisterUserRequestValidator` checks email shape, password length and character classes, and can express conditional or cross-field rules that DataAnnotations attributes cannot. Keep them free of I/O — "is this email already taken?" is a *context* question and belongs in the handler, where the answer is a `EmailAlreadyUsed` result case, not a 400.
 
 Conventions, from the ASP.NET Core Web API guidance:
 
 - request/response types are `sealed record` with `<summary>` XML doc comments — those flow into the OpenAPI document with no extra metadata calls
 - `CancellationToken` in every signature, forwarded to every downstream call
-- `TypedResults`, not `Results`, so OpenAPI infers response types
+- `TypedResults`, not `Results`, so each returned value carries its status
 - `DateTimeOffset` for anything time-shaped
 - `.WithName()` / `.WithSummary()` / `.Produces<T>(...)` chained on each endpoint
 - **`.RequireAuthorization()`**, not `[Authorize]` — the attribute works on a lambda but reads as controller habit
 - errors are RFC 7807 Problem Details from `AddProblemDetails()` plus the `IExceptionHandler`
 
-On multi-case results, annotate the lambda with an explicit `Results<Ok<T>, ProblemHttpResult>` return type. `TypedResults.Ok(x)` and `TypedResults.Problem(...)` are unrelated types with no common base; without the annotation the compiler falls back to matching `RequestDelegate(HttpContext)` and reports the baffling `CS1593: delegate does not take N arguments`.
+**Endpoint handlers return `Task<IResult>`.** An earlier revision returned the typed union — `Results<Ok<T>, ProblemHttpResult>` — because `TypedResults.Ok(x)` and `TypedResults.Problem(...)` are unrelated types with no common base, and without *some* annotation the compiler falls back to matching `RequestDelegate(HttpContext)` and reports the baffling `CS1593: delegate does not take N arguments`. Annotating `.Match<IResult>(…)` settles that just as well.
+
+The typed union was dropped because it restates in the signature what `.Produces(...)` already declares, and grows an argument every time a case is added. Exhaustiveness is unaffected: it comes from the union's arity.
+
+The real cost, and it is a genuine one: the compiler no longer rejects a result the signature had not declared, so `.Produces(...)` metadata is the **only** description of what a route emits and can drift from the code silently. That is why the rule below is verify-against-a-live-response. The change itself was made by capturing `/openapi/v1.json` before and after and confirming the document was byte-identical — the metadata was never coming from the return types.
+
+Dropping typed results also removed the `Microsoft.AspNetCore.Http.HttpResults` import, and with it a collision worth remembering: `OneOf.Types.NotFound` and `HttpResults.NotFound` are both `NotFound`, so a file importing both needs `using NotFound = OneOf.Types.NotFound;`.
 
 `POST /register` returns 201, which per HTTP semantics should carry a `Location`. There is no `GET /api/users/{id}` to point at, so either set `Location: /api/auth/me` or say in the README that the created resource is only addressable as the caller's own identity. An unexplained bare 201 reads as an oversight.
 
@@ -692,7 +735,7 @@ builder.Services.AddCors(o => o.AddPolicy("spa", p => p
     .WithOrigins(builder.Configuration.GetSection("Cors:Origins").Get<string[]>() ?? [])
     .AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
-// 5. Modules — Infrastructure registers handlers, Presentation registers validators
+// 5. Modules — Infrastructure registers handlers, .Api registers validators
 builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddIdentityApi();
 builder.Services.DecorateHandlers();      // logging only; must come after the modules
@@ -968,7 +1011,7 @@ Two that will fail on a naive implementation:
 - The first rule must **exempt `Api` and `Migrator`** — they reference every `<M>.Infrastructure` and `<M>.Api` by design. Without the exemption, step 1 ends with a red test.
 - The third must check `GetSetMethod(nonPublic: false) is not null`, or `private set` reads as a violation and every entity fails. This matters more now that Domain types are public.
 
-`Identity.UnitTests` also gains validator tests — `RegisterRequestValidator` rejects a short password, accepts a good one. They touch no infrastructure, so they stay unit tests.
+`Identity.UnitTests` also gains validator tests — `RegisterUserRequestValidator` rejects a short password, accepts a good one. They touch no infrastructure, so they stay unit tests.
 
 ---
 
@@ -1009,7 +1052,7 @@ Decide before writing the refresh integration test — the assertions encode the
 | 1 | `global.json`, `Directory.Build.props`, `Directory.Packages.props`, `.editorconfig`, solution, **all** project shells + references | `dotnet build` clean, `Architecture.Tests` compile |
 | 2 | ~~Spike the OneOf toolchain~~ — **done**, see §3 | `[GenerateOneOf]` verified on Roslyn 5; no suppressor needed |
 | 3 | `Shared.Kernel` + `Money` tests | green; no EF reference anywhere in the project |
-| 4 | `Identity.Domain` — `AggregateRoot`, `UserId`, `User`, `RefreshToken` + tests | green; `User` does **not** re-declare `Id` |
+| 4 | `Identity.Domain` — `UserId`, `RefreshTokenId`, `User`, `RefreshToken` + tests | green; no base class, one private all-args constructor each |
 | 5 | Argon2 hasher + PHC string + tests | round-trip and distinct-salt tests green |
 | — | *half day* | |
 | 6 | `IdentityDbContext`, configurations, converter, design-time factory; `00-roles.sh` + `01-roles.sql` | `dotnet ef migrations add InitialIdentity` succeeds with no local config |
@@ -1041,7 +1084,7 @@ Steps 1–2 come before anything else because both set repo-wide switches that a
 
 **`Identity.Contracts` ships empty.** Documented in the project's own README; evidence for the extraction-order argument.
 
-**Five projects per module, twenty in total** (§4.6). The `.Api` split buys two compiler-enforced reference rules — Infrastructure never sees HTTP, Presentation never sees the database — at the cost of four extra `.csproj`. Reversed from an earlier draft that put endpoints in `.Infrastructure`; that draft was wrong about which layer inbound HTTP belongs to.
+**Five projects per module, twenty in total** (§4.6). The `.Api` split buys two compiler-enforced reference rules — Infrastructure never sees HTTP, `.Api` never sees the database — at the cost of four extra `.csproj`. Reversed from an earlier draft that put endpoints in `.Infrastructure`; that draft was wrong about which layer inbound HTTP belongs to.
 
 **Four schemas but one context in Phase 1.** Init SQL creates all four; only `identity` has tables.
 

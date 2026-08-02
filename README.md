@@ -48,9 +48,9 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each five p
 `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator`.
 
 ```
-Presentation  ──▶ Application ──▶ Domain ──▶ Shared.Kernel
-      │                ▲
-      └── HTTP only    └── Infrastructure implements the abstractions
+.Api  ──▶ Application ──▶ Domain ──▶ Shared.Kernel
+  │            ▲
+  └─ HTTP only └── Infrastructure implements the abstractions
 ```
 
 **Two reference rules are enforced by the compiler and asserted by tests:**

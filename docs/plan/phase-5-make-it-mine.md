@@ -28,15 +28,20 @@ The frontend fetches one aggregated `GET /api/settings` view and PATCHes each se
 ### 2.1 `UserPreferences` — `Identity.Domain`
 
 ```csharp
-public sealed class UserPreferences : AggregateRoot<UserPreferencesId>
+public sealed class UserPreferences
 {
+    private UserPreferences(UserPreferencesId id, UserId userId, Theme theme, Language language);
+
+    public UserPreferencesId Id { get; private set; }
     public UserId UserId { get; private set; }
     public Theme Theme { get; private set; }        // Light | Dark | System
     public Language Language { get; private set; }  // En | Uk
 
-    public OneOf<Success, ValidationFailed> Update(Theme theme, Language language);
+    public OneOf<Success, InvalidInput> Update(Theme theme, Language language);
 }
 ```
+
+No base class, and the entity declares its own `Id` — see `phase-1-implementation.md` §5.2.
 
 Created lazily on first read with defaults `System` / `En`, so registration stays a single insert.
 

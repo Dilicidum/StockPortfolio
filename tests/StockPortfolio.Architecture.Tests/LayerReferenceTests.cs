@@ -133,21 +133,20 @@ public sealed class LayerReferenceTests
 
         SolutionAssemblies.FindForbiddenReferencePath(Name, IsPersistence).ShouldBeNull(
             Name
-                + " must never reach EF Core. AggregateRoot uses [NotMapped] from "
-                + "System.ComponentModel.Annotations, part of the shared framework, precisely to "
-                + "avoid the reference.");
+                + " must never reach EF Core. It holds Money, the CQRS interfaces and InvalidInput; "
+                + "anything that needs a value converter or a DbContext belongs in .Infrastructure.");
     }
 
     /// <summary>Presses the button on the smoke detector for rules 2, 4, 5 and 6.</summary>
     [Fact]
     public void ReferenceWalker_FindsEdgesThatDoExist_SoAnEmptyResultMeansSomething()
     {
-        var presentation = SolutionAssemblies.NameOf("Identity", "Api");
+        var apiLayer = SolutionAssemblies.NameOf("Identity", "Api");
         var infrastructure = SolutionAssemblies.NameOf("Identity", "Infrastructure");
 
         // Direct edges, legitimate where they are, forbidden one layer over.
-        SolutionAssemblies.FindForbiddenReferencePath(presentation, IsAspNetCore).ShouldNotBeNull(
-            presentation + " does reference ASP.NET Core — endpoints live there. Not finding that "
+        SolutionAssemblies.FindForbiddenReferencePath(apiLayer, IsAspNetCore).ShouldNotBeNull(
+            apiLayer + " does reference ASP.NET Core — endpoints live there. Not finding that "
                 + "edge means rule 4 cannot find it either.");
 
         SolutionAssemblies.FindForbiddenReferencePath(infrastructure, IsPersistence).ShouldNotBeNull(
@@ -156,11 +155,11 @@ public sealed class LayerReferenceTests
 
         // A three-hop edge: Api -> Application -> Domain -> Shared.Kernel.
         var transitive = SolutionAssemblies.FindForbiddenReferencePath(
-            presentation,
+            apiLayer,
             name => string.Equals(name, "StockPortfolio.Shared.Kernel", StringComparison.Ordinal));
 
         transitive.ShouldNotBeNull("The walk must be transitive, not direct-only.");
-        transitive.ShouldStartWith(presentation, Case.Sensitive);
+        transitive.ShouldStartWith(apiLayer, Case.Sensitive);
         transitive.ShouldEndWith("StockPortfolio.Shared.Kernel", Case.Sensitive);
         transitive.ShouldContain(" -> ", Case.Sensitive);
 

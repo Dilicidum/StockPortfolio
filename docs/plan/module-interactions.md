@@ -31,7 +31,7 @@ flowchart TB
         MdI["MarketData.Application · Domain · Infrastructure"]
     end
 
-    SK["Shared.Kernel — AggregateRoot · Money · IDomainEvent"]
+    SK["Shared.Kernel — Money · CQRS interfaces · InvalidInput"]
 
     Web -->|HTTPS + SSE| Host
     Host --> IdI
