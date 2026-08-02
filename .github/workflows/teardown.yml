@@ -76,41 +76,45 @@ jobs:
           echo "today (UTC)    : $(date -u +%Y-%m-%d)"
 
       # -------------------------------------------------------------------------------------------
-      # TODO(kosty): implement the teardown decision.
+      # An unreadable deadline DELETES. That is a deliberate choice, not an oversight.
       #
-      # Set `should_delete` to true or false on $GITHUB_OUTPUT. Available to you:
+      # The alternative -- skip when the tag is missing -- never destroys anything unexpectedly,
+      # but it fails in the quiet direction: one typo in the tag name and the only cost guarantee
+      # on this subscription is silently doing nothing, discovered when the bill arrives. Deleting
+      # fails in the loud direction. The data here is disposable and a redeploy is one workflow
+      # run; an unbounded bill on a personal pay-as-you-go card is not recoverable in one run.
       #
-      #   ${{ steps.read.outputs.deleteAfter }}   YYYY-MM-DD, or "" when the tag is absent
-      #   ${{ steps.read.outputs.today }}         YYYY-MM-DD, UTC
-      #   ${{ inputs.force }}                     true when manually dispatched with force
-      #
-      # Both dates are ISO-8601, so a plain string comparison orders them correctly -- no date
-      # parsing needed.
-      #
-      # THE DECISION THAT MATTERS: what happens when `deleteAfter` is empty or malformed?
-      #
-      #   Delete anyway (fail-safe for cost) -- a missing tag can never leave resources billing
-      #   forever. But a tag someone cleared by hand, or a `az group update` that dropped tags
-      #   during an unrelated change, destroys a deployment that was meant to survive.
-      #
-      #   Skip (fail-open) -- never destroys anything unexpectedly. But a single typo in the tag
-      #   name silently disables the only guarantee you have, and it fails in the quiet direction:
-      #   you find out when the bill arrives, not when the workflow runs.
-      #
-      # There is no neutral answer. Pick the direction you would rather be wrong in, and if you
-      # pick "skip", make the else branch shout loudly enough that a quiet failure is still visible.
-      #
-      # Replace the `exit 1` below with your implementation.
+      # Dates are ISO-8601, so lexical comparison is chronological and no date parsing is needed.
+      # The comparison is >=, not >, so the group dies ON the stamped date -- exactly the
+      # TEARDOWN_DAYS window advertised in deploy.yml rather than one day more.
       # -------------------------------------------------------------------------------------------
       - name: Decide
         id: decide
         if: steps.read.outputs.exists == 'true'
         run: |
           set -euo pipefail
-          echo "::error::Teardown decision is not implemented -- see the TODO in .github/workflows/teardown.yml"
-          echo "Refusing to guess. This workflow is the only cost guarantee; a wrong default here"
-          echo "either deletes a live deployment or silently protects nothing."
-          exit 1
+          DELETE_AFTER='${{ steps.read.outputs.deleteAfter }}'
+          TODAY='${{ steps.read.outputs.today }}'
+
+          if [ '${{ inputs.force }}' = 'true' ]; then
+            echo "Forced by manual dispatch, ignoring deleteAfter."
+            echo "should_delete=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! echo "$DELETE_AFTER" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "::warning::deleteAfter is missing or malformed ('$DELETE_AFTER') - deleting, because a group with no readable deadline is a group nothing is bounding."
+            echo "should_delete=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ ! "$TODAY" < "$DELETE_AFTER" ]]; then
+            echo "Deadline reached: today $TODAY >= deleteAfter $DELETE_AFTER."
+            echo "should_delete=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not yet: today $TODAY < deleteAfter $DELETE_AFTER."
+            echo "should_delete=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Delete resource group
         if: steps.decide.outputs.should_delete == 'true'

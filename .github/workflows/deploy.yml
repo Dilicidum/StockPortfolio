@@ -3,10 +3,19 @@ name: Deploy
 # Push to main deploys the API to Azure Container Apps and the SPA to GitHub Pages.
 #
 # Authentication is OIDC federated credentials — azure/login with client-id / tenant-id /
-# subscription-id and NO stored client secret. Create the federated credential on the app
-# registration with subject `repo:<owner>/<repo>:ref:refs/heads/main`, and give the service
-# principal Contributor plus User Access Administrator on the resource group (the second is
-# required because main.bicep creates an AcrPull role assignment).
+# subscription-id and NO stored client secret. Give the service principal Contributor plus User
+# Access Administrator on the resource group (the second is required because main.bicep creates an
+# AcrPull role assignment).
+#
+# THE SUBJECT IS NOT `repo:<owner>/<repo>:ref:refs/heads/main`, whatever every guide says. GitHub
+# now issues immutable subject claims carrying the numeric owner and repository IDs:
+#
+#     repo:<owner>@<ownerId>/<repo>@<repoId>:ref:refs/heads/main
+#
+# The IDs stop a credential being hijacked by deleting a repo and recreating one with the same
+# name. A credential registered in the old form matches nothing and fails with AADSTS700213 — read
+# the subject out of the failing run's log and register that exact string. Both forms are
+# registered here, so a rollback of the feature does not break the deploy.
 #
 # Required repository secrets:
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
