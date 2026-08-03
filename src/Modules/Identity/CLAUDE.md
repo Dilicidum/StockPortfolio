@@ -1,10 +1,11 @@
 # Identity — the reference implementation
 
-The rules are in [../CLAUDE.md](../CLAUDE.md). This file is the index: which file to open when you want to
-see a rule actually working, and why that file rather than a sibling.
+The rules are in the root [CLAUDE.md](../../../CLAUDE.md). This file is only the index: which file to open
+when you want to see a rule actually working, and why that one rather than a sibling.
 
-**Read `../CLAUDE.md` §3 before copying anything from here.** Five of Identity's answers are wrong for a
-module that has domain events, a background service, or an outbound HTTP dependency.
+**Read "Where Identity is not a safe template" in the root CLAUDE.md before copying anything from here.**
+Five of Identity's answers are wrong for a module with domain events, a background service or an outbound
+HTTP dependency.
 
 ---
 
@@ -46,8 +47,8 @@ service, **no** outbound HTTP, **no** Redis, **no** SSE, **no** cross-module dep
 is the argument for extracting Identity first.
 
 So Identity cannot teach you: transaction scope under an event dispatcher, degradation as a success field,
-authentication without a header, or an adapter over another module's contracts. Those rules are in
-`../CLAUDE.md` anyway, sourced from the phase plans rather than from this code.
+authentication without a header, or an adapter over another module's contracts. Those rules are in the root
+CLAUDE.md anyway, sourced from the phase plans rather than from this code.
 
 ## Known provisional
 

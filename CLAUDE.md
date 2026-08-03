@@ -51,9 +51,9 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
 - Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **`Api` host** (makes the host the merge point for every feature). `StockPortfolio.Api` is the host; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, no collision.
-- `Shared.Kernel` must stay framework-free — `Money` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no `IDomainEvent`; both were deleted as unused, and Phase 2 adds an event type at `HoldingRemoved`, the first one anything actually raises. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
+- `Shared.Kernel` must stay framework-free — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no `IDomainEvent`; both were deleted as unused, and Phase 2 adds an event type at `HoldingRemoved`, the first one anything actually raises. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
-- `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. That is a rule about the **cross-module DTO surface**, so one module's contract cannot drag another's domain along with it. It is not a rule against sharing value types: `UserId` belongs in `Shared.Kernel` beside `Money`, and every module uses that one.
+- `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would make the kernel the shared domain, which is what modules exist to prevent.
 - Dependency direction is **Alerts → Portfolio → MarketData**. Identity has zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
 - MarketData depends on nothing. It declares `IPollSetSource` and the host supplies an adapter over `Portfolio.Contracts`. Do not make MarketData read Portfolio directly.
 - One `DbContext` and one Postgres schema per module, each connecting as its own role.
@@ -136,12 +136,27 @@ The trade is real and worth knowing: the typed union made the compiler reject a 
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was verified by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while reporting green. `ReferenceWalker_FindsEdgesThatDoExist` guards the same class of bug permanently: rules that pass by finding nothing need a companion that fails if the search finds nothing.
 
+## Where Identity is not a safe template
+
+Identity is the only built module, so it is what gets copied. It has no domain events, no background
+service, no outbound HTTP, no SSE and no cross-module dependency — five of its answers are wrong
+elsewhere, and each fails silently. Decide these before writing the module, not after.
+
+| Identity does | Wrong for | Decide instead |
+|---|---|---|
+| Repositories self-commit | Phase 2 — dispatch-before-save needs handler writes in **one** transaction, and a repository that commits while an interceptor assumes it has not is silently incompatible | State the commit point on the repository interface's doc comment before the first handler exists |
+| Validates all config eagerly in `Add<M>Module` | Phase 3 — a missing `Finnhub__ApiKey` is a *supported* state (`FakeQuoteProvider`), and eager validation there breaks `docker compose up`, which is the P0 gate | Validate eagerly only what the module genuinely cannot run without |
+| Value converters are for ids | Phase 2 `Ticker`, Phase 4 `AlertDirection` — Identity has no non-id value object, so "id" and "converter-backed type" happen to name the same set | A converter for every custom mapped type; register both `Properties<T>()` and `DefaultTypeMapping<T>()` |
+| Canonical form is a `public static` on the entity (`User.NormaliseEmail`) | Only because email is a bare `string` with nowhere else to live — `Ticker` is a value object and canonicalises in its own factory | Canonicalise in the value object where there is one; a static on the entity only for bare primitives |
+| Two host wire-ups finish a module | Phases 3–4 add a poller, an adapter over another module's `.Contracts`, and Redis | Count the wire-ups the module actually needs — `Add` + `Map` does not mean wired |
+
 ## Traps
 
 Each of these costs a day if you meet it cold.
 
 - **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Every context needs `MigrationsHistoryTable("__EFMigrationsHistory", "<schema>")` or all four share one table and corrupt each other's bookkeeping. Never put `SearchPath=` in a connection string.
 - **A constructor whose parameter names match mapped properties gets hijacked by EF for materialisation.** Binding is by convention and cannot be configured. This is *fine and intended* here — the single private all-args constructor only assigns. It becomes a trap the moment a guard is added inside it, because EF then re-runs that guard on every row of every `SELECT`. Guards belong in the static factory.
+- **A `ComplexProperty` cannot be a constructor parameter** ([efcore#31621](https://github.com/dotnet/efcore/issues/31621), open). Phase 2's `Holding` maps `Money AveragePrice`, and `private Holding(…, Money averagePrice, …)` fails model building. This does **not** require a parameterless constructor — EF documents that *"not all properties need to have constructor parameters"* and sets the rest after construction. Omit only the complex member; the factory assigns it afterwards, since `private set` is reachable from inside the type.
 - **`PropertyAccessMode.PreferField` is the default**, so EF writes the backing field and never calls your setter. Validation in a setter silently never runs — which is moot now that entities have no settable surface, but it is why they don't.
 - **`Maximum Pool Size=2` on every connection string.** Azure Postgres B1ms allows 35 user connections and a different username is a different Npgsql pool; the default of 100 × 4 roles × 2 replicas requests 800. PgBouncer is unavailable on Burstable.
 - **An unhandled exception in a `BackgroundService` kills the host** (`StopHost` is the default). The poll loop needs an in-loop `try/catch`.

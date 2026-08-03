@@ -8,8 +8,9 @@ description: Add one complete use case to a module — command or query, handler
 One use case, end to end. `<M>` is the module, `<Feature>` the feature area (Identity's is
 `Authentication`), `<UseCase>` the operation (`RegisterUser`, `AddHolding`).
 
-Read `src/Modules/CLAUDE.md` first — especially **§3**, which lists the five places Identity's answer is
-wrong for a module with domain events, a background service or an outbound dependency.
+Read the root `CLAUDE.md` first — especially **"Where Identity is not a safe template"**, which lists the
+five places Identity's answer is wrong for a module with domain events, a background service or an
+outbound dependency.
 
 ## Before you start
 
@@ -33,7 +34,8 @@ Build inward-out. Each step compiles before the next.
 
 New entity → private all-args constructor that only assigns, static factory returning
 `OneOf<T, InvalidInput>`, mutators that change tracked state and do not persist. If it maps a complex type
-(`Money`), omit that member from the constructor and assign it in the factory — see `../CLAUDE.md` §1.
+(`Money`), omit that member from the constructor and assign it in the factory — see the Traps section of
+the root `CLAUDE.md`.
 
 Add the entity to the module's constructor-binding test in the same commit.
 
@@ -106,4 +108,4 @@ For each test, name the mutation that turns it red. If you cannot, delete it.
 - Add `ConfigureAwait(false)`, a unit of work, or `[GenerateOneOf]`
 - Use `_ =>` in a `.Match`
 - Pool failure records into a shared errors file
-- Copy Identity's commit point without checking `../CLAUDE.md` §3
+- Copy Identity's commit point without checking "Where Identity is not a safe template" in root `CLAUDE.md`
