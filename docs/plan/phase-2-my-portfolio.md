@@ -19,10 +19,11 @@ One row per `(UserId, Ticker)`. A unique index enforces it in the database, beca
 ```csharp
 public sealed class Holding
 {
-    // The only constructor: every mapped value, assign and nothing else. Guards live in Create.
+    // Every mapped value EXCEPT AveragePrice, which is a complex type and cannot be a constructor
+    // parameter (efcore#31621) - the factory assigns it after construction. See §6.
     private Holding(
         HoldingId id, UserId userId, Ticker ticker, decimal quantity,
-        Money averagePrice, DateTimeOffset createdAt, DateTimeOffset updatedAt);
+        DateTimeOffset createdAt, DateTimeOffset updatedAt);
 
     public HoldingId Id { get; private set; }
     public UserId UserId { get; private set; }
@@ -257,7 +258,17 @@ The interceptor from the second test is worth keeping registered in the test fix
 
 **`ComplexProperty`, not `OwnsOne`.** Owned entity types are entity types — they have identity, so `a.Price = b.Price; SaveChanges()` throws "the same entity is being tracked". Complex types copy by value. EF 11 is already deprecating the owned-JSON path.
 
-**Complex types cannot be constructor parameters of their container** (efcore#31621, open). `private Holding(HoldingId id, Money averagePrice)` fails with *"Cannot bind 'averagePrice'… only mapped properties can be bound to constructor parameters."* Private parameterless constructor plus field writes, as in Phase 1.
+**Complex types cannot be constructor parameters of their container** (efcore#31621, open). `private Holding(HoldingId id, Money averagePrice)` fails with *"Cannot bind 'averagePrice'… only mapped properties can be bound to constructor parameters."*
+
+**This does not require a parameterless constructor**, and an earlier revision of this file said it did — while §2.1 simultaneously showed `Money averagePrice` as a constructor parameter, so the two halves of the file contradicted each other. EF's documented behaviour settles it: *"Not all properties need to have constructor parameters… EF Core will set it after calling the constructor in the normal way."* So **omit only the complex member**. The all-args-minus-complex constructor binds normally, and the factory assigns `AveragePrice` afterwards — `private set` is reachable from inside the type:
+
+```csharp
+var holding = new Holding(HoldingId.New(), userId, ticker, quantity, now, now);
+holding.AveragePrice = purchasePrice;
+return holding;
+```
+
+Phase 1's rule survives intact: no parameterless constructor, and the factory is still the only way in. What changes is that `EfConstructorBindingTests.User_BindsEveryMappedPropertyThroughTheConstructor` cannot be copied verbatim — for `Holding` it must assert every **scalar** property binds, and note in one line that `AveragePrice` is set post-construction.
 
 **Precision is set at the column, and EF will not warn you.** Without `.HasPrecision(18, 6)` Npgsql maps `decimal` to `numeric` with no precision, which works, but any later `HasPrecision(18,2)` silently truncates existing averages on the next migration.
 
