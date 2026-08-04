@@ -13,7 +13,7 @@ Six vertical phases, 6.0 days. Each phase ships screens + backend + tests + a de
 
 **5.4 days against a 6-day clock**, so there is about half a day of slack. Phases 1–3 cover every P0 requirement, so the acceptance gate is passed by end of day 3.
 
-Reference diagrams: [bounded-contexts.md](bounded-contexts.md) — subdomain classification, the DDD context map, and who owns which byte across Postgres, Redis and the browser. [er-diagram.md](er-diagram.md) — the three schemas, what lives in Redis instead, and the indexes that carry weight. [module-interactions.md](module-interactions.md) — module dependency graph, what crosses each boundary, runtime sequences for the poll cycle and the dashboard, and the deployment topology.
+Reference diagrams: [module-boundaries.md](module-boundaries.md) — the criterion behind the four modules, what is in each, the three places a boundary was deliberately *not* drawn, and who owns which byte across Postgres, Redis and the browser. [er-diagram.md](er-diagram.md) — the schemas, what lives in Redis instead, and the indexes that carry weight. [module-interactions.md](module-interactions.md) — module dependency graph, what crosses each boundary, runtime sequences for the poll cycle and the dashboard, and the deployment topology.
 
 Phase 4 still ships alerts as a phase; it no longer ships them as a *module*. See "Three modules, not four" below.
 
