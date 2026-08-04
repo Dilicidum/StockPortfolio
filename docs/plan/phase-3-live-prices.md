@@ -124,6 +124,8 @@ public interface IPollSetSource { Task<IReadOnlySet<Ticker>> GetAsync(Cancellati
 
 The host supplies the adapter, backed by `Portfolio.Contracts`. MarketData therefore depends on nothing, and the module graph stays acyclic — see [module-interactions.md](module-interactions.md) §1.
 
+There are three modules, not four: Alerts merged into Portfolio in Phase 2 ([00-overview.md](00-overview.md) §"Three modules, not four"). So the graph MarketData must stay outside of is a single edge, **Portfolio → MarketData**, and Phase 4's price-window reader is a second call on that same edge rather than a third module arriving.
+
 `Initial.md:74` gives MarketData its own table of distinct tickers, kept in step by subscribing to holding events. **That table is dropped.** It was duplicated state, and it was the reason for the event subscription, a periodic reconciliation pass, and a real failure mode: that event stream has no cursor and no replay, so a publish lost to a crash between commit and dispatch would diverge the two permanently, and the ticker would render pending forever with no error anywhere. Reading the set live removes the table, both handlers, the reconciliation, and the divergence — one query instead of four moving parts.
 
 The cost is one `SELECT DISTINCT` per cycle against an indexed column, sixty times an hour. That is nothing, and it is always correct by construction.

@@ -8,6 +8,8 @@ Nothing exists yet. Every path below is created in this phase.
 
 > **Revision note.** This document was reviewed before any code was written; the review found six blockers and eleven majors, all folded in below. Three decisions since then changed the shape of the design: **§4.2** accessibility follows the onion rather than blanket `internal`; **§4.5** shape validation is an `IEndpointFilter`, not a DI decorator; **§4.6** endpoints live in a new `.Api` project, not in `.Infrastructure`. §13 lists what they cost.
 
+> **Superseded in one respect (Phase 2).** Phase 1 built **four** module shells; Alerts has since been merged into Portfolio and its five projects deleted, leaving three modules and 23 projects. What Phase 1 actually shipped is recorded below as it was, since this is the build record for that phase — but where the text projects forward ("phases 2–4 add files, not plumbing", "Phase 2 brings an event type back"), read it against [00-overview.md](00-overview.md) §"Three modules, not four". The `alerts` schema and `alerts_svc` role that §11 creates still exist and are now unused; see [../deferred-work.md](../deferred-work.md).
+
 ---
 
 ## 1. Naming and root conventions
@@ -43,7 +45,7 @@ README.md
 
 db/
   init/00-roles.sh               wrapper: passes passwords to psql as -v variables
-  init/01-roles.sql              schemas, roles, grants, revokes — all four modules
+  init/01-roles.sql              schemas, roles, grants, revokes — all four modules of the time
 
 src/
   Shared.Kernel/                 no ASP.NET Core reference — see §4.7
@@ -94,6 +96,8 @@ infra/
 ```
 
 **Empty shells for Portfolio / MarketData / Alerts are deliberate.** They cost ten minutes now and they make the architecture tests meaningful from day one — a boundary rule that only has one module to check is not a rule. They also make `Directory.Packages.props` and the solution graph final, so phases 2–4 add files, never plumbing.
+
+The Alerts shell was deleted in Phase 2 when Alerts became a feature area inside Portfolio. The claim survives its own counter-example: the shells cost ten minutes, and deleting five of them cost about the same.
 
 ---
 
@@ -514,7 +518,7 @@ Nothing calls Identity at runtime; the JWT carries the user id. So the Contracts
 
 **There is no `AggregateRoot<TId>` base class, and no `IDomainEvent`.** Both were written — the base declared `Id`, held a `List<IDomainEvent>`, and exposed `Raise`/`ClearDomainEvents` — and both were deleted before the phase closed. Nothing raised an event, so the collection was always empty, `[NotMapped]` was guarding nothing, and the type parameter existed only to satisfy the base. A base class earns its place by removing duplication; this one added a CS0108 hazard (`User` must not re-declare `Id`) in exchange for nothing.
 
-Each entity declares its own `Id`. Phase 2 brings an event type back, at `HoldingRemoved` — the first one anything actually raises, and the point at which the design can say what it is for.
+Each entity declares its own `Id`. **The plan to bring an event type back in Phase 2, at `HoldingRemoved`, was withdrawn**: that event existed only so a separate Alerts module could learn about a closed position, and Alerts was merged into Portfolio. There is still nothing that raises a domain event, so `Shared.Kernel` still has none — the Phase 1 reasoning held, one phase longer than expected. See [00-overview.md](00-overview.md) §"Three modules, not four".
 
 `UserId.cs`
 
@@ -1084,7 +1088,7 @@ Steps 1–2 come before anything else because both set repo-wide switches that a
 
 **`Identity.Contracts` ships empty.** Documented in the project's own README; evidence for the extraction-order argument.
 
-**Five projects per module, twenty in total** (§4.6). The `.Api` split buys two compiler-enforced reference rules — Infrastructure never sees HTTP, `.Api` never sees the database — at the cost of four extra `.csproj`. Reversed from an earlier draft that put endpoints in `.Infrastructure`; that draft was wrong about which layer inbound HTTP belongs to.
+**Five projects per module, twenty in total** (§4.6) — fifteen since Phase 2 merged Alerts into Portfolio. The `.Api` split buys two compiler-enforced reference rules — Infrastructure never sees HTTP, `.Api` never sees the database — at the cost of four extra `.csproj`. Reversed from an earlier draft that put endpoints in `.Infrastructure`; that draft was wrong about which layer inbound HTTP belongs to.
 
 **Four schemas but one context in Phase 1.** Init SQL creates all four; only `identity` has tables.
 

@@ -44,7 +44,7 @@ npm --prefix src/Web test
 
 ## Architecture
 
-Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each five projects, plus
+Three modules — `Identity`, `Portfolio`, `MarketData` — each five projects, plus
 `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator`.
 
 ```
@@ -66,6 +66,20 @@ nothing could not report a false green.
 
 ### Decisions worth defending
 
+**Three modules, not four — Alerts lives inside Portfolio.** It started as a fourth module and was merged in
+during Phase 2. The test for a bounded context is *ubiquitous language*: the same word meaning genuinely
+different things on either side of the line. `Ticker` meant a stock symbol in Portfolio, in MarketData and in
+Alerts — identical everywhere — so there was no second context there, only one context split in two. What
+actually applies is subdomain classification: **Portfolio (with alerts) is core**, the thing being built;
+**Identity is generic**, the part you would buy in production; **MarketData is supporting** — necessary, not
+differentiating, with its own lifecycle of timers, an external API and its own failure mode.
+
+The code had already said so. `HoldingRemoved` was the only domain event in a six-phase plan, and it existed
+purely because Alerts could not call into Portfolio. Inside one module it is a method call, so the whole
+domain-event apparatus — `IDomainEvent`, a handler interface, a publisher and a `SaveChanges` interceptor —
+was deleted rather than written. Every alert feature still ships; the dependency graph is now one edge,
+`Portfolio → MarketData`, with Identity carrying zero inbound runtime coupling.
+
 **SSE, not WebSockets.** The brief lists WebSockets; the task-giver also said to use whatever we
 judge appropriate. Alerts are strictly server→client, one-way, low-frequency.
 
@@ -85,9 +99,10 @@ EF Core makes parameterisation structural rather than a discipline — and the c
 asserted: a `DbCommandInterceptor` in the test fixture registers a user whose email contains
 `' OR 1=1 --` and asserts no user-supplied value ever reaches `CommandText`.
 
-**Four Postgres roles, one per module, and no cross-schema grants.** `portfolio_svc` selecting from
+**One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from
 `identity.users` fails with SQLSTATE `42501`. There is a test for exactly that, because a module
-boundary you cannot demonstrate is a diagram, not a boundary.
+boundary you cannot demonstrate is a diagram, not a boundary. A fourth role and schema, `alerts_svc` /
+`alerts`, are still created and now unused — see Known gaps.
 
 **Money is `decimal` server-side and serialised as strings.** `System.Text.Json` writes `decimal` as
 a JSON number and `JSON.parse` turns it into a double, which destroys the arithmetic at the
@@ -146,8 +161,8 @@ headers), and a 20-second heartbeat, since ACA's `requestIdleTimeout` is 4 minut
 floor on Consumption.
 
 Every connection string carries `Maximum Pool Size=2`: B1ms allows 35 user connections, and a
-different username is a different Npgsql pool, so 2 replicas × 4 roles × 2 = 16 with headroom. The
-default of 100 would ask for 800.
+different username is a different Npgsql pool, so 2 replicas × 3 roles × 2 = 12 with headroom. The
+default of 100 would ask for 600.
 
 ---
 
@@ -160,7 +175,13 @@ Stated plainly rather than left for you to find.
   templates on the first pull request.
 - **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
   `TODO`. They work and are exercised by tests; they have not been signed off.
-- **Portfolio, MarketData and Alerts are empty shells.** Deliberate — they make the architecture
+- **Portfolio and MarketData are empty shells.** Deliberate — they make the architecture
   tests meaningful from day one and mean phases 2–4 add files, not plumbing.
+- **The database still has an unused `alerts` schema and `alerts_svc` role.** `docker-compose.yml`,
+  `db/init/00-roles.sh`, `infra/*.bicep` and the workflows still carry `ALERTS_PW` and an Alerts
+  connection string, left over from when Alerts was its own module. Nothing connects as that role.
+  They were not removed with the module because `docker compose up` from a clean clone is the
+  acceptance gate and there was no Docker daemon available to re-verify it. Tracked in
+  [docs/deferred-work.md](docs/deferred-work.md).
 - **Npgsql logs `Cannot load library libgssapi_krb5.so.2`** in the container at startup. It is
   probing for Kerberos, falls back to password auth, and is harmless.

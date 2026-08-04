@@ -1,5 +1,30 @@
 # Phase 4 — Alerts · 0.9 days
 
+> **Where this builds, changed in Phase 2.** Alerts was a fourth module with its own five projects. It is now
+> a **feature area inside Portfolio**: `Portfolio.Domain/Alerts/`, `Portfolio.Application/Alerts/`,
+> `Portfolio.Api/`. Every requirement below is unchanged — thresholds, windows, cooldowns, evaluation after
+> each poll, history, simulate, SSE, the ticket handshake, the `/api/alerts/*` URL space. What changed is
+> which assemblies the files land in, and that three seams stop being module boundaries.
+>
+> The reasoning is in [00-overview.md](00-overview.md) §"Three modules, not four": `Ticker` meant a symbol in
+> Portfolio, MarketData *and* Alerts, so the ubiquitous language never diverged and there was no second
+> bounded context. Portfolio-with-alerts is the **core** subdomain; Identity is generic; MarketData is
+> supporting.
+>
+> **Read this file with three substitutions:**
+>
+> | Written as | Build it as |
+> |---|---|
+> | `Alerts.Domain` / `Alerts.Application` / `Alerts.Api` | `Portfolio.Domain/Alerts/` and the matching folders |
+> | `alerts.alert_settings`, `alerts.fired_alerts`, `alerts_svc` | `portfolio.alert_settings`, `portfolio.fired_alerts`, `portfolio_svc`, in `PortfolioDbContext` |
+> | *"ask Portfolio which users hold this ticker"* via `IHoldersOfTicker` | an ordinary query inside Portfolio; the contract interface is still there but no boundary is crossed |
+>
+> Two further consequences, called out where they occur: `HoldingRemoved` no longer exists (§2.3), and the
+> entity snippets' `UserId` is `Identity.Domain`'s type, which Portfolio may not reference — it is a plain
+> `Guid`, exactly as `phase-2-implementation.md` §2.1 settled for `Holding`.
+>
+> Redis key prefixes stay `alerts:*`. They name the feature, not the module.
+
 ## 1. Goal
 
 Set a threshold, click **Simulate** → an alert appears in the panel in under a second. Open `/notifications` → recent alerts are listed. Nudge a price past the threshold → a real, evaluation-driven alert fires.
@@ -18,11 +43,13 @@ What survives is smaller and does the same job for the user: alerts are written 
 
 `Initial.md:22` says **Identity** owns "user preferences including alert settings" and, one sentence later, that **Alerts** owns "thresholds". Both cannot be true, and the answer is load-bearing: `:32` and `:34` claim *"Identity has zero inbound runtime coupling"*, which is the flagship argument of the whole document. But `:124` says evaluation runs for users "online or not", and offline users have no JWT in flight — so the evaluator must read each threshold from somewhere.
 
-**Resolution: Alerts owns thresholds, windows and enabled-state.** Identity keeps account data and UI preferences only. Alerts then needs no runtime call into Identity and `:34` survives intact.
+**Resolution: the alerts feature owns thresholds, windows and enabled-state.** Identity keeps account data and UI preferences only. Evaluation then needs no runtime call into Identity and `:34` survives intact.
+
+Since Phase 2 that ownership sits in **Portfolio**, which strengthens the resolution rather than changing it: the evaluator reads holdings and thresholds from the same `DbContext`, and Identity still has zero inbound runtime coupling.
 
 Update `docs/Initial.md:22` to match. Shipping a design doc that contradicts itself is worse than the contradiction.
 
-### 2.1 `AlertSettings` — `Alerts.Domain`
+### 2.1 `AlertSettings` — `Portfolio.Domain/Alerts/`
 
 ```csharp
 public sealed class AlertSettings
@@ -43,13 +70,13 @@ public sealed class AlertSettings
 }
 ```
 
-No base class, and the entity declares its own `Id` — see `phase-1-implementation.md` §5.2.
+No base class, and the entity declares its own `Id` — see `phase-1-implementation.md` §5.2. `UserId` in both snippets is a plain `Guid`: `Identity.Domain`'s `UserId` is not reachable from Portfolio, and `phase-2-implementation.md` §2.1 already settled this for `Holding`.
 
 One threshold and one window **per user**, applied to every ticker they hold. Not a per-ticker rules engine — the brief describes a single user-configured threshold, and a rules table would be a richer product than was asked for.
 
 The window is capped at 1 hour: "moved sharply" is a minutes-to-an-hour concept, and a move over several days is a trend, which is a different feature. `Update` also rejects a window longer than the price-window retention from Phase 3, so a user cannot configure something the store cannot answer.
 
-### 2.2 `FiredAlert` — history, not a cursor
+### 2.2 `FiredAlert` — history, not a cursor · `Portfolio.Domain/Alerts/`
 
 ```csharp
 public sealed class FiredAlert
@@ -81,7 +108,7 @@ A price alert is **a moment that passed, not a condition that persists** (`Initi
 
 Runs **immediately after each fetch, in the same cycle** — the natural trigger for "did this move sharply" is "a new price just arrived". Evaluating on any other schedule means re-checking data you already checked, or checking stale data.
 
-Per ticker, compute **current, min, max** once from the Redis window. Ask Portfolio which users hold that ticker, then test each of their thresholds against the same three numbers.
+Per ticker, compute **current, min, max** once from the Redis window. Look up which users hold that ticker, then test each of their thresholds against the same three numbers. That lookup used to be a cross-module call through `IHoldersOfTicker`; since Phase 2 it is an ordinary query inside Portfolio, against the same `DbContext` that holds the thresholds.
 
 #### ⚠️ Fix the false positive
 
@@ -113,14 +140,14 @@ SET alerts:cooldown:{userId}:{ticker}:{direction} 1 NX EX {cooldownSeconds}
 
 If the `SET` fails the alert is suppressed. Expiry *is* the semantics of a cooldown, so a store with native expiry is the right one — a table would need a cleanup job to do the same thing worse. Per user, ticker **and** direction, so a drawdown cooldown does not mask a subsequent run-up.
 
-`HoldingRemoved` from Phase 2 clears any cooldown for that user and ticker. It is the only cross-module event consumer left in the system.
+Removing a holding clears any cooldown for that user and ticker, in **both** directions — `HoldingRemoved` carried no direction and neither does the delete. This was going to be Phase 2's `HoldingRemoved` domain event, consumed by Alerts across the module boundary; with Alerts inside Portfolio it is a call at the end of `RemoveHoldingCommandHandler`, and the domain-event infrastructure was deleted rather than built. It was the only event in the whole project, and it existed only to talk across a boundary that should not have been there. See [00-overview.md](00-overview.md) §"Three modules, not four".
 
 ### 2.4 Delivery
 
 Write to Postgres, then publish. Connection state only decides whether it also arrives right now.
 
 ```
-evaluate → INSERT alerts.fired_alerts → PUBLISH alerts:user:{userId} {payload}
+evaluate → INSERT portfolio.fired_alerts → PUBLISH alerts:user:{userId} {payload}
                                           ↓
                           every replica subscribes; the one holding
                           this user's stream writes it to the browser
@@ -263,7 +290,7 @@ In compose, the nginx SSE location block from Phase 1 finally gets exercised. Ve
 
 ## 5. Tests
 
-### Unit — `Alerts.UnitTests`
+### Unit — `Portfolio.UnitTests`
 
 | Test | Asserts |
 |---|---|
@@ -278,7 +305,7 @@ In compose, the nginx SSE location block from Phase 1 finally gets exercised. Ve
 | `Cooldown_SecondBreachWithinTtl_Suppressed` | |
 | `Cooldown_AfterTtlExpiry_Fires` | |
 | `Cooldown_IsPerTickerAndDirection` | A drawdown cooldown does not suppress a run-up |
-| `HoldingRemoved_ClearsCooldown` | The one remaining cross-module event consumer |
+| `RemoveHolding_ClearsCooldown_BothDirections` | Was `HoldingRemoved_ClearsCooldown`; now an in-module call, not an event handler |
 | `Settings_WindowAboveOneHour_Rejected` | |
 | `Settings_WindowExceedingRetention_Rejected` | |
 
@@ -327,7 +354,7 @@ Read the stream with the BCL `SseParser.Create<T>` over `HttpCompletionOption.Re
 
 ## 7. Your call
 
-### The false-positive constraint — `Alerts.Domain/ThresholdRule.cs`
+### The false-positive constraint — `Portfolio.Domain/Alerts/ThresholdRule.cs`
 
 ```csharp
 internal static class ThresholdRule
@@ -380,6 +407,7 @@ About ten lines. Write it before `Evaluate_PartialReversal_150to141to149_DoesNot
 - [ ] `dotnet test` green, including `Stream_EmitsHeartbeat_WithinTwentyFiveSeconds`
 - [ ] `npm test` green, including `connects once under StrictMode`
 - [ ] Deployed: alerts arrive on the GitHub Pages URL from the Azure API, and the stream survives past 4 minutes
-- [ ] `docs/Initial.md:22` corrected — Alerts owns thresholds
+- [ ] `docs/Initial.md:22` corrected — thresholds are owned by the alerts feature in Portfolio, not by Identity
+- [ ] `alert_settings` and `fired_alerts` are in the **`portfolio`** schema, reached by `portfolio_svc`, with no `alerts` schema in the migration
 - [ ] README: the SSE vs WebSocket decision matrix · the ticket handshake and why · the heartbeat and the ACA 4-minute floor · why replay was dropped · the false-positive constraint you chose
 - [ ] Alerts panel usable at 375px

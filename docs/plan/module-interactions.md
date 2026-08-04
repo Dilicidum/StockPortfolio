@@ -1,6 +1,8 @@
 # Module interactions
 
-Four modules in one ASP.NET Core process. A module references only other modules' `.Contracts` projects; everything else is `internal`. The compiler enforces it, and `Architecture.Tests` asserts it.
+Three modules in one ASP.NET Core process. A module references only other modules' `.Contracts` projects; everything else is `internal`. The compiler enforces it, and `Architecture.Tests` asserts it.
+
+> **Reversal, Phase 2.** This file previously drew **four** modules with Alerts as its own subgraph, an `IHoldersOfTicker` call from Alerts into Portfolio, and a dotted `HoldingRemoved` domain event back the other way. Alerts is now a feature area **inside** Portfolio. The reason is in [00-overview.md](00-overview.md) §"Three modules, not four": `Ticker` meant the same thing on both sides of that boundary, so it was one bounded context split in two — and the only domain event in the whole project existed purely to talk across the split. Both edges below the fold are therefore gone, and so is the domain-event infrastructure that carried one of them.
 
 ---
 
@@ -11,22 +13,17 @@ flowchart TB
     Web["Web — React SPA<br/>GitHub Pages"]
     Host["Api host — composition root<br/>endpoints · DI · PollSetAdapter"]
 
-    subgraph Id["Identity"]
+    subgraph Id["Identity — generic subdomain"]
         IdC["Identity.Contracts"]
         IdI["Identity.Application · Domain · Infrastructure"]
     end
 
-    subgraph Al["Alerts"]
-        AlC["Alerts.Contracts"]
-        AlI["Alerts.Application · Domain · Infrastructure"]
-    end
-
-    subgraph Pf["Portfolio"]
+    subgraph Pf["Portfolio — core subdomain<br/>holdings + alerts"]
         PfC["Portfolio.Contracts"]
         PfI["Portfolio.Application · Domain · Infrastructure"]
     end
 
-    subgraph Md["MarketData"]
+    subgraph Md["MarketData — supporting subdomain"]
         MdC["MarketData.Contracts"]
         MdI["MarketData.Application · Domain · Infrastructure"]
     end
@@ -37,33 +34,30 @@ flowchart TB
     Host --> IdI
     Host --> PfI
     Host --> MdI
-    Host --> AlI
     Host -.->|"adapts Portfolio → IPollSetSource"| MdC
 
-    AlI -->|"who holds this ticker"| PfC
-    AlI -.->|HoldingRemoved| PfC
-    AlI -->|"price window: current / min / max"| MdC
     PfI -->|"IQuoteReader — dashboard needs prices"| MdC
+    PfI -->|"price window: current / min / max — alert evaluation"| MdC
 
     IdI --> SK
     PfI --> SK
     MdI --> SK
-    AlI --> SK
 
     style IdC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
     style PfC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
     style MdC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
-    style AlC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
     style SK fill:#3a3a52,stroke:#818cf8,color:#e8eaf6
 ```
 
-Solid arrows are synchronous calls through a contract interface; the dotted one is a domain event.
+Every arrow is a synchronous call through a contract interface. **There are no dotted arrows any more** — the one domain event in the project, `HoldingRemoved`, existed only to cross the Portfolio/Alerts boundary, and inside one module clearing a cooldown after a delete is a method call.
 
-The graph is a clean line: **Alerts → Portfolio → MarketData**, with Identity off to the side.
+The graph is one edge: **Portfolio → MarketData**, with Identity off to the side.
 
 **MarketData depends on nothing.** It needs to know which tickers to poll, but it declares that need as its own interface — `IPollSetSource` in `MarketData.Contracts` — and the host supplies a ten-line adapter backed by `Portfolio.Contracts`. Dependency inversion, and it is what keeps the graph acyclic. Without it, MarketData reading holdings directly would make Portfolio and MarketData mutually dependent, which quietly undermines the extraction-order argument the whole shape rests on.
 
-**Nothing points at Identity at runtime.** The JWT is self-contained, so no module calls Identity during a request. That makes it the cheapest module to extract into its own process later — a new host project, a Dockerfile, its own connection string, one swapped DI registration. MarketData is at the other end: two modules depend on it, both synchronously, so extracting *that* would put a network hop on every dashboard render.
+**Nothing points at Identity at runtime.** The JWT is self-contained, so no module calls Identity during a request. That makes it the cheapest module to extract into its own process later — a new host project, a Dockerfile, its own connection string, one swapped DI registration. MarketData is at the other end: Portfolio depends on it on two paths, both synchronously — the dashboard join and alert evaluation — so extracting *that* would put a network hop on every dashboard render.
+
+**Alerts is not on this diagram because it is not a module.** It is a feature area in Portfolio, reading price windows through the same `MarketData.Contracts` seam the dashboard uses and reading holdings by direct call rather than through `IHoldersOfTicker`. See the reversal note above.
 
 Nothing is being extracted now. The graph is why the answer to "should auth be a service?" is a reading of the structure rather than an opinion.
 
@@ -75,10 +69,10 @@ Nothing is being extracted now. The graph is why the answer to "should auth be a
 |---|---|---|
 | Host → MarketData | `IPollSetSource` adapter | `SELECT DISTINCT ticker` across all holdings |
 | Portfolio → MarketData | `IQuoteReader` | Latest price per ticker, for the dashboard join |
-| Alerts → MarketData | `IPriceWindowReader` | Current / min / max over the user's window |
-| Alerts → Portfolio | `IHoldersOfTicker` | Which users hold a ticker, for evaluation |
-| Portfolio → Alerts | `HoldingRemoved` event | Clears any pending cooldown for that user + ticker |
+| Portfolio → MarketData | `IPriceWindowReader` | Current / min / max over the user's window, for alert evaluation |
 | Anything → Identity | **Nothing at runtime** | The token already carries what anyone needs |
+
+Two rows were deleted in Phase 2 rather than rewritten, and it is worth knowing which: `Alerts → Portfolio | IHoldersOfTicker` and `Portfolio → Alerts | HoldingRemoved event`. Both were module-boundary machinery for a boundary that should not have existed. `IHoldersOfTicker` becomes an ordinary query inside Portfolio; `HoldingRemoved` becomes a call in the remove-holding handler.
 
 ---
 
@@ -90,7 +84,7 @@ sequenceDiagram
     participant P as QuotePollingService
     participant R as Redis
     participant F as IQuoteProvider<br/>Finnhub or Fake
-    participant E as Alerts evaluator
+    participant E as Alert evaluator<br/>(Portfolio)
     participant DB as Postgres
     participant S as SSE endpoint
     participant B as Browser
@@ -110,7 +104,7 @@ sequenceDiagram
     P->>E: evaluate(ticker, current, min, max)
     Note over E: guards — enough samples,<br/>same session, feed not stale
     E->>R: GET cooldown:{user}:{ticker}:{dir}
-    E->>DB: INSERT fired_alerts
+    E->>DB: INSERT portfolio.fired_alerts
     E->>R: SET cooldown … EX
     E->>R: PUBLISH alerts:user:{id} {payload}
 
@@ -189,7 +183,7 @@ flowchart TB
     ACR -.->|"managed identity pull"| API
     ACR -.-> JOB
     JOB -->|"as migrator role"| PG
-    API -->|"4 roles × pool size 2"| PG
+    API -->|"3 roles × pool size 2"| PG
     API -->|"windows · claims · cooldowns · tickets · pub-sub"| RD
 
     style Pages fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9

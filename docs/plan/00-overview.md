@@ -13,13 +13,15 @@ Six vertical phases, 6.0 days. Each phase ships screens + backend + tests + a de
 
 **5.4 days against a 6-day clock**, so there is about half a day of slack. Phases 1–3 cover every P0 requirement, so the acceptance gate is passed by end of day 3.
 
-Reference diagrams: [er-diagram.md](er-diagram.md) — the four schemas, what lives in Redis instead, and the indexes that carry weight. [module-interactions.md](module-interactions.md) — module dependency graph, what crosses each boundary, runtime sequences for the poll cycle and the dashboard, and the deployment topology.
+Reference diagrams: [er-diagram.md](er-diagram.md) — the three schemas, what lives in Redis instead, and the indexes that carry weight. [module-interactions.md](module-interactions.md) — module dependency graph, what crosses each boundary, runtime sequences for the poll cycle and the dashboard, and the deployment topology.
+
+Phase 4 still ships alerts as a phase; it no longer ships them as a *module*. See "Three modules, not four" below.
 
 ---
 
 ## Context
 
-`TZ_Stock_Portfolio_App.docx` is a 7-day take-home: a stock-portfolio tracker with live quotes, P&L, and real-time threshold alerts. `docs/Initial.md` is the architecture — modular monolith, four modules, Postgres schema + role isolation, Redis price windows, SSE alert delivery.
+`TZ_Stock_Portfolio_App.docx` is a 7-day take-home: a stock-portfolio tracker with live quotes, P&L, and real-time threshold alerts. `docs/Initial.md` is the architecture — modular monolith, Postgres schema + role isolation, Redis price windows, SSE alert delivery. It says **four** modules; Phase 2 cut that to three, and the argument is in "Three modules, not four" below. `Initial.md` stays historical and is not edited for it.
 
 A validation team audited that architecture against the brief. It holds up technically; the gaps were about **graded surface**. Three P0 requirements had no design at all (TanStack Router routing, compose-with-frontend, client session handling), req 8's dashboard settings were missing entirely while `Initial.md:66` and `:150` hard-code the 60-second cadence it asks you to make configurable, and there were two internal contradictions plus a false positive in the alert rule. All are addressed in the phases.
 
@@ -39,6 +41,31 @@ The task-giver said *«Используй все что посчитаешь н�
 | **No alert replay** | Req 9 asks for an event on breach, a background check, and a simulate button. Persistence, offline delivery and cursor replay are `Initial.md:134-136`, not the requirement. Alerts are written to Postgres and the panel loads history with a plain `GET`. |
 | **No watchlist** | «Перелік акцій» in req 8 sits inside *dashboard settings*, so it means which of your holdings show on the dashboard — an `is_visible` flag, not a second list of stocks you don't own. |
 | **No cached ticker table** | `Initial.md:74` gives MarketData its own table of distinct tickers kept in step by events. The poll set is read live from Portfolio each cycle instead, which removes the table, both handlers, a reconciliation pass and a divergence failure mode. |
+| **Alerts is not a module** | Reversed during Phase 2. Alerts is a feature area inside Portfolio; the module count is three. Reasoning below. |
+
+---
+
+## Three modules, not four
+
+The plan shipped with four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — and Phase 2 reduced that to three by folding Alerts into Portfolio. Recorded here in full because several files in `docs/plan/` argue for the four-way split, and a reversal that does not name what it reverses leaves the next reader following the older argument.
+
+**Why the split was wrong.** A bounded context is delimited by *ubiquitous language*: the same word meaning genuinely different things on either side of the line. `Ticker` means a symbol in Portfolio, a symbol in MarketData and a symbol in Alerts — no divergence anywhere. So it was one context split three ways, not three contexts. `phase-2-implementation.md` §2.2 defends declaring `Ticker` three times as *"not duplication… it is what lets three modules be pulled apart"*; by DDD's own test, it was duplication.
+
+**What actually applies is subdomain classification.**
+
+| Subdomain | Module | Why |
+|---|---|---|
+| **Core** | Portfolio, alerts included | The differentiator — holdings, P&L and the threshold behaviour built on top of them |
+| **Generic** | Identity | Register/login/refresh. In production you would buy this, not write it |
+| **Supporting** | MarketData | Necessary, not differentiating, and with its own lifecycle: timer-driven, external API, a distinct failure mode |
+
+**The code was already saying so.** `HoldingRemoved` was the only domain event in the entire six-phase plan, and it existed for exactly one reason: Alerts could not call into Portfolio, so removal had to be announced. Inside one module it is a method call.
+
+**Consequence: the domain-event infrastructure is deleted.** `Shared.Kernel/DomainEvents/` — `IDomainEvent`, `IDomainEventHandler`, `IDomainEventPublisher` — is gone, along with Phase 2's Task 1, its Task 10 (dispatch interceptor, publisher and six tests) and the `HoldingRemoved` part of Task 5. Phase 1 had already written `IDomainEvent`, found nothing raised it and deleted it; bringing it back with still no raiser would have repeated that exactly.
+
+**Dependency direction is now Portfolio (alerts included) → MarketData**, with Identity off to the side and zero inbound runtime coupling.
+
+**What did not change.** Every alert requirement in Phase 4 still ships: thresholds, windows, cooldowns, evaluation after each poll, fired-alert history, the simulate endpoint, the SSE stream and the ticket handshake. The `/api/alerts/*` URL space is unchanged. They are built in `Portfolio.Domain` / `.Application` / `.Api` under an `Alerts/` feature area instead of in five projects of their own.
 
 ---
 
@@ -82,9 +109,8 @@ src/
   Shared.Api/           ValidationFilter<T>, ProblemDetails helpers
   Modules/
     Identity/    .Contracts · .Domain · .Application · .Infrastructure · .Api
-    Portfolio/   same five
+    Portfolio/   same five — holdings and alerts
     MarketData/  same five
-    Alerts/      same five
   Api/                           host: DI, endpoint registration, middleware
   Migrator/                      console; applies every DbContext as the `migrator` role
   Web/                           React SPA
@@ -104,17 +130,17 @@ Assumed by every phase file.
 
 **Architecture** — accessibility follows the onion, **not** a blanket `internal`: `.Domain`, `.Application` and `.Api` are `public`, `.Infrastructure` is `internal` except one `<Module>Module` seam. (`internal` is per-assembly and a module is five assemblies, so blanket-`internal` cannot compile.) A module references only other modules' `.Contracts`, enforced by `Architecture.Tests` rather than the compiler. `.Contracts` holds records of primitives only — no EF reference, no aggregates, no strongly-typed IDs, raw `Guid`. See `phase-1-implementation.md` §4.2.
 
-**Four Postgres schemas + four roles, `Maximum Pool Size=2`.** Azure Postgres B1ms allows **35 user connections** (50 total, 15 reserved), and a different `Username` is a different Npgsql pool. Npgsql's default pool size of 100 × 4 roles × 2 replicas would request 800. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
+**Three Postgres schemas + three roles, `Maximum Pool Size=2`.** Azure Postgres B1ms allows **35 user connections** (50 total, 15 reserved), and a different `Username` is a different Npgsql pool. Npgsql's default pool size of 100 × 3 roles × 2 replicas would request 600. PgBouncer is unavailable on Burstable, so there is no escape hatch below this. The database still creates a fourth schema and role, `alerts` / `alerts_svc`, which nothing connects as — see Open items.
 
 **CQRS** — `ICommandHandler<,>` / `IQueryHandler<,>` injected directly into Minimal API endpoints. **No dispatcher**: one caller per handler, in the same module, so there is nothing to decouple — and the concrete type gives better OpenAPI metadata. Cross-cutting concerns are DI decorators, which work without a mediator. Add a dispatcher only if a second caller appears.
 
 **Results** — a handler returns `OneOf<…>` of its outcomes **directly**, mapped to `TypedResults` via `.Match`. No `[GenerateOneOf]` and no named union class: the wrapper hides the outcome list behind a name for no gain. `<UseCase>Result` means the *success payload*, and each failure record lives beside the use case that returns it; `InvalidInput` in `Shared.Kernel` is the one shared failure. Exhaustiveness comes from `.Match`'s arity, not from an analyzer: add a case and every call site breaks. Never `switch` over `.Value`, never silence CS8509 with `_ => throw`, and name every `.Match` lambda parameter.
 
-**Rich domain, and no base class** — there is no `AggregateRoot<TId>` and no `IDomainEvent`; both were written, found to carry nothing, and deleted. Each entity declares its own `Id` and has **exactly one constructor**: private, taking every mapped value, assigning and nothing else. No parameterless constructor, no object initialiser, no public setter — so a half-built entity is not representable and the static `Create(…)` returning a OneOf is the only way in. Instance methods enforce invariants and **throw**. Three EF rules that bite otherwise:
+**Rich domain, and no base class** — there is no `AggregateRoot<TId>` and no `IDomainEvent`; both were written, found to carry nothing, and deleted. Phase 2 planned to reintroduce the event type for `HoldingRemoved` and then did not: the Alerts merge removed the only consumer, so there is again no raiser. Each entity declares its own `Id` and has **exactly one constructor**: private, taking every mapped value, assigning and nothing else. No parameterless constructor, no object initialiser, no public setter — so a half-built entity is not representable and the static `Create(…)` returning a OneOf is the only way in. Instance methods enforce invariants and **throw**. Three EF rules that bite otherwise:
 
 - `PropertyAccessMode.PreferField` is the default since EF Core 3.0, so **EF never calls your setter**. Validation placed in a setter silently never runs.
 - A constructor whose **parameter names match mapped property names is selected for materialisation**. Binding is by convention and accessibility-blind, and cannot be configured. That is fine and intended here — the constructor only assigns — and becomes a trap the moment a guard is added inside it, because EF re-runs that guard on every row of every `SELECT`. Guards belong in the factory, which EF never calls. Renaming a parameter without renaming its property leaves no bindable constructor and the **whole model fails to build at startup**.
-- **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Without `MigrationsHistoryTable(name, schema)` per context, all four contexts share one history table and corrupt each other's bookkeeping in ways that look like data corruption.
+- **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Without `MigrationsHistoryTable(name, schema)` per context, all three contexts share one history table and corrupt each other's bookkeeping in ways that look like data corruption.
 
 **Validation placement** — shape → the request record in `.Api` (FluentValidation, run by a generic `IEndpointFilter`, **not** a DI decorator); context (exists? allowed?) → handler, as a result case; invariant → entity, and entity guards **throw** rather than returning result cases. Requests live in `.Api/Requests/` and the endpoint builds the command with `new`; an `.Application` type never binds off the wire. Do not use the built-in Minimal API `AddValidation()`: it is DataAnnotations-attribute-driven and awkward for conditional or cross-field rules.
 
@@ -179,6 +205,7 @@ Then steps 1–5 against the GitHub Pages URL talking to the deployed API, watch
 ## Open items
 
 - ~~Spike `OneOfDiagnosticSuppressor` against Roslyn 5~~ — **done 2026-08-02.** The package does not exist; it is also unnecessary. See `phase-1-implementation.md` §3.
-- **`docs/Initial.md` needs three corrections** — alert-settings ownership (Phase 4), the window-claim overlap guard (Phase 3), the alert example's arithmetic (Phase 4).
+- **`docs/Initial.md` needs three corrections** — alert-settings ownership (Phase 4), the window-claim overlap guard (Phase 3), the alert example's arithmetic (Phase 4). It also describes four modules, which is now wrong; it stays historical and is not edited for that.
+- **The `alerts` schema, the `alerts_svc` role and the Alerts deployment variables still exist.** `db/init/00-roles.sh`, `docker-compose.yml`, `infra/*.bicep` and `.github/workflows/*` all still carry `ALERTS_PW` and an Alerts connection string. They were left in place deliberately when Alerts was merged into Portfolio: `docker compose up` is the P0 acceptance gate and there was no Docker daemon available to re-verify a clean-clone boot after removing them. Tracked with its trigger in [../deferred-work.md](../deferred-work.md).
 - **Recompute the 50-ticker ceiling** before the README quotes it. Finnhub is confirmed at 60 calls/min with a 30/sec burst cap and no batch endpoint, but `Initial.md:184` admits the figure was never verified.
 - **Confirm AMR B0 pricing in your region** before the Phase 1 deploy.

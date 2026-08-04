@@ -1,6 +1,8 @@
 # Data model
 
-Four Postgres schemas, one per module. Price observations are **not** here — they live in Redis (§3).
+Three Postgres schemas, one per module. Price observations are **not** here — they live in Redis (§3).
+
+> **Reversal, Phase 2.** This file previously drew four schemas, with `alerts.alert_settings` and `alerts.fired_alerts` in an `alerts` schema owned by an Alerts module. Alerts is now a feature area inside Portfolio ([00-overview.md](00-overview.md) §"Three modules, not four"), so both tables live in the **`portfolio`** schema, in `PortfolioDbContext`, reached by `portfolio_svc`. The `alerts` schema and `alerts_svc` role are still created by `db/init/` and are now unused — deliberately, pending a real `docker compose up` verification. See [../deferred-work.md](../deferred-work.md).
 
 ## The rule that shapes this diagram
 
@@ -70,15 +72,15 @@ erDiagram
         timestamptz validated_at "live /quote check at save time"
     }
 
-    alerts_alert_settings {
+    portfolio_alert_settings {
         uuid id PK
-        uuid user_id UK "logical FK — Alerts owns this, not Identity"
+        uuid user_id UK "logical FK — Portfolio owns this, not Identity"
         boolean enabled
         numeric threshold_percent "5,2 — 0.1..50"
         int window_minutes "1..60, must be < retention"
     }
 
-    alerts_fired_alerts {
+    portfolio_fired_alerts {
         uuid id PK
         uuid user_id "logical FK"
         text ticker
@@ -97,15 +99,15 @@ erDiagram
     identity_users ||..o{ portfolio_holdings : "user_id — no FK"
     identity_users ||..o| portfolio_dashboard_settings : "user_id — no FK"
     identity_users ||..o| marketdata_user_api_keys : "user_id — no FK"
-    identity_users ||..o| alerts_alert_settings : "user_id — no FK"
-    identity_users ||..o{ alerts_fired_alerts : "user_id — no FK"
+    identity_users ||..o| portfolio_alert_settings : "user_id — no FK"
+    identity_users ||..o{ portfolio_fired_alerts : "user_id — no FK"
 ```
 
 Seven tables plus the Data Protection key ring. Two tables from an earlier draft are gone, and it is worth saying why so they don't creep back:
 
 **`marketdata.tracked_tickers`** — `Initial.md:74` gives MarketData its own table of distinct tickers, maintained by subscribing to holding events. Once the poller reads the poll set live from Portfolio at the start of each cycle, that table is duplicated state with no job — and it was the reason for the event subscription, the periodic reconciliation, and the whole "a lost publish diverges the two permanently" failure mode. All three go with it.
 
-**`alerts.cooldowns`** — moved to Redis as `alerts:cooldown:{userId}:{ticker}:{direction}` with a TTL. Expiry is the entire semantics of a cooldown, so a store with native expiry is the right one; a table needs a cleanup job to do the same thing worse.
+**`alerts.cooldowns`** — moved to Redis as `alerts:cooldown:{userId}:{ticker}:{direction}` with a TTL. Expiry is the entire semantics of a cooldown, so a store with native expiry is the right one; a table needs a cleanup job to do the same thing worse. The Redis key prefix stays `alerts:` even though the owning module is now Portfolio — it names the feature, and renaming it would invalidate live keys for nothing.
 
 ---
 
@@ -115,7 +117,7 @@ Seven tables plus the Data Protection key ring. Two tables from an earlier draft
 
 `identity.users` needs `UNIQUE (email)` for registration conflict detection, and `identity.refresh_tokens` needs `UNIQUE (token_hash)` plus a partial index on `superseded_at IS NULL` so rotation lookups only touch active tokens.
 
-`alerts.fired_alerts` needs `(user_id, fired_at DESC)` — the history endpoint is the only thing that reads it, and it reads it exactly one way.
+`portfolio.fired_alerts` needs `(user_id, fired_at DESC)` — the history endpoint is the only thing that reads it, and it reads it exactly one way.
 
 ---
 
@@ -124,26 +126,26 @@ Seven tables plus the Data Protection key ring. Two tables from an earlier draft
 Each `DbContext` needs its own history table:
 
 ```csharp
-npg.MigrationsHistoryTable("__EFMigrationsHistory", "identity");   // and portfolio, marketdata, alerts
+npg.MigrationsHistoryTable("__EFMigrationsHistory", "identity");   // and portfolio, marketdata
 ```
 
-`HasDefaultSchema` does **not** move `__EFMigrationsHistory` ([efcore#24127](https://github.com/dotnet/efcore/issues/24127), closed *not planned*). Without this line all four contexts share `public.__EFMigrationsHistory`, each sees the others' migration IDs in the applied list, and `database update` reports migrations as applied-but-missing. It looks like data corruption.
+`HasDefaultSchema` does **not** move `__EFMigrationsHistory` ([efcore#24127](https://github.com/dotnet/efcore/issues/24127), closed *not planned*). Without this line all three contexts share `public.__EFMigrationsHistory`, each sees the others' migration IDs in the applied list, and `database update` reports migrations as applied-but-missing. It looks like data corruption.
 
 ---
 
 ## Roles and grants
 
 ```
-migrator          OWNER of all four schemas, CREATE  — used only by the migration job
+migrator          OWNER of all schemas, CREATE  — used only by the migration job
 identity_svc      DML on identity.*      only
-portfolio_svc     DML on portfolio.*     only
+portfolio_svc     DML on portfolio.*     only  — holdings AND alerts
 marketdata_svc    DML on marketdata.*    only
-alerts_svc        DML on alerts.*        only
+alerts_svc        DML on alerts.*        only  — created, unused; see deferred-work.md
 ```
 
 `REVOKE ALL ON SCHEMA <other> FROM <role>` for every pair. A cross-schema query then fails at runtime, in CI, on the first test run — which is what `Api.IntegrationTests.PortfolioRole_CannotReadIdentitySchema` asserts.
 
-⚠️ **Connection budget.** Azure Postgres B1ms allows **35 user connections**, and a different `Username` is a different Npgsql pool. Every connection string carries `Maximum Pool Size=2`: 2 replicas × 4 roles × 2 = 16, leaving 19 headroom. Npgsql's default of 100 would request 800. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
+⚠️ **Connection budget.** Azure Postgres B1ms allows **35 user connections**, and a different `Username` is a different Npgsql pool. Every connection string carries `Maximum Pool Size=2`: 2 replicas × 3 roles × 2 = 12, leaving 23 headroom. Npgsql's default of 100 would request 600. PgBouncer is unavailable on Burstable, so there is no escape hatch below this. `alerts_svc` exists in the database but has no connection string, so it opens no pool.
 
 ---
 

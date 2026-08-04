@@ -13,11 +13,47 @@ order* — the same relationship `phase-1-implementation.md` has to `phase-1-sig
 and live on Azure.
 
 **Architecture:** Portfolio becomes the second real module, built by copying Identity's five-project shape.
-It adds three things Identity does not have and therefore cannot teach: a value object with a converter
-(`Ticker`), a complex-typed property (`Money AveragePrice`), and the first domain event (`HoldingRemoved`)
-with its dispatch seam.
+It adds two things Identity does not have and therefore cannot teach: a value object with a converter
+(`Ticker`) and a complex-typed property (`Money AveragePrice`).
 
 **Tech stack:** unchanged. No new NuGet package, no new npm package, no infrastructure change.
+
+---
+
+## 0.0 Mid-phase decision — Alerts is merged into Portfolio, and domain events are withdrawn
+
+Taken while this plan was being executed, so parts of it below are stale by design rather than by neglect.
+**Task numbering is preserved**: withdrawn tasks keep their numbers and are marked `WITHDRAWN` in place, because
+execution is already keyed to them and renumbering would desynchronise it.
+
+**The decision.** Alerts stops being a fourth module and becomes a feature area inside Portfolio. Three
+modules: `Identity`, `Portfolio`, `MarketData`. Full reasoning in
+[00-overview.md](00-overview.md) §"Three modules, not four"; in short, `Ticker` meant exactly the same thing on
+both sides of the Portfolio/Alerts line, so ubiquitous language never diverged and there was only ever one
+bounded context there. What does apply is subdomain classification: Portfolio-with-alerts is **core**, Identity
+is **generic**, MarketData is **supporting**.
+
+**What it withdraws from this plan:**
+
+| Item | Status |
+|---|---|
+| §2.2's defence of declaring `Ticker` three times | **Reversed.** It is the exact pattern DDD's ubiquitous-language test rejects |
+| §2.7 dispatch after the save commits | **Moot.** There is nothing to dispatch |
+| §2.8's `HoldingRemoved` half, and `Portfolio.Contracts → Shared.Kernel` for `IDomainEvent` | **Withdrawn.** The two read interfaces survive; see §2.8 |
+| Task 1 — domain-event types in `Shared.Kernel` | **WITHDRAWN** |
+| Task 5 — the `HoldingRemoved` record | **PARTLY WITHDRAWN.** `IPollSet` and `IHoldersOfTicker` still ship |
+| Task 10 — dispatch interceptor, publisher, 6 tests | **WITHDRAWN** |
+| §7's "`Ticker` is declared three times" and "the sync `SavingChanges` throws" risks | **Withdrawn with the tasks that created them** |
+
+`Shared.Kernel/DomainEvents/` is deleted, not merely unused: `IDomainEvent`, `IDomainEventHandler` and
+`IDomainEventPublisher` are gone. Phase 1 wrote `IDomainEvent`, found nothing raised it and deleted it
+(`phase-1-implementation.md` §5.2). `HoldingRemoved` was the only raiser in six phases and existed solely
+because Alerts sat behind a module boundary. Reintroducing the abstraction with the raiser removed would have
+repeated Phase 1's mistake one phase later.
+
+**What Phase 2 still delivers is unchanged**: holdings CRUD, the merge arithmetic, `Ticker`, `Money`
+mapping, the migration, the four use cases, the endpoints and the SPA route. Alerts themselves are still
+Phase 4 work — they are just built inside Portfolio when they arrive.
 
 ---
 
@@ -98,19 +134,27 @@ That line needs editing to `h.UserId` when Phase 3 lands. Recorded here so it is
 
 ### 2.2 DECISION — `Ticker` is Portfolio's, and every module that needs one declares its own
 
-`Ticker` is created here first, and three phases use the name: `phase-3` puts it in `MarketData.Domain`
-*and* in `MarketData.Contracts`; `phase-4` puts it in `Alerts.Domain`. That cannot all be one type without
-either a shared domain assembly or a strongly-typed id in `.Contracts` — and root `CLAUDE.md` forbids both
-(*"`Shared.Kernel` is for types that belong to **no** module"*; *"`.Contracts` holds records of primitives
-only"*).
+> ⚠️ **Amended (§0.0).** The paragraph beginning "This is the modular-monolith answer" argued that three
+> independent `Ticker` declarations are what make the extraction argument true. That argument was turned
+> around and used against the module split itself: if `Ticker` means a symbol in Portfolio, a symbol in
+> MarketData *and* a symbol in Alerts, the ubiquitous language never diverged, and a boundary with no
+> language divergence is not a bounded context. Alerts was merged into Portfolio for exactly that reason.
+> **`Ticker` is now declared twice, not three times** — once in `Portfolio.Domain`, once in MarketData —
+> and those two survive because MarketData is a genuinely separate (supporting) subdomain with its own
+> lifecycle. The rest of this decision stands as written.
+
+`Ticker` is created here first, and two modules use the name: Portfolio declares it here; `phase-3` puts it in
+`MarketData.Domain` *and* in `MarketData.Contracts`. That cannot be one type without either a shared domain
+assembly or a strongly-typed id in `.Contracts` — and root `CLAUDE.md` forbids both (*"`Shared.Kernel` is for
+types that belong to **no** module"*; *"`.Contracts` holds records of primitives only"*).
 
 **Settled: each module declares its own `Ticker` in its own `.Domain`, and every `.Contracts` carries
 `string`.** Portfolio declares the first one. The host adapter Phase 3 writes converts
 `List<string>` → `IReadOnlySet<MarketData.Domain.Ticker>`, which is exactly the ten-line adapter
 `phase-3` §2.5 already describes.
 
-This is the modular-monolith answer and it is what makes the extraction argument true: three modules that
-each own their notion of a ticker can be pulled apart; one shared `Ticker` cannot.
+Two declarations across a real subdomain boundary is the modular-monolith answer. Three declarations across a
+boundary that no language difference justified was the error §0.0 corrects.
 
 **Knock-on:** `phase-3-live-prices.md` §2.5 declares `IPollSetSource { Task<IReadOnlySet<Ticker>> … }` inside
 `MarketData.Contracts`. That is a strongly-typed value object in a Contracts project and violates the rule.
@@ -228,7 +272,14 @@ Spec §5's test is rewritten accordingly — see Task 15. It asserts what actual
 survives**. Asserting "one returns a conflict" would be asserting a behaviour this plan deliberately does not
 build.
 
-### 2.7 DECISION — dispatch **after** the save commits
+### 2.7 DECISION — dispatch **after** the save commits — ⛔ MOOT (§0.0)
+
+> **Moot, not reversed.** This decision was correct against the design it was made for, and it is kept
+> verbatim below because it records why dispatch-before-save is the wrong default — an argument worth having
+> written down if events ever return. But Alerts moved into Portfolio, `HoldingRemoved` has no consumer
+> across a boundary, and the domain-event infrastructure is deleted. There is nothing left to dispatch, so
+> there is no dispatch point to choose. Its one surviving conclusion is the one that mattered anyway:
+> **Portfolio's repositories self-commit, exactly like Identity's.**
 
 `phase-2-my-portfolio.md` §2.2 argues for dispatch-before-save so handler writes join the same transaction.
 The only consumer that will ever exist — Phase 4's `HoldingRemoved` → clear the Redis cooldown key — writes
@@ -256,7 +307,7 @@ whose entity disappears, so publishing straight from `SavedChangesAsync` would p
 therefore **collected** in `SavingChangesAsync` and **published** in `SavedChangesAsync`. Full shape in Task 10.
 
 This reverses spec §2.2 and one row of root `CLAUDE.md`'s "Where Identity is not a safe template" table.
-Both edits are Task 22.
+Both edits are Task 22. (That row has since been rewritten again — §0.0 removed its driver entirely.)
 
 ### 2.8 DECISION — `Portfolio.Contracts` ships two interfaces now
 
@@ -265,15 +316,22 @@ holders-of-ticker read; `module-interactions.md` names the latter `IHoldersOfTic
 `LayerReferenceTests.ContractsAssembly_ReferencesNoPersistence` currently **skips all four of its cases**,
 because every `.Contracts` project is an empty shell — a rule that asserts nothing.
 
-**Settled: two interfaces, both returning primitives, both implemented in Phase 2.** Two rather than one so
-Alerts cannot enumerate every ticker in the system when it only ever needs the holders of one.
+**Settled: two interfaces, both returning primitives, both implemented in Phase 2.** Two rather than one so a
+caller that only ever needs the holders of one ticker cannot enumerate every ticker in the system.
 
 This is not speculative work: spec §5 already schedules a test for the poll-set read, and Task 13 implements
 and tests both.
 
-`Portfolio.Contracts` gains a `ProjectReference` to `Shared.Kernel`, for `IDomainEvent` only. That is legal —
-rule 2 forbids EF Core and Npgsql, nothing else — and it keeps `HoldingRemoved` a record of primitives, which
-is what lets Alerts consume it without seeing `Portfolio.Domain`.
+> ⚠️ **Amended (§0.0), two ways.**
+>
+> - **The `Shared.Kernel` reference is withdrawn.** This paragraph used to say `Portfolio.Contracts` gains a
+>   `ProjectReference` to `Shared.Kernel` for `IDomainEvent`. `IDomainEvent` no longer exists, so
+>   `Portfolio.Contracts` keeps no project reference at all. It holds two interfaces over primitives.
+> - **`IHoldersOfTicker`'s stated consumer changes.** It was justified as Alerts' only view of Portfolio.
+>   Alerts is now inside Portfolio and can ask directly, so the interface's remaining reason to sit in
+>   `.Contracts` is `IPollSet`'s: it is the seam the host adapter uses. Keep both — they are implemented and
+>   tested here, and Phase 3 consumes `IPollSet` — but do not defend `IHoldersOfTicker` on a cross-module
+>   argument that no longer holds.
 
 ### 2.9 DECISION — `is_visible` ships in this migration, unused
 
@@ -350,14 +408,14 @@ private const decimal MinimumQuantity = 0.000001m;
 
 ## 4. File map
 
-`✚` created · `✎` modified · everything else untouched.
+`✚` created · `✎` modified · `⛔` withdrawn by §0.0 · everything else untouched.
 
 ```
 src/
   Shared.Kernel/
- ✚  DomainEvents/IDomainEvent.cs               marker; the type Phase 1 deleted, now with a raiser
- ✚  DomainEvents/IDomainEventHandler.cs        what Alerts implements in Phase 4
- ✚  DomainEvents/IDomainEventPublisher.cs      what the interceptor calls
+ ⛔  DomainEvents/IDomainEvent.cs               withdrawn; no raiser once Alerts moved into Portfolio
+ ⛔  DomainEvents/IDomainEventHandler.cs        withdrawn
+ ⛔  DomainEvents/IDomainEventPublisher.cs      withdrawn
  ✚  MoneyJsonConverter.cs                      money out as a string (§2.5)
 
   Shared.Api/
@@ -365,10 +423,10 @@ src/
 
   Modules/Portfolio/
     …Portfolio.Contracts/
- ✎    *.csproj                                 + ProjectReference Shared.Kernel
- ✚    HoldingRemoved.cs                        record of primitives; Alerts' only view of Portfolio
+ ⛔    *.csproj                                 the Shared.Kernel reference was only for IDomainEvent
+ ⛔    HoldingRemoved.cs                        withdrawn; removal is a method call inside one module
  ✚    IPollSet.cs                              Task<List<string>>  — host adapter, Phase 3
- ✚    IHoldersOfTicker.cs                      Task<List<Guid>>    — Alerts, Phase 4
+ ✚    IHoldersOfTicker.cs                      Task<List<Guid>>    — alert evaluation, Phase 4
 
     …Portfolio.Domain/
  ✚    HoldingId.cs                             UUIDv7, six lines, copied from UserId.cs
@@ -394,8 +452,8 @@ src/
  ✚    Persistence/Converters/TickerConverter.cs
  ✚    Persistence/HoldingRepository.cs         self-commits, like Identity's (§2.7)
  ✚    Persistence/HoldingQueries.cs            IPollSet + IHoldersOfTicker, AsNoTracking
- ✚    Persistence/DispatchDomainEventsInterceptor.cs
- ✚    Persistence/DomainEventPublisher.cs
+ ⛔    Persistence/DispatchDomainEventsInterceptor.cs   withdrawn with Task 10
+ ⛔    Persistence/DomainEventPublisher.cs              withdrawn with Task 10
  ✚    Persistence/Migrations/                  generated by dotnet ef
 
     …Portfolio.Api/
@@ -456,7 +514,16 @@ Build inward-out; each task compiles and its tests pass before the next begins.
 
 ---
 
-### Task 1: Domain-event types in `Shared.Kernel`
+### Task 1: Domain-event types in `Shared.Kernel` — ⛔ WITHDRAWN
+
+> **Do not build this task.** Withdrawn by §0.0. It exists only because Alerts was a separate module and
+> could not be told about a removed holding by a method call. With Alerts inside Portfolio, `HoldingRemoved`
+> has no consumer across a boundary, so the three interfaces below would once again be an abstraction with no
+> raiser — which is the precise reason Phase 1 deleted `IDomainEvent` in the first place
+> (`phase-1-implementation.md` §5.2). `src/Shared.Kernel/DomainEvents/` does not exist and must not be
+> created. Task numbering is preserved so execution against these numbers does not shift.
+>
+> The original task is left below, unedited, as the record of what was planned and rejected.
 
 Phase 1 wrote `IDomainEvent`, found nothing raised it, and deleted it. `HoldingRemoved` is the first real one,
 so it comes back — with the two collaborators the single consumer needs, and nothing else. **No
@@ -925,24 +992,33 @@ git commit -m "Portfolio's first two types: an id and a ticker that owns its can
 
 ---
 
-### Task 5: `Portfolio.Contracts` — the event and the two reads
+### Task 5: `Portfolio.Contracts` — the two reads (⛔ the event is WITHDRAWN)
+
+> **Partly withdrawn by §0.0.** `HoldingRemoved.cs` is **not** created, `Portfolio.Contracts` gains **no**
+> `ProjectReference` to `Shared.Kernel`, and `Portfolio.Domain` gains **no** reference to
+> `Portfolio.Contracts` — all three existed only to carry a cross-module event that no longer crosses
+> anything. `IPollSet.cs` and `IHoldersOfTicker.cs` still ship, unchanged, and Step 3's check (rule 2 going
+> live for the first time on any module) still applies. Skip Step 1 entirely and build only the two
+> interfaces in Step 2. Task numbering is preserved.
+>
+> The withdrawn material is left below, unedited, as the record of what was planned and rejected.
 
 Written before `Holding`, because `Holding` raises `HoldingRemoved` and therefore references this project.
 
 **Files:**
-- Modify: `src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/StockPortfolio.Modules.Portfolio.Contracts.csproj`
-- Create: `.../Portfolio.Contracts/HoldingRemoved.cs`
+- ⛔ Modify: `src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/StockPortfolio.Modules.Portfolio.Contracts.csproj`
+- ⛔ Create: `.../Portfolio.Contracts/HoldingRemoved.cs`
 - Create: `.../Portfolio.Contracts/IPollSet.cs`
 - Create: `.../Portfolio.Contracts/IHoldersOfTicker.cs`
-- Modify: `src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Domain/StockPortfolio.Modules.Portfolio.Domain.csproj`
+- ⛔ Modify: `src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Domain/StockPortfolio.Modules.Portfolio.Domain.csproj`
 
 **Interfaces:**
-- Produces: `HoldingRemoved(Guid UserId, string Ticker) : IDomainEvent`;
+- Produces: ⛔ `HoldingRemoved(Guid UserId, string Ticker) : IDomainEvent`;
   `IPollSet.GetPollSetAsync(CancellationToken) → Task<List<string>>`;
   `IHoldersOfTicker.GetHoldersAsync(string ticker, CancellationToken) → Task<List<Guid>>`.
-- Consumed by: Task 6 (`Holding.Remove`), Task 14 (implementations), Phase 3 (host adapter), Phase 4 (Alerts).
+- Consumed by: Task 14 (implementations), Phase 3 (host adapter), Phase 4 (alert evaluation, inside Portfolio).
 
-- [ ] **Step 1: Give Contracts and Domain the references they need**
+- [ ] ⛔ **Step 1: Give Contracts and Domain the references they need — WITHDRAWN, skip it**
 
 `Portfolio.Contracts.csproj` — currently `<Project Sdk="Microsoft.NET.Sdk"></Project>` with no ItemGroup at all:
 
@@ -967,11 +1043,13 @@ Written before `Holding`, because `Holding` raises `HoldingRemoved` and therefor
 which gives `.Domain` only `Shared.Kernel`. It is legal (rule 1 only polices reaching into *another* module,
 and rule 2 only forbids persistence in Contracts) and it is necessary: the event must be a record of
 primitives so Alerts can consume it without seeing `Portfolio.Domain`. §4.1 is amended in Task 23.
+**Withdrawn:** with no event, neither reference is needed and §4.1 needs no amendment.
+`Portfolio.Contracts` stays reference-free.
 
-- [ ] **Step 2: Write the three files**
+- [ ] **Step 2: Write the two files** *(the third, `HoldingRemoved.cs`, is withdrawn)*
 
 ```csharp
-// src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/HoldingRemoved.cs
+// ⛔ WITHDRAWN — src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/HoldingRemoved.cs
 using StockPortfolio.Shared.Kernel.DomainEvents;
 
 namespace StockPortfolio.Modules.Portfolio.Contracts;
@@ -983,10 +1061,10 @@ public sealed record HoldingRemoved(Guid UserId, string Ticker) : IDomainEvent;
 Primitives, deliberately: `Guid` not `UserId`, `string` not `Ticker`. This record is the entire surface Alerts
 ever sees of Portfolio.
 
-⚠️ **Phase 4 note, recorded here because Phase 2 fixes the payload:** the cooldown key is
-`alerts:cooldown:{userId}:{ticker}:{direction}` with `direction ∈ Drawdown | RunUp`. `HoldingRemoved` carries
-no direction, so Phase 4's handler must delete **both** keys. Widening the event instead would be wrong —
-Portfolio has no notion of a direction.
+⚠️ **Phase 4 note, and it survives the withdrawal in changed form:** the cooldown key is
+`alerts:cooldown:{userId}:{ticker}:{direction}` with `direction ∈ Drawdown | RunUp`. Removing a holding must
+still clear **both** keys, because there is no single direction to clear. Phase 4 does it from
+`RemoveHoldingCommandHandler` — a direct call inside Portfolio, not an event handler.
 
 ```csharp
 // src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/IPollSet.cs
@@ -1012,7 +1090,7 @@ public interface IHoldersOfTicker
 }
 ```
 
-Two interfaces rather than one so Alerts, which only ever needs holders, cannot enumerate every ticker in the
+Two interfaces rather than one so a caller that only ever needs holders cannot enumerate every ticker in the
 system (§2.8). Both say "including hidden holdings" in the doc comment because Phase 5's visibility flag is a
 **display** filter and must not narrow either read — `phase-3` has a test named for exactly that.
 
@@ -1025,13 +1103,20 @@ going live — before this task it asserted nothing at all, on any module.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Domain/StockPortfolio.Modules.Portfolio.Domain.csproj
-git commit -m "Contracts: the event Alerts consumes and the two reads phases 3 and 4 need"
+git add src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts
+git commit -m "Contracts: the two reads phases 3 and 4 need"
 ```
 
 ---
 
 ### Task 6: The `Holding` aggregate
+
+> ⚠️ **Amended by §0.0.** Everything here still builds **except the event surface**. `Holding` has no
+> `_domainEvents` field, no `DomainEvents` projection, no `ClearDomainEvents()` and no `Remove()` that records
+> an event — removal is `HoldingRepository.RemoveAsync` and nothing more. Drop
+> `Remove_RaisesHoldingRemoved_Once`, `Create_And_Merge_RaiseNoEvents` and `ClearDomainEvents_EmptiesTheList`
+> from `HoldingTests`; the merge, correction and validation tests are unaffected. Phase 4's cooldown clearing
+> is a call from `RemoveHoldingCommandHandler`, not an event.
 
 The centre of the phase. Everything decided in §2.1, §2.3 and §3 lands here.
 
@@ -1391,10 +1476,12 @@ Four things worth reading twice:
   materialisation and would otherwise re-run every guard on every row of every `SELECT`.
 - **`Guard` is an instance method and `Validate` is static.** `Create` has no existing currency to compare
   against, so it calls `Validate`; `Merge` and `Correct` call `Guard`, which adds the currency comparison.
-- **`_domainEvents` is a field with a `IReadOnlyList` projection**, so `DomainShapeTests` rule 3 (no public
-  setter on a domain type) passes. Task 7 maps it out with `builder.Ignore`.
-- **`Remove()` does not delete.** It records the event; `HoldingRepository.RemoveAsync` deletes. Task 12's
+- ⛔ **`_domainEvents` is a field with a `IReadOnlyList` projection**, so `DomainShapeTests` rule 3 (no public
+  setter on a domain type) passes. Task 7 maps it out with `builder.Ignore`. **Withdrawn by §0.0** — there is
+  no event collection, so there is nothing to project and nothing to `Ignore`.
+- ⛔ **`Remove()` does not delete.** It records the event; `HoldingRepository.RemoveAsync` deletes. Task 12's
   handler calls both, and `Remove_RaisesHoldingRemoved_Once` is what stops the pair drifting apart.
+  **Withdrawn by §0.0** — `HoldingRepository.RemoveAsync` deletes, and that is the whole of removal.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1619,6 +1706,7 @@ internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
             .IsUnique()
             .HasDatabaseName(UserTickerUniqueIndexName);
 
+        // ⛔ WITHDRAWN by §0.0 — there is no DomainEvents member to ignore.
         // Raised events live in memory between a mutation and the dispatch interceptor. Never a column.
         builder.Ignore(h => h.DomainEvents);
     }
@@ -1784,6 +1872,7 @@ public sealed class EfModelTests
                 index => index.IsUnique.ShouldBeTrue(),
                 index => index.Properties.Select(p => p.Name).ShouldBe(["UserId", "Ticker"]));
 
+    // ⛔ WITHDRAWN by §0.0 — Holding has no DomainEvents member, so there is nothing to assert unmapped.
     [Fact]
     public void DomainEvents_IsNotMapped() =>
         HoldingEntity()
@@ -1947,7 +2036,17 @@ git commit -m "Holding repository: every read scoped to the user, so 404 is stru
 
 ---
 
-### Task 10: Domain-event dispatch
+### Task 10: Domain-event dispatch — ⛔ WITHDRAWN
+
+> **Do not build this task.** Withdrawn by §0.0 along with Task 1. There is no `IDomainEventPublisher` to
+> implement, no `IDomainEvent` to collect and no cross-module event to dispatch, so the interceptor, the
+> publisher and the six tests are all withdrawn. The three EF facts recorded here are still true and still
+> worth keeping — a `Deleted` entity becomes `Detached` after a successful save, so anything reading the
+> change tracker post-save reads nothing; `ChangeTracker.Entries<T>()` is a live projection and must be
+> `.ToList()`ed before enumeration; the interceptor signatures are as printed. Nothing in Phase 2 now needs
+> them. Task numbering is preserved.
+>
+> The original task is left below, unedited, as the record of what was planned and rejected.
 
 The seam every later cross-module event goes through. §2.7 settled *when* it fires; this task is *how*.
 
@@ -2579,7 +2678,7 @@ git commit -m "Four use cases; add returns two successes because the merge is th
 
 **Interfaces:**
 - Produces: `internal sealed class HoldingQueries : IPollSet, IHoldersOfTicker`.
-- Consumed by: Phase 3's host adapter, Phase 4's Alerts, and Task 15's integration test.
+- Consumed by: Phase 3's host adapter, Phase 4's alert evaluation (inside Portfolio), and Task 15's integration test.
 
 - [ ] **Step 1: Write it**
 
@@ -2629,7 +2728,7 @@ Three things this settles for Phase 3 and Phase 4:
 - **`Distinct()` runs in the database**, not in memory — two users holding AAPL is one poll-set entry.
 
 ⚠️ `new Ticker(ticker)` bypasses `Ticker.Create`, so an unnormalised argument silently matches nothing. The
-callers are a host adapter and Alerts, both of which pass a value that came out of `GetPollSetAsync` and is
+callers are a host adapter and the alert evaluator, both of which pass a value that came out of `GetPollSetAsync` and is
 already canonical. Documented rather than defended, because re-validating on a hot read is the guard-in-the-
 constructor trap again.
 
@@ -2691,8 +2790,9 @@ public static class PortfolioModule
                 + "neither the key nor the file.");
         }
 
-        // Scoped, and resolved per-context: ISaveChangesInterceptor is NOT an ISingletonInterceptor,
-        // so this does not build a second EF internal service provider. Do not switch to AddDbContextPool.
+        // ⛔ The two registrations and the AddInterceptors call are WITHDRAWN by §0.0, with Task 10.
+        // Register the context with UseNpgsql and the history table only; there is no interceptor,
+        // so `(sp, options)` collapses to `options`.
         services.AddScoped<IDomainEventPublisher, DomainEventPublisher>();
         services.AddScoped<DispatchDomainEventsInterceptor>();
 
@@ -2718,10 +2818,12 @@ public static class PortfolioModule
 }
 ```
 
-⚠️ **The interceptor and publisher are registered *here*, not in `Program.cs`.** `src/Migrator/Program.cs`
+⛔ ~~**The interceptor and publisher are registered *here*, not in `Program.cs`.** `src/Migrator/Program.cs`
 builds a bare `new ServiceCollection()` and calls only each module's `Add…Module`. Register them in the host
 instead and the migrator throws on `GetRequiredService<DispatchDomainEventsInterceptor>()` before applying a
-single migration.
+single migration.~~ Withdrawn by §0.0 with Task 10. The general point survives and is worth remembering: a
+module's own `Add<M>Module` must register everything its `DbContext` needs, because the Migrator builds a bare
+`ServiceCollection` and calls nothing else.
 
 ⚠️ **Eager validation is limited to the connection string.** `CLAUDE.md`'s "Where Identity is not a safe
 template" warns that Identity validates *all* config eagerly and that this breaks Phase 3, where a missing
@@ -3203,8 +3305,9 @@ app.MapPortfolioEndpoints();
 Add both usings: `StockPortfolio.Modules.Portfolio.Infrastructure;` and
 `StockPortfolio.Modules.Portfolio.Api;`.
 
-`src/Api/StockPortfolio.Api.csproj` needs **no** change — it already ProjectReferences all four modules'
-`.Infrastructure` and `.Api`.
+`src/Api/StockPortfolio.Api.csproj` needs **no** change — it already ProjectReferences every module's
+`.Infrastructure` and `.Api`. (It referenced four modules when this was written; the Alerts references went
+with the module in §0.0.)
 
 - [ ] **Step 2: Extend the `.http` file**
 
@@ -3460,6 +3563,12 @@ Two hard-coded lists exist precisely so this is a deliberate edit rather than a 
 **Files:**
 - Modify: `tests/StockPortfolio.Architecture.Tests/ModuleBoundaryTests.cs`
 
+> ⚠️ **Amended by §0.0.** The arithmetic below predates the Alerts merge, which removed five shell assemblies
+> from the list on its own. Do not copy the numbers — read the list in
+> `EmptyShells_AreExactlyThePhasesNotYetBuilt` and delete the five Portfolio entries from whatever is actually
+> there. After both changes the list is the five MarketData assemblies plus
+> `StockPortfolio.Modules.Identity.Contracts`.
+
 - [ ] **Step 1: Shrink the empty-shell list from 16 to 11**
 
 Delete these five entries from `EmptyShells_AreExactlyThePhasesNotYetBuilt`'s `expected` array:
@@ -3472,8 +3581,9 @@ Delete these five entries from `EmptyShells_AreExactlyThePhasesNotYetBuilt`'s `e
 "StockPortfolio.Modules.Portfolio.Infrastructure",
 ```
 
-leaving eleven: the five Alerts, the five MarketData, and `StockPortfolio.Modules.Identity.Contracts` — which
-stays empty on purpose, and whose own README says why.
+leaving ~~eleven: the five Alerts, the five MarketData,~~ **six: the five MarketData assemblies** and
+`StockPortfolio.Modules.Identity.Contracts` — which stays empty on purpose, and whose own README says why.
+The five Alerts assemblies were deleted outright by §0.0.
 
 - [ ] **Step 2: Add Portfolio to the populated list**
 
@@ -3499,7 +3609,7 @@ rule 1 (cross-module), rule 2 (Contracts has no persistence — for the first ti
 rule 3 (no public setter), rule 4 (Infrastructure has no ASP.NET Core), rule 5 (Api has neither EF nor its own
 Infrastructure).
 
-⚠️ **Quote the skipped count alongside the passing count.** `CLAUDE.md` pins 29 skips against 188 passing; both
+⚠️ **Quote the skipped count alongside the passing count.** `CLAUDE.md` pins 20 skips against 188 passing; both
 numbers move here, and a passing count quoted alone hides a rule that stopped asserting.
 
 - [ ] **Step 4: Break one rule on purpose, then put it back**
@@ -4580,6 +4690,19 @@ git commit -m "Four SPA tests, including the optimistic rollback that pins the v
 
 A plan file that disagrees with the code is worse than no plan file — the next reader follows the wrong rule.
 
+> ⚠️ **Amended by §0.0.** The Alerts merge landed mid-phase and its documentation sweep was done separately,
+> covering `CLAUDE.md`, `README.md`, `00-overview.md`, `module-interactions.md`, `er-diagram.md`,
+> `deferred-work.md`, this file, and phases 1 and 3–6. Steps 1–4 below are the *original* Phase 2 sweep and
+> are still owed; two of their items changed:
+>
+> - **Step 1 item 2** (the "Where Identity is not a safe template" commit-point row) is already done, and was
+>   rewritten a second time: the row's driver is gone entirely, since there are no domain events to dispatch.
+> - **Step 3's §4.1 amendment** (`<M>.Domain → <M>.Contracts`) is **withdrawn** — that edge was only needed to
+>   let `Holding` raise a contracts-shaped event. §4.1's table is correct as written.
+>
+> Still owed here: the TanStack Query trap rewrite, both `ComplexProperty`/`Money` trap items, the
+> `phase-2-my-portfolio.md` corrections, the §3 package-list note, and the README's Portfolio section.
+
 **Files:**
 - Modify: `CLAUDE.md`
 - Modify: `docs/plan/phase-2-my-portfolio.md`
@@ -4692,9 +4815,11 @@ dotnet build && dotnet test
 npm --prefix src/Web test && npm --prefix src/Web run typecheck
 ```
 
-Record passing **and** skipped. Expected direction: .NET passing well above 188; **skips down from 29**,
-because five Portfolio assemblies stopped being shells. A skip count that did not fall means Task 17 did not
-land.
+Record passing **and** skipped. Both baselines moved with §0.0 — deleting five Alerts assemblies removed
+architecture cases, and withdrawing Task 10 removed six unit tests — so compare against a freshly measured
+pre-task run, not against the 188/29 figures this plan was written with. Expected direction is unchanged:
+passing up, **skips down**, because five Portfolio assemblies stopped being shells. A skip count that did not
+fall means Task 17 did not land.
 
 ⚠️ `dotnet test --no-build` after a **failed** build silently runs the previous assemblies and reports green.
 Check the build result, not just the test result.
@@ -4724,19 +4849,21 @@ git commit --allow-empty -m "Phase 2 verified: compose, browser, and the deploye
 
 ## 6. Work order
 
+Task numbers are **not** renumbered after §0.0's withdrawals — execution is keyed to them.
+
 | # | Task | Verified by |
 |---|---|---|
-| 1 | Domain-event types in `Shared.Kernel` | kernel stays framework-free |
+| 1 | ⛔ ~~Domain-event types in `Shared.Kernel`~~ | **WITHDRAWN (§0.0)** — skip it |
 | 2 | `MoneyJsonConverter` | 5 new tests; money is a string on the wire |
 | 3 | `Portfolio.UnitTests` project | builds, discovered, 0 tests |
 | 4 | `HoldingId`, `Ticker` | 12 tests; **architecture suite goes red here** |
-| 5 | `Portfolio.Contracts` | rule 2 runs instead of skipping, for the first time on any module |
-| 6 | `Holding` | 15 tests; rule 3 runs and passes |
+| 5 | `Portfolio.Contracts` — the two reads only | rule 2 runs instead of skipping, for the first time on any module |
+| 6 | `Holding`, without the event surface | rule 3 runs and passes |
 | 7 | Context, converters, configuration, `appsettings.Development.json` | `dotnet build` clean |
 | 8 | Migration + `EfModelTests` | generated SQL read by eye: schema, snake_case, `numeric(18,6)`, unique index |
 | — | *half day* | |
 | 9 | `IHoldingRepository` + implementation | commit point stated on the interface |
-| 10 | Dispatch interceptor + publisher | 6 tests |
+| 10 | ⛔ ~~Dispatch interceptor + publisher~~ | **WITHDRAWN (§0.0)** — skip it |
 | 11 | The four use cases | `.Application` still has no EF, no Npgsql, no ASP.NET Core |
 | 12 | `HoldingQueries` | builds |
 | 13 | `PortfolioModule`, DI, **`Migrator/Program.cs`** | migrator prints `2 context(s) checked` |
@@ -4754,17 +4881,27 @@ git commit --allow-empty -m "Phase 2 verified: compose, browser, and the deploye
 | 24 | Compose, full suite, deploy | the §8 walkthrough on the public URL |
 | — | *0.75 days total* | |
 
-Tasks 1–8 come first because they set the shape every later file copies, and because task 4 is the moment the
-architecture rules switch on.
+Tasks 2–8 come first because they set the shape every later file copies, and because task 4 is the moment the
+architecture rules switch on. Tasks 1 and 10 are withdrawn; the day estimate does not change materially,
+since between them they were about ninety lines and six tests.
 
 ---
 
 ## 7. Risks and deviations, stated up front
 
-**Phase 2 reverses two Phase 1-era decisions, deliberately.** Dispatch is after-save, not before (§2.7), and
-`Portfolio.Domain` references `Portfolio.Contracts`, which §4.1's reference table does not list (§2.8). Both
-are argued where they are made and both edit the documents that said otherwise (Task 23). A reversal that does
-not update the document it reverses is how the next reader follows a rule the code does not obey.
+**Phase 2's biggest deviation is §0.0: Alerts is merged into Portfolio and domain events are withdrawn.**
+It reverses the module split that `docs/plan/` argues for throughout, and it is argued in full in
+[00-overview.md](00-overview.md) §"Three modules, not four". The deferred consequence is real and is tracked
+in [../deferred-work.md](../deferred-work.md): the `alerts` schema, the `alerts_svc` role and the Alerts
+deployment variables are still in `db/init/`, `docker-compose.yml`, `infra/` and the workflows, because
+`docker compose up` is the P0 gate and removing them was not verifiable in the environment that made the
+change.
+
+⛔ ~~**Phase 2 reverses two Phase 1-era decisions, deliberately.** Dispatch is after-save, not before (§2.7),
+and `Portfolio.Domain` references `Portfolio.Contracts`, which §4.1's reference table does not list (§2.8).~~
+Both were then withdrawn by §0.0 — there is no dispatch and no event, so `Portfolio.Domain` needs no reference
+to `Portfolio.Contracts` and §4.1's table stands as written. The principle survives: a reversal that does not
+update the document it reverses is how the next reader follows a rule the code does not obey.
 
 **The merge race surfaces as a 500, and that is a chosen cost** (§2.6). The window is the few milliseconds
 between the handler's lookup and its insert, for one user on one ticker. The frontend's disabled-while-pending
@@ -4785,18 +4922,21 @@ implemented and integration-tested here, so they are not speculative, but they a
 whose *purpose* is external. If Phase 3 discovers it needs a different shape, changing them is cheap precisely
 because nothing else consumes them yet.
 
-**`Ticker` is declared three times across the codebase by Phase 4**, once per module that needs one (§2.2).
-That looks like duplication and is the opposite: it is what lets three modules be pulled apart. It also means
-`phase-3-live-prices.md` §2.5's `IReadOnlySet<Ticker>` in `MarketData.Contracts` violates the
-records-of-primitives rule and must be resolved in Phase 3, not here.
+⛔ ~~**`Ticker` is declared three times across the codebase by Phase 4**, once per module that needs one
+(§2.2). That looks like duplication and is the opposite: it is what lets three modules be pulled apart.~~
+**Withdrawn by §0.0, and inverted:** the third declaration was going to be Alerts', and the fact that `Ticker`
+would have meant the same thing there is what showed Alerts was not a separate bounded context. Two
+declarations remain, Portfolio's and MarketData's, across a real subdomain boundary. The other half of the
+paragraph still stands: `phase-3-live-prices.md` §2.5's `IReadOnlySet<Ticker>` in `MarketData.Contracts`
+violates the records-of-primitives rule and must be resolved in Phase 3, not here.
 
 **`is_visible` ships unused** (§2.9). A column with no reader is normally a smell; here it is one line against
 an `ALTER TABLE` on a live Azure database mid-demo, and it is what makes `phase-5`'s "no migration data step"
 claim true.
 
-**The sync `SavingChanges` throws.** Any synchronous `SaveChanges()` anywhere in Portfolio — Migrator,
-seeding, design-time tooling, a test helper — now fails loudly. None exists today. That is the point; the
-throw is what stops one appearing quietly and skipping dispatch.
+⛔ ~~**The sync `SavingChanges` throws.** Any synchronous `SaveChanges()` anywhere in Portfolio — Migrator,
+seeding, design-time tooling, a test helper — now fails loudly.~~ Withdrawn with Task 10 (§0.0). There is no
+interceptor, so nothing throws and synchronous saves are merely unused.
 
 ---
 
@@ -4809,7 +4949,10 @@ throw is what stops one appearing quietly and skipping dispatch.
 - [ ] Delete → empty; reload → still empty
 - [ ] User A's position is invisible to user B, and B's `PATCH` of A's id returns **404, not 403**
 - [ ] Compose logs show `migrator: complete, 2 context(s) checked.`
-- [ ] `dotnet test` green — passing **and** skipped both quoted, and **the skip count fell from 29**
+- [ ] `dotnet test` green — passing **and** skipped both quoted, and **the skip count fell** against a freshly
+      measured baseline (the 29 this plan quotes predates §0.0)
+- [ ] No `Shared.Kernel/DomainEvents/` directory, no `HoldingRemoved`, no dispatch interceptor anywhere (§0.0)
+- [ ] The counts left as `TODO(count)` in `CLAUDE.md` are replaced with real measured values
 - [ ] `npm test` green including the optimistic-rollback test
 - [ ] One architecture rule broken on purpose and seen red, then restored
 - [ ] `/openapi/v1.json` names `AddHoldingRequest`; no `.Application` type appears in it

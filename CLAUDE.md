@@ -6,7 +6,9 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Phase 1 is functionally complete.** 28 projects, `dotnet build` clean, 188 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
+**Phase 1 is functionally complete.** 23 projects, `dotnet build` clean, 188 tests green, and `docker compose up` brings the whole stack up from a clean volume with register/login/refresh/logout verified in a browser. Outstanding: `TokenPolicy` values are provisional, `bicep build` has never run locally, nothing is deployed.
+
+**Phase 2 merged Alerts into Portfolio**, so the module count went from four to three and the project count from 28 to 23. The argument is in Architecture below; the deferred database and deployment cleanup is in [docs/deferred-work.md](docs/deferred-work.md).
 
 `docs/plan/` was swept to match the conventions below — its snippets are current, and where a decision was reversed the plan says so and why, rather than quietly showing the new shape. `docs/Initial.md` is the exception and stays historical.
 
@@ -36,7 +38,14 @@ With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a
 
 ## Architecture
 
-Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+Three modules — `Identity`, `Portfolio`, `MarketData` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+
+**Alerts was a fourth module and is now part of Portfolio.** Reversed in Phase 2, and worth stating rather than showing silently, because the earlier plan files argue at length for the four-way split.
+
+- A bounded context is delimited by **ubiquitous language** — the same word meaning genuinely different things in two places. `Ticker` means a symbol in Portfolio, a symbol in MarketData and a symbol in Alerts. No divergence, so there was no second context: it was one context split three ways. `phase-2-implementation.md` §2.2 defended declaring `Ticker` three times as "not duplication, it is what lets three modules be pulled apart". By DDD's own test it was duplication.
+- What genuinely applies is **subdomain classification**: Portfolio (holdings *and* alerts) is CORE, the thing being built; Identity is GENERIC, the part you would buy in production; MarketData is SUPPORTING — necessary, not differentiating, and with its own lifecycle: timer-driven, external API, its own failure mode.
+- The corroborating evidence was in the code. `HoldingRemoved` was the **only** domain event in a six-phase project, and it existed solely because Alerts had been split out of Portfolio. Inside one module the same job is a plain method call.
+- Alerts functionality is unchanged. Thresholds, cooldowns, evaluation, SSE and the `/api/alerts/*` routes all still ship — they live in `Portfolio.Domain` / `.Application` / `.Api` under an `Alerts/` feature area rather than in five projects of their own.
 
 **Accessibility follows the onion, not a blanket `internal`.** `internal` is per-assembly and a module is five assemblies, so "everything internal outside `.Contracts`" cannot compile — `Identity.Infrastructure` could not see `User` in `Identity.Domain`.
 
@@ -51,12 +60,12 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
 - Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **`Api` host** (makes the host the merge point for every feature). `StockPortfolio.Api` is the host; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, no collision.
-- `Shared.Kernel` must stay framework-free — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no `IDomainEvent`; both were deleted as unused, and Phase 2 adds an event type at `HoldingRemoved`, the first one anything actually raises. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
+- `Shared.Kernel` must stay framework-free — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and **no domain-event infrastructure**: `IDomainEvent`, `IDomainEventHandler` and `IDomainEventPublisher` are deleted. Phase 1 wrote `IDomainEvent`, found nothing raised it, and removed it; Phase 2 planned to bring it back for `HoldingRemoved`, which existed only because Alerts was a separate module. With Alerts inside Portfolio there is again no raiser, so reintroducing it would have repeated Phase 1's mistake. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would make the kernel the shared domain, which is what modules exist to prevent.
-- Dependency direction is **Alerts → Portfolio → MarketData**. Identity has zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
+- Dependency direction is **Portfolio → MarketData**, one edge. Identity sits off to the side with zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
 - MarketData depends on nothing. It declares `IPollSetSource` and the host supplies an adapter over `Portfolio.Contracts`. Do not make MarketData read Portfolio directly.
-- One `DbContext` and one Postgres schema per module, each connecting as its own role.
+- One `DbContext` and one Postgres schema per module, each connecting as its own role. `alert_settings` and `fired_alerts` therefore belong to the `portfolio` schema and `PortfolioDbContext`.
 
 ## Conventions
 
@@ -130,35 +139,35 @@ The trade is real and worth knowing: the typed union made the compiler reject a 
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** 188 passing of 217 discovered: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** 188 passing of 208 discovered: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven. Counts fell with the Alerts merge: five assemblies and their architecture cases are gone, as are the six domain-event dispatch tests Phase 2 had planned.
 
-**The 29 skips are architecture rules waiting on empty modules, and that number is pinned.** A rule that skips asserts nothing — rule 2 currently runs zero of its four cases, because all four `.Contracts` projects are empty. `EmptyShells_AreExactlyThePhasesNotYetBuilt` fixes the exact list of 16 shell assemblies, so the day Portfolio gains its first type the skip set changes as a deliberate edit rather than silently shifting what is enforced. Quoting a passing count without the skip count hides this.
+**The 20 skips are architecture rules waiting on empty modules, and that number is pinned.** A rule that skips asserts nothing — rule 2 runs zero of its three cases while all three `.Contracts` projects are empty. `EmptyShells_AreExactlyThePhasesNotYetBuilt` fixes the exact list of 11 shell assemblies, so the day Portfolio gains its first type the skip set changes as a deliberate edit rather than silently shifting what is enforced. Quoting a passing count without the skip count hides this.
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was verified by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while reporting green. `ReferenceWalker_FindsEdgesThatDoExist` guards the same class of bug permanently: rules that pass by finding nothing need a companion that fails if the search finds nothing.
 
 ## Where Identity is not a safe template
 
-Identity is the only built module, so it is what gets copied. It has no domain events, no background
-service, no outbound HTTP, no SSE and no cross-module dependency — five of its answers are wrong
+Identity is the only built module, so it is what gets copied. It has no background service, no
+outbound HTTP, no SSE, no value object and no cross-module dependency — five of its answers are wrong
 elsewhere, and each fails silently. Decide these before writing the module, not after.
 
 | Identity does | Wrong for | Decide instead |
 |---|---|---|
-| Repositories self-commit | Phase 2 — dispatch-before-save needs handler writes in **one** transaction, and a repository that commits while an interceptor assumes it has not is silently incompatible | State the commit point on the repository interface's doc comment before the first handler exists |
+| Repositories self-commit | **Nothing today.** This row used to warn that Phase 2's dispatch-before-save needed handler writes in one transaction. That argument is void twice over: §2.7 moved dispatch to after-save, then the Alerts merge deleted domain events entirely, so Portfolio's repositories self-commit exactly like Identity's | State the commit point on the repository interface's doc comment before the first handler exists — the question outlives the answer |
 | Validates all config eagerly in `Add<M>Module` | Phase 3 — a missing `Finnhub__ApiKey` is a *supported* state (`FakeQuoteProvider`), and eager validation there breaks `docker compose up`, which is the P0 gate | Validate eagerly only what the module genuinely cannot run without |
-| Value converters are for ids | Phase 2 `Ticker`, Phase 4 `AlertDirection` — Identity has no non-id value object, so "id" and "converter-backed type" happen to name the same set | A converter for every custom mapped type; register both `Properties<T>()` and `DefaultTypeMapping<T>()` |
+| Value converters are for ids | Phase 2 `Ticker`, Phase 4 `AlertDirection` (now also `Portfolio.Domain`) — Identity has no non-id value object, so "id" and "converter-backed type" happen to name the same set | A converter for every custom mapped type; register both `Properties<T>()` and `DefaultTypeMapping<T>()` |
 | Canonical form is a `public static` on the entity (`User.NormaliseEmail`) | Only because email is a bare `string` with nowhere else to live — `Ticker` is a value object and canonicalises in its own factory | Canonicalise in the value object where there is one; a static on the entity only for bare primitives |
-| Two host wire-ups finish a module | Phases 3–4 add a poller, an adapter over another module's `.Contracts`, and Redis | Count the wire-ups the module actually needs — `Add` + `Map` does not mean wired |
+| Two host wire-ups finish a module | Phase 3 adds a poller, an adapter over another module's `.Contracts`, and Redis; Phase 4 adds SSE and a Redis subscriber to Portfolio | Count the wire-ups the module actually needs — `Add` + `Map` does not mean wired |
 
 ## Traps
 
 Each of these costs a day if you meet it cold.
 
-- **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Every context needs `MigrationsHistoryTable("__EFMigrationsHistory", "<schema>")` or all four share one table and corrupt each other's bookkeeping. Never put `SearchPath=` in a connection string.
+- **`HasDefaultSchema` does not move `__EFMigrationsHistory`** (efcore#24127, closed *not planned*). Every context needs `MigrationsHistoryTable("__EFMigrationsHistory", "<schema>")` or all three share one table and corrupt each other's bookkeeping. Never put `SearchPath=` in a connection string.
 - **A constructor whose parameter names match mapped properties gets hijacked by EF for materialisation.** Binding is by convention and cannot be configured. This is *fine and intended* here — the single private all-args constructor only assigns. It becomes a trap the moment a guard is added inside it, because EF then re-runs that guard on every row of every `SELECT`. Guards belong in the static factory.
 - **A `ComplexProperty` cannot be a constructor parameter** ([efcore#31621](https://github.com/dotnet/efcore/issues/31621), open). Phase 2's `Holding` maps `Money AveragePrice`, and `private Holding(…, Money averagePrice, …)` fails model building. This does **not** require a parameterless constructor — EF documents that *"not all properties need to have constructor parameters"* and sets the rest after construction. Omit only the complex member; the factory assigns it afterwards, since `private set` is reachable from inside the type.
 - **`PropertyAccessMode.PreferField` is the default**, so EF writes the backing field and never calls your setter. Validation in a setter silently never runs — which is moot now that entities have no settable surface, but it is why they don't.
-- **`Maximum Pool Size=2` on every connection string.** Azure Postgres B1ms allows 35 user connections and a different username is a different Npgsql pool; the default of 100 × 4 roles × 2 replicas requests 800. PgBouncer is unavailable on Burstable.
+- **`Maximum Pool Size=2` on every connection string.** Azure Postgres B1ms allows 35 user connections and a different username is a different Npgsql pool; the default of 100 × 3 roles × 2 replicas requests 600. PgBouncer is unavailable on Burstable. (The database still defines a fourth role, `alerts_svc`, which nothing now connects as — see `docs/deferred-work.md`.)
 - **An unhandled exception in a `BackgroundService` kills the host** (`StopHost` is the default). The poll loop needs an in-loop `try/catch`.
 - **Assigning a `DelayGenerator` silently disables `Retry-After` handling**, which is honoured by default.
 - **Never add `UseResponseCompression()`** — it buffers `text/event-stream` and the alert feed dies silently.

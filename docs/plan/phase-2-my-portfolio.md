@@ -49,7 +49,7 @@ No base class — see `phase-1-implementation.md` §5.2. `Holding` declares its 
 
 `Merge` and `Correct` are deliberately separate operations. Overloading one method with a flag is how a "fix my typo" silently becomes a second purchase.
 
-Deleting raises `HoldingRemoved(UserId, Ticker)`, consumed by Alerts in Phase 4 to clear any pending cooldown for that user and ticker. `Create` and `Merge` raise nothing.
+⛔ ~~Deleting raises `HoldingRemoved(UserId, Ticker)`, consumed by Alerts in Phase 4 to clear any pending cooldown for that user and ticker. `Create` and `Merge` raise nothing.~~ **Withdrawn.** Alerts is a feature area inside Portfolio, not a module, so Phase 4 clears the cooldown with a call at the end of `RemoveHoldingCommandHandler`. `Holding` raises nothing and has no event surface. See `phase-2-implementation.md` §0.0.
 
 That asymmetry is deliberate and worth understanding, because an earlier draft had events on both. The poll set is read live from Portfolio at the start of every cycle (Phase 3 §2.5), so *adding* a holding needs no notification — the next cycle simply sees it. Only removal has an effect nothing else would notice: a cooldown key sitting in Redis for a position you no longer own. One event, one consumer, one real job.
 
@@ -57,7 +57,17 @@ The dispatch machinery below is still worth building for that single consumer �
 
 `Ticker` is a `readonly record struct Ticker(string Value)` with a `ValueConverter`, normalised to uppercase, validated against `^[A-Z]{1,5}$` on construction.
 
-### 2.2 Domain event dispatch
+### 2.2 Domain event dispatch — ⛔ WITHDRAWN
+
+> **Nothing in this section is built.** `phase-2-implementation.md` §2.7 first reversed the dispatch point
+> (after the save, not before), and §0.0 then withdrew domain events entirely: Alerts merged into Portfolio,
+> `HoldingRemoved` lost its only reason to exist, and `Shared.Kernel/DomainEvents/` was deleted rather than
+> written. There is no interceptor, no publisher, no drain loop and no depth cap. The ⚠️ at the end of this
+> section — "Portfolio's repositories must **not** commit per call" — is withdrawn with it: Portfolio's
+> repositories self-commit, exactly like Identity's.
+>
+> Left below as the record of what was planned and rejected. Reasoning in
+> [00-overview.md](00-overview.md) §"Three modules, not four".
 
 **This phase reintroduces the event type.** `Shared.Kernel` has no `IDomainEvent` — one was written in Phase 1 and deleted because nothing raised it, and an empty abstraction is worse than an absent one. `HoldingRemoved` is the first real event, so Phase 2 is where `IDomainEvent` (and whatever an entity needs to raise one) gets added, with a consumer waiting in Phase 4. Add the minimum the single consumer needs; do not restore the deleted `AggregateRoot<TId>` base along with it.
 
@@ -187,7 +197,7 @@ When the API returns 200-merged rather than 201-created, show an inline notice: 
 
 **None.** Redeploy the API image and the SPA; the Bicep is unchanged.
 
-The only additions are the `portfolio` schema migration — which the existing ACA migration job picks up automatically because it runs a bundle over all four contexts — and one new integration-test container dependency, which is already in the fixture.
+The only additions are the `portfolio` schema migration — which the existing ACA migration job picks up automatically because it runs a bundle over all four contexts — and one new integration-test container dependency, which is already in the fixture. ⚠️ Both halves are wrong: the Migrator is not a bundle and registers Identity only (`phase-2-implementation.md` §0 item 2), and there are three contexts, not four, since Alerts merged into Portfolio.
 
 This is the point of front-loading infrastructure: a whole feature phase costs zero infrastructure work.
 
@@ -206,18 +216,20 @@ This is the point of front-loading infrastructure: a whole feature phase costs z
 | `Merge_NegativeQuantity_ReturnsInvalidInput` | |
 | `Merge_DifferentCurrency_ReturnsInvalidInput` | |
 | `Correct_ReplacesRatherThanAverages` | 20@$125 corrected to 10@$100 → 10@$100, not an average |
-| `Remove_RaisesHoldingRemoved_Once` | Exactly one event |
-| `Create_And_Merge_RaiseNoEvents` | The poll set is read live; nothing needs telling |
+| ⛔ `Remove_RaisesHoldingRemoved_Once` | Withdrawn — no events; removal is `HoldingRepository.RemoveAsync` |
+| ⛔ `Create_And_Merge_RaiseNoEvents` | Withdrawn — the poll set is read live and nothing raises anything |
 | `Ticker_Normalises_ToUppercase` | `aapl` → `AAPL` |
 | `Ticker_RejectsTooLong` | `TOOLONG` invalid |
 
-### Unit — `Portfolio.UnitTests` (dispatch)
+### ⛔ Unit — `Portfolio.UnitTests` (dispatch) — WITHDRAWN
+
+All three are withdrawn with §2.2. There is no interceptor to test.
 
 | Test | Asserts |
 |---|---|
-| `Interceptor_ClearsEventsBeforePublishing` | Publisher sees each event once |
-| `Interceptor_DrainsEventsRaisedByHandlers` | A handler raising a new event gets it dispatched |
-| `Interceptor_ThrowsAtMaxDepth` | A handler cycle fails loudly instead of hanging |
+| ⛔ `Interceptor_ClearsEventsBeforePublishing` | Publisher sees each event once |
+| ⛔ `Interceptor_DrainsEventsRaisedByHandlers` | A handler raising a new event gets it dispatched |
+| ⛔ `Interceptor_ThrowsAtMaxDepth` | A handler cycle fails loudly instead of hanging |
 
 ### Integration — `Api.IntegrationTests`
 
@@ -245,8 +257,8 @@ P0 req 6's sharpest line is *«Конкатенація рядків у SQL не
 | `Register_EmailContainingQuoteAndComment_RoundTripsExactly` | `o'brien'--@example.com` is a legitimately valid address. It stores and reads back byte-identical, and `identity.users` still exists. This is the one field in the app that genuinely accepts SQL metacharacters, so it is where the payload actually reaches the database |
 
 The interceptor from the second test is worth keeping registered in the test fixture for the whole assembly, with an assertion that **no** captured `CommandText` ever contains a value that was supplied as user input. That turns parameterisation from something asserted once into an invariant checked across every integration test in the suite — which is a stronger claim than any single raw query could make.
-| `HoldingRemoved_EventDispatched_WithinSameTransaction` | A test handler's write rolls back when the outer save fails |
-| `NewHolding_AppearsInPollSet_WithNoEvent` | Proves the live read works and the event isn't needed |
+| ⛔ `HoldingRemoved_EventDispatched_WithinSameTransaction` | Withdrawn with §2.2 — there is no event and no dispatch |
+| `NewHolding_AppearsInPollSet_WithNoEvent` | Proves the live read works and the event isn't needed. Moved to Phase 3 as `PollSet_ReflectsHoldingsImmediately_AfterAdd` (`phase-2-implementation.md` §2.9) |
 
 ### Frontend
 

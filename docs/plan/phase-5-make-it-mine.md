@@ -14,13 +14,13 @@ Near-greenfield: `Initial.md` gives settings three words in a build-order line (
 
 ## 2. Backend
 
-Settings are split across the modules that own them. A single `user_settings` table would be a fifth module nobody designed.
+Settings are split across the modules that own them. A single `user_settings` table would be a module nobody designed. There are three modules, not four — Alerts merged into Portfolio in Phase 2 ([00-overview.md](00-overview.md) §"Three modules, not four") — so refresh interval, holding visibility *and* the alert threshold all land in the `portfolio` schema. That is one fewer `PATCH` target crossing a boundary; the endpoint list below is unchanged.
 
 | Setting | Owner |
 |---|---|
 | Theme, language | `Identity` |
 | Refresh interval, holding visibility | `Portfolio` |
-| Threshold, window, enabled | `Alerts` (settled in Phase 4) |
+| Threshold, window, enabled | `Portfolio`, alerts feature area (ownership settled in Phase 4; the module merged into Portfolio in Phase 2) |
 | BYOK key | `MarketData` |
 
 The frontend fetches one aggregated `GET /api/settings` view and PATCHes each section separately — one read, targeted writes.
@@ -122,7 +122,7 @@ The server value is the source of truth across devices; `localStorage` is the bo
 
 `react-i18next` + `i18next-browser-languagedetector`, which gives persistence for free. EN and UK — the brief requires a minimum of two.
 
-Namespaces per feature (`auth`, `portfolio`, `dashboard`, `alerts`, `settings`, `common`), mirroring the backend modules. Phase 2's zod schemas already store message **keys** rather than strings, so validation messages translate with no changes to the schemas. Numbers and dates go through `Intl.NumberFormat` and `Intl.DateTimeFormat` with the active locale — currency stays USD, only the formatting localises.
+Namespaces per feature (`auth`, `portfolio`, `dashboard`, `alerts`, `settings`, `common`), mirroring the backend **features** — `alerts` is a feature area inside Portfolio, not a module of its own. Phase 2's zod schemas already store message **keys** rather than strings, so validation messages translate with no changes to the schemas. Numbers and dates go through `Intl.NumberFormat` and `Intl.DateTimeFormat` with the active locale — currency stays USD, only the formatting localises.
 
 Add a CI check that both locale files have identical key sets. A missing Ukrainian key renders as the raw key path in the UI, which looks far worse than an English fallback, and `fallbackLng` hides the bug from you while showing it to everyone else.
 

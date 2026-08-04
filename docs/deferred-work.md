@@ -5,6 +5,8 @@ Findings from the audit of 2026-08-02 that were **not** actioned, and why. Each 
 
 Rejected items are recorded with the reason they were rejected, so they are not re-proposed.
 
+Items numbered `A`–`D` come from that audit. `E` items were added later, by the work that raised them.
+
 ---
 
 ## Deferred
@@ -105,14 +107,14 @@ module's design-time factory omits it, four contexts share one history table.
 **Fix:** `IdentityDbContextOptions.Configure(builder, connectionString)` in `.Infrastructure`; everything else
 references the existing public constant.
 
-**Trigger:** Phase 2. With four modules this becomes sixteen sites, and the value is almost entirely in not
-stamping the pattern out four times.
+**Trigger:** Phase 2. With three modules this becomes twelve sites, and the value is almost entirely in not
+stamping the pattern out three times.
 
-### C7 — the `postgres` readiness check probes one of four roles
+### C7 — the `postgres` readiness check probes one of three roles
 
 `src/Api/HealthChecks/PostgresHealthCheck.cs:11` hard-codes the `Identity` connection string but registers
-under the unqualified name `postgres`. Once the other three modules have their own roles, readiness reports
-Healthy while three of four cannot reach the database, and ACA keeps routing to that revision.
+under the unqualified name `postgres`. Once the other two modules have their own roles, readiness reports
+Healthy while two of three cannot reach the database, and ACA keeps routing to that revision.
 
 **Fix:** each module contributes its own readiness check from its `Add<M>Module`; the host only maps the
 endpoints. `AddDbContextCheck<T>()` does exactly this, but note that
@@ -165,6 +167,40 @@ shell-based probe.
 
 **Trigger:** before the first deploy or any demo where someone else runs `docker compose up`.
 
+### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables outlive the module
+
+Phase 2 merged the Alerts module into Portfolio (three modules, not four — see
+[plan/00-overview.md](plan/00-overview.md) §"Three modules, not four"). The five `.csproj` files, the
+`Shared.Kernel/DomainEvents/` folder and the solution entries went with it. The **database and deployment
+surface did not**:
+
+| Still carries it | What |
+|---|---|
+| `db/init/00-roles.sh`, `db/init/01-roles.sql` | `CREATE SCHEMA alerts`, role `alerts_svc`, its grants, revokes and `ALTER DEFAULT PRIVILEGES` |
+| `docker-compose.yml`, `.env.example` | `ALERTS_PW`, and an `ConnectionStrings__Alerts` value passed to the API |
+| `infra/*.bicep` | the Alerts password secret and connection-string parameter |
+| `.github/workflows/*` | `ALERTS_PW` as a secret/parameter on the deploy path |
+
+Nothing connects as `alerts_svc` — the API has no Alerts connection string in `appsettings.json` and no
+context to open one — so the leftovers are inert: one extra role and one empty schema. The connection budget
+is unaffected, because a pool is only created for a connection string that exists.
+
+**Why it was not cleaned up with the module.** `docker compose up` from a clean clone is the **P0 acceptance
+gate**, and `db/init/` is the exact area that has already broken it once (`docker-entrypoint-initdb.d` passes
+no `-v` to psql, so a `.sql` using `:'password'` aborts init under `ON_ERROR_STOP=1`). The environment that
+made the merge had no Docker daemon, so a clean-clone boot could not be re-verified. Editing init SQL and
+deployment parameters blind, against the one gate that must not fail, was the worse trade.
+
+**Fix:** delete the `alerts` schema, the `alerts_svc` role and every `ALERTS_PW` / Alerts-connection-string
+reference across those four places, then boot from a clean clone — `docker compose down -v && docker compose
+up` — and confirm the migrator still reports every context and `/health/ready` comes up green. Check the
+Bicep with `az deployment group what-if` before deploying: a removed parameter that a workflow still passes
+fails at preflight, not at runtime.
+
+**Trigger:** the next `docker compose up` on a machine with a Docker daemon. Firm deadline is the Phase 6
+README/verification pass, which is where a reviewer reading `db/init/01-roles.sql` would find a role for a
+module that does not exist.
+
 ---
 
 ## Skipped
@@ -211,7 +247,8 @@ Recorded so the same ground is not re-covered.
   suppress the framework's auto-insertion *before* `UseCors` — deleting them silently reverses the ordering.
 - **The liveness/readiness split** — `Predicate = _ => false` on liveness, and a test that boots a host with
   unreachable dependencies and asserts live=200 / ready=503. Not decorative.
-- **`Maximum Pool Size=2`** on all five production connection strings.
+- **`Maximum Pool Size=2`** on every production connection string — five when Alerts was a module, four since
+  (three service roles plus `migrator`).
 - **`AddProblemDetails()` and `UseStatusCodePages()` both registered**, so the 415/500 `problem+json`
   declarations are honest — for JSON `Accept` headers. A client sending `Accept: text/html` gets the
   plain-text fallback.
