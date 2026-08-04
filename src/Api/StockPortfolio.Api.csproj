@@ -22,11 +22,9 @@
     <ProjectReference Include="..\Modules\Identity\StockPortfolio.Modules.Identity.Infrastructure\StockPortfolio.Modules.Identity.Infrastructure.csproj" />
     <ProjectReference Include="..\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Infrastructure\StockPortfolio.Modules.Portfolio.Infrastructure.csproj" />
     <ProjectReference Include="..\Modules\MarketData\StockPortfolio.Modules.MarketData.Infrastructure\StockPortfolio.Modules.MarketData.Infrastructure.csproj" />
-    <ProjectReference Include="..\Modules\Alerts\StockPortfolio.Modules.Alerts.Infrastructure\StockPortfolio.Modules.Alerts.Infrastructure.csproj" />
     <ProjectReference Include="..\Modules\Identity\StockPortfolio.Modules.Identity.Api\StockPortfolio.Modules.Identity.Api.csproj" />
     <ProjectReference Include="..\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Api\StockPortfolio.Modules.Portfolio.Api.csproj" />
     <ProjectReference Include="..\Modules\MarketData\StockPortfolio.Modules.MarketData.Api\StockPortfolio.Modules.MarketData.Api.csproj" />
-    <ProjectReference Include="..\Modules\Alerts\StockPortfolio.Modules.Alerts.Api\StockPortfolio.Modules.Alerts.Api.csproj" />
   </ItemGroup>
 
 </Project>

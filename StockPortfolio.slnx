@@ -7,13 +7,6 @@
     <Project Path="src/Migrator/StockPortfolio.Migrator.csproj" />
   </Folder>
   <Folder Name="/src/Modules/" />
-  <Folder Name="/src/Modules/Alerts/">
-    <Project Path="src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/StockPortfolio.Modules.Alerts.Application.csproj" />
-    <Project Path="src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/StockPortfolio.Modules.Alerts.Contracts.csproj" />
-    <Project Path="src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/StockPortfolio.Modules.Alerts.Domain.csproj" />
-    <Project Path="src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/StockPortfolio.Modules.Alerts.Infrastructure.csproj" />
-    <Project Path="src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/StockPortfolio.Modules.Alerts.Api.csproj" />
-  </Folder>
   <Folder Name="/src/Modules/Identity/">
     <Project Path="src/Modules/Identity/StockPortfolio.Modules.Identity.Application/StockPortfolio.Modules.Identity.Application.csproj" />
     <Project Path="src/Modules/Identity/StockPortfolio.Modules.Identity.Contracts/StockPortfolio.Modules.Identity.Contracts.csproj" />

@@ -6,13 +6,13 @@ namespace StockPortfolio.Tests;
 /// <summary>Rules 2, 4, 5 and 6 — the onion, asserted layer by layer.</summary>
 public sealed class LayerReferenceTests
 {
-    /// <summary>The four .Contracts assemblies.</summary>
+    /// <summary>The three .Contracts assemblies.</summary>
     public static TheoryData<string> ContractsAssemblies => AssembliesFor(SolutionAssemblies.ContractsLayer);
 
-    /// <summary>The four .Infrastructure assemblies.</summary>
+    /// <summary>The three .Infrastructure assemblies.</summary>
     public static TheoryData<string> InfrastructureAssemblies => AssembliesFor("Infrastructure");
 
-    /// <summary>The four .Api assemblies.</summary>
+    /// <summary>The three .Api assemblies.</summary>
     public static TheoryData<string> ApiAssemblies => AssembliesFor("Api");
 
     /// <summary>Presses the button on the smoke detector for the rule targets themselves.</summary>

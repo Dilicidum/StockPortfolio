@@ -10,7 +10,7 @@ public sealed class DomainShapeTests
 {
     private const string IsExternalInitTypeName = "System.Runtime.CompilerServices.IsExternalInit";
 
-    /// <summary>The four .Domain assemblies.</summary>
+    /// <summary>The three .Domain assemblies.</summary>
     public static TheoryData<string> DomainAssemblies =>
         [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, "Domain"))];
 

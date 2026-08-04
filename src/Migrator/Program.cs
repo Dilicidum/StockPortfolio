@@ -26,7 +26,6 @@ var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
     ["ConnectionStrings:Identity"] = migratorConnectionString,
     ["ConnectionStrings:Portfolio"] = migratorConnectionString,
     ["ConnectionStrings:MarketData"] = migratorConnectionString,
-    ["ConnectionStrings:Alerts"] = migratorConnectionString,
     // AddIdentityModule validates the Jwt section eagerly; the migrator never signs anything.
     ["Jwt:SigningKey"] = configuration["Jwt:SigningKey"]
                          ?? "migrator-placeholder-signing-key-unused-32b",
