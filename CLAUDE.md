@@ -64,7 +64,7 @@ Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: 
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would make the kernel the shared domain, which is what modules exist to prevent.
 - Dependency direction is **Portfolio → MarketData**, one edge. Identity sits off to the side with zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
-- MarketData depends on nothing. It declares `IPollSetSource` and the host supplies an adapter over `Portfolio.Contracts`. Do not make MarketData read Portfolio directly.
+- MarketData depends on nothing. It declares `ITickersHeldByAnyUser` and the host supplies an adapter over `Portfolio.Contracts`. Do not make MarketData read Portfolio directly.
 - One `DbContext` and one Postgres schema per module, each connecting as its own role. `alert_settings` and `fired_alerts` therefore belong to the `portfolio` schema and `PortfolioDbContext`.
 
 ## Conventions
@@ -218,7 +218,7 @@ These were considered and cut. Don't reintroduce them without asking.
 
 - **Alert replay** — no cursor, no `Last-Event-ID`, no 24h backfill. Req 9 asks for an event on breach, a background check, and a simulate button. History is a plain `GET`; the stream hook invalidates the query on reconnect.
 - **Watchlist** — «перелік акцій» in req 8 sits inside *dashboard settings*, so it means which of your holdings show on the dashboard. That's `is_visible` on `holdings`.
-- **A cached ticker table in MarketData** — the poll set is read live from Portfolio each cycle. Removing it also removed two event handlers, a reconciliation pass and a divergence failure mode.
+- **A cached ticker table in MarketData** — the held-ticker list is read live from Portfolio each cycle. Removing it also removed two event handlers, a reconciliation pass and a divergence failure mode.
 - **Raw SQL** — see Conventions.
 - **Trading-hours gating** — ships as a config flag defaulting to off. Read-through covers the weekend demo case.
 - **WebSockets and SignalR** — SSE is the transport. The README carries the decision matrix; the UI badge says "Live (SSE)", never "WS Live".

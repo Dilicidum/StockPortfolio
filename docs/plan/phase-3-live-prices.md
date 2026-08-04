@@ -87,7 +87,7 @@ internal sealed class QuotePollingService(
 
 1. Claim the window: `SET marketdata:claim:{windowStart} 1 NX EX 120`. Lose → skip.
 2. **Take the overlap guard** (see below). Fail → log and skip.
-3. Load the poll set.
+3. Load the held-ticker list.
 4. Fetch under a token-bucket limiter, spread across the cycle, bounded concurrency respecting the 30/sec cap.
 5. Write observations, trim windows.
 6. Release the overlap guard in a `finally`.
@@ -113,13 +113,13 @@ try { … } finally { await db.KeyDeleteAsync("marketdata:cycle-inflight"); }
 
 The TTL is the backstop for a process that dies mid-cycle. Note this in the README — finding and fixing a race in your own design is a better story than not having had one.
 
-### 2.5 Poll set — read live, not cached
+### 2.5 The held-ticker list — read live, not cached
 
 Every distinct ticker anyone holds, read at the start of each cycle:
 
 ```csharp
 // MarketData.Contracts — MarketData declares what it needs
-public interface IPollSetSource { Task<IReadOnlySet<Ticker>> GetAsync(CancellationToken ct); }
+public interface ITickersHeldByAnyUser { Task<IReadOnlySet<Ticker>> GetAsync(CancellationToken ct); }
 ```
 
 The host supplies the adapter, backed by `Portfolio.Contracts`. MarketData therefore depends on nothing, and the module graph stays acyclic — see [module-interactions.md](module-interactions.md) §1.
@@ -132,7 +132,7 @@ The cost is one `SELECT DISTINCT` per cycle against an indexed column, sixty tim
 
 ⚠️ It crosses a module boundary, so it goes through the contract, never a cross-schema read — `marketdata_svc` has no `USAGE` on `portfolio` and a direct query fails with a permission error. That is the schema isolation working.
 
-Note the poll set uses **all** holdings, not just visible ones. Phase 5's show/hide is a dashboard display filter; hiding a position must not stop its price being collected, or unhiding it would show a stale number.
+Note the held-ticker list uses **all** holdings, not just visible ones. Phase 5's show/hide is a dashboard display filter; hiding a position must not stop its price being collected, or unhiding it would show a stale number.
 
 ### 2.6 Storage — Redis
 
@@ -179,7 +179,7 @@ This single mechanism fixes three separate audit findings:
 |---|---|
 | Blank dashboard outside market hours (`Initial.md:76` trading-hours gate) | The request fetches for itself |
 | A just-added ticker showing `pending` until the next cycle (`Initial.md:110`) | Priced on first render |
-| Permanent divergence from a lost `HoldingAdded` event | A ticker missing from the poll set still gets a price |
+| Permanent divergence from a lost `HoldingAdded` event | A ticker missing from the held-ticker list still gets a price |
 
 It makes the poller an **optimisation** rather than the only path to a price. The trading-hours gate can therefore stay — but ship it as a config flag defaulting to **off**, so the reviewer's first run polls unconditionally.
 
@@ -205,13 +205,18 @@ A ticker with no price returns `null` and renders as **pending**, never `$0.00` 
 The two set-based reads Portfolio exposes are plain LINQ:
 
 ```csharp
-public Task<List<string>> GetPollSetAsync(CancellationToken ct) =>
+// ITickersHeldByAnyUser — every ticker anyone holds, deduplicated in the database.
+public Task<List<string>> GetAsync(CancellationToken ct) =>
     db.Holdings.AsNoTracking().Select(h => h.Ticker.Value).Distinct().ToListAsync(ct);
 
-public Task<List<Guid>> GetHoldersAsync(Ticker ticker, CancellationToken ct) =>
+// IUsersHoldingTicker — the other direction: who holds this one.
+public Task<List<Guid>> GetAsync(Ticker ticker, CancellationToken ct) =>
     db.Holdings.AsNoTracking().Where(h => h.Ticker == ticker)
               .Select(h => h.UserId.Value).ToListAsync(ct);
 ```
+
+The two names are the same because the interfaces already say which is which; the parameter list
+distinguishes them at every call site.
 
 Proving it is the job of a test and a README line rather than of hand-written SQL — see §5 and Phase 6's README checklist.
 
@@ -322,7 +327,7 @@ Testcontainers Postgres + Redis, `FakeQuoteProvider`.
 | `PollCycle_WritesObservations_AndTrimsBeyondRetention` | Window bounded at 61 entries |
 | `PollSet_ReflectsHoldingsImmediately_AfterAdd` | No cached ticker table to go stale |
 | `PollSet_IncludesHiddenHoldings` | Phase 5's show/hide is display-only |
-| `GetHolders_GeneratedSql_UsesParameterPlaceholder` | Capture the command text; it contains `@__ticker_0` and **not** the literal ticker value |
+| `UsersHoldingTicker_GeneratedSql_UsesParameterPlaceholder` | Capture the command text; it contains `@__ticker_0` and **not** the literal ticker value |
 
 ### Frontend
 

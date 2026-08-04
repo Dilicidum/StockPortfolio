@@ -41,7 +41,7 @@ projects with its own schema. Calling one of them "the core module" collapsed th
 ```mermaid
 flowchart TB
     WEB["React SPA — GitHub Pages"]
-    HOST["Api host — composition root<br/>endpoints · DI · the IPollSetSource adapter"]
+    HOST["Api host — composition root<br/>endpoints · DI · the ITickersHeldByAnyUser adapter"]
 
     ID["<b>Identity</b><br/>register · login · refresh · logout"]
     PF["<b>Portfolio</b><br/>holdings · weighted-average merge<br/>dashboard read model · P&amp;L"]
@@ -53,10 +53,10 @@ flowchart TB
     HOST --> PF
     HOST --> MD
     HOST --> AL
-    HOST -.->|"adapts Portfolio.Contracts<br/>to MarketData's IPollSetSource"| MD
+    HOST -.->|"adapts Portfolio.Contracts<br/>to MarketData's ITickersHeldByAnyUser"| MD
 
     PF -->|"IQuoteReader — prices for the dashboard join"| MD
-    AL -->|"IHoldersOfTicker — who holds this?"| PF
+    AL -->|"IUsersHoldingTicker — who holds this?"| PF
     AL -->|"IPriceWindowReader — current / min / max"| MD
 
     style PF fill:#14532d,stroke:#4ade80,color:#dcfce7
@@ -70,7 +70,7 @@ Read the graph two ways and it says the same thing both times:
 - **Nothing depends on Alerts**, and **Alerts depends on two things**. It is a pure consumer — the leaf of
   the graph, and therefore the module whose internals nobody else can be broken by.
 - **MarketData depends on nothing.** It needs to know which tickers to poll, but declares that need as its
-  own interface, `IPollSetSource`, and the host supplies a ten-line adapter over `Portfolio.Contracts`.
+  own interface, `ITickersHeldByAnyUser`, and the host supplies a ten-line adapter over `Portfolio.Contracts`.
   Without that inversion Portfolio and MarketData would be mutually dependent and the graph would cycle.
 - **Nothing calls Identity at runtime.** The JWT is self-contained, so `Identity.Contracts` is empty — the
   emptiness is the evidence.
@@ -108,7 +108,7 @@ Dockerfile, its own connection string, one swapped DI registration.
 | **Endpoints** | `/api/holdings` CRUD · `/api/dashboard` |
 | **Postgres** | `portfolio` — holdings, dashboard_settings |
 | **Depends on** | MarketData, for prices |
-| **Exposes** | `IHoldersOfTicker`, `IPollSet` |
+| **Exposes** | `IUsersHoldingTicker`, `ITickersHeldByAnyUser` |
 
 `Merge` versus `Correct` is the one place the domain language does real work: "I bought more" and "I typed
 it wrong" touch the same two fields and mean different things, and folding them behind one flag is how a
@@ -141,7 +141,7 @@ capability with a cache in front, not a place where the product is differentiate
 | **Behaviour** | evaluation after each poll cycle, cooldown suppression, SSE stream with a single-use ticket handshake, a simulate endpoint |
 | **Redis** | `alerts:cooldown:{user}:{ticker}:{dir}`, `alerts:ticket:{ticket}`, `alerts:user:{id}` pub/sub |
 | **Postgres** | `alerts` — alert_settings, fired_alerts |
-| **Depends on** | Portfolio (`IHoldersOfTicker`), MarketData (`IPriceWindowReader`) |
+| **Depends on** | Portfolio (`IUsersHoldingTicker`), MarketData (`IPriceWindowReader`) |
 | **Depended on by** | nothing |
 
 The threshold is measured against **the extreme of your own window**, never against Finnhub's `dp`, which is
@@ -211,7 +211,7 @@ clear a Redis cooldown key. That single event dragged in `IDomainEvent`, a publi
 Not clearing it costs, at worst, one suppressed alert if the user re-buys the same ticker inside the window.
 So the boundary comes back and **the domain-event infrastructure stays deleted**: `Shared.Kernel` has no
 `IDomainEvent`, nothing raises one, and Alerts learns about removed holdings by simply not finding them in
-`IHoldersOfTicker` on the next cycle.
+`IUsersHoldingTicker` on the next cycle.
 
 Applied to the four tests, the Portfolio/Alerts seam passes all of them: no shared transaction (`FiredAlert`
 is never written atomically with `Holding`), bounded and batchable chattiness (one holders lookup per ticker

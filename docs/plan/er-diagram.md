@@ -105,7 +105,7 @@ erDiagram
 
 Seven tables plus the Data Protection key ring. Two tables from an earlier draft are gone, and it is worth saying why so they don't creep back:
 
-**`marketdata.tracked_tickers`** — `Initial.md:74` gives MarketData its own table of distinct tickers, maintained by subscribing to holding events. Once the poller reads the poll set live from Portfolio at the start of each cycle, that table is duplicated state with no job — and it was the reason for the event subscription, the periodic reconciliation, and the whole "a lost publish diverges the two permanently" failure mode. All three go with it.
+**`marketdata.tracked_tickers`** — `Initial.md:74` gives MarketData its own table of distinct tickers, maintained by subscribing to holding events. Once the poller reads the held-ticker list live from Portfolio at the start of each cycle, that table is duplicated state with no job — and it was the reason for the event subscription, the periodic reconciliation, and the whole "a lost publish diverges the two permanently" failure mode. All three go with it.
 
 **`alerts.cooldowns`** — moved to Redis as `alerts:cooldown:{userId}:{ticker}:{direction}` with a TTL. Expiry is the entire semantics of a cooldown, so a store with native expiry is the right one; a table needs a cleanup job to do the same thing worse. The Redis key prefix stays `alerts:` even though the owning module is now Portfolio — it names the feature, and renaming it would invalidate live keys for nothing.
 

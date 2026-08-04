@@ -41,7 +41,7 @@ is **generic**, MarketData is **supporting**.
 | §2.7 dispatch after the save commits | **Moot.** There is nothing to dispatch |
 | §2.8's `HoldingRemoved` half, and `Portfolio.Contracts → Shared.Kernel` for `IDomainEvent` | **Withdrawn.** The two read interfaces survive; see §2.8 |
 | Task 1 — domain-event types in `Shared.Kernel` | **WITHDRAWN** |
-| Task 5 — the `HoldingRemoved` record | **PARTLY WITHDRAWN.** `IPollSet` and `IHoldersOfTicker` still ship |
+| Task 5 — the `HoldingRemoved` record | **PARTLY WITHDRAWN.** `ITickersHeldByAnyUser` and `IUsersHoldingTicker` still ship |
 | Task 10 — dispatch interceptor, publisher, 6 tests | **WITHDRAWN** |
 | §7's "`Ticker` is declared three times" and "the sync `SavingChanges` throws" risks | **Withdrawn with the tasks that created them** |
 
@@ -156,7 +156,7 @@ types that belong to **no** module"*; *"`.Contracts` holds records of primitives
 Two declarations across a real subdomain boundary is the modular-monolith answer. Three declarations across a
 boundary that no language difference justified was the error §0.0 corrects.
 
-**Knock-on:** `phase-3-live-prices.md` §2.5 declares `IPollSetSource { Task<IReadOnlySet<Ticker>> … }` inside
+**Knock-on:** `phase-3-live-prices.md` §2.5 declares `ITickersHeldByAnyUser { Task<IReadOnlySet<Ticker>> … }` inside
 `MarketData.Contracts`. That is a strongly-typed value object in a Contracts project and violates the rule.
 Phase 3 must move it to `MarketData.Domain` or change it to `string`. Flagged, not fixed here.
 
@@ -311,15 +311,15 @@ Both edits are Task 22. (That row has since been rewritten again — §0.0 remov
 
 ### 2.8 DECISION — `Portfolio.Contracts` ships two interfaces now
 
-`phase-2-my-portfolio.md` never mentions `.Contracts`. `phase-3` needs a poll-set read; `phase-4` needs a
-holders-of-ticker read; `module-interactions.md` names the latter `IHoldersOfTicker`. Meanwhile
+`phase-2-my-portfolio.md` never mentions `.Contracts`. `phase-3` needs a held-ticker read; `phase-4` needs a
+holders-of-ticker read; `module-interactions.md` names the latter `IUsersHoldingTicker`. Meanwhile
 `LayerReferenceTests.ContractsAssembly_ReferencesNoPersistence` currently **skips all four of its cases**,
 because every `.Contracts` project is an empty shell — a rule that asserts nothing.
 
 **Settled: two interfaces, both returning primitives, both implemented in Phase 2.** Two rather than one so a
 caller that only ever needs the holders of one ticker cannot enumerate every ticker in the system.
 
-This is not speculative work: spec §5 already schedules a test for the poll-set read, and Task 13 implements
+This is not speculative work: spec §5 already schedules a test for the held-ticker read, and Task 13 implements
 and tests both.
 
 > ⚠️ **Amended (§0.0), two ways.**
@@ -327,10 +327,10 @@ and tests both.
 > - **The `Shared.Kernel` reference is withdrawn.** This paragraph used to say `Portfolio.Contracts` gains a
 >   `ProjectReference` to `Shared.Kernel` for `IDomainEvent`. `IDomainEvent` no longer exists, so
 >   `Portfolio.Contracts` keeps no project reference at all. It holds two interfaces over primitives.
-> - **`IHoldersOfTicker`'s stated consumer changes.** It was justified as Alerts' only view of Portfolio.
+> - **`IUsersHoldingTicker`'s stated consumer changes.** It was justified as Alerts' only view of Portfolio.
 >   Alerts is now inside Portfolio and can ask directly, so the interface's remaining reason to sit in
->   `.Contracts` is `IPollSet`'s: it is the seam the host adapter uses. Keep both — they are implemented and
->   tested here, and Phase 3 consumes `IPollSet` — but do not defend `IHoldersOfTicker` on a cross-module
+>   `.Contracts` is `ITickersHeldByAnyUser`'s: it is the seam the host adapter uses. Keep both — they are implemented and
+>   tested here, and Phase 3 consumes `ITickersHeldByAnyUser` — but do not defend `IUsersHoldingTicker` on a cross-module
 >   argument that no longer holds.
 
 ### 2.9 DECISION — `is_visible` ships in this migration, unused
@@ -351,7 +351,7 @@ Phase 5 to a name-bound constructor is exactly how the whole model fails to buil
 `HoldingSummary` **does** carry `IsVisible`, so the wire contract is stable across Phase 5.
 
 **One test moves.** Spec §5's `NewHolding_AppearsInPollSet_WithNoEvent` is listed as an integration test but
-needs Phase 3's `IPollSetSource` and host adapter. Phase 2 ships and tests only the Portfolio side of that
+needs Phase 3's `ITickersHeldByAnyUser` and host adapter. Phase 2 ships and tests only the Portfolio side of that
 seam (Task 13); the end-to-end assertion stays where `phase-3` §5 already has it, as
 `PollSet_ReflectsHoldingsImmediately_AfterAdd`.
 
@@ -425,8 +425,8 @@ src/
     …Portfolio.Contracts/
  ⛔    *.csproj                                 the Shared.Kernel reference was only for IDomainEvent
  ⛔    HoldingRemoved.cs                        withdrawn; removal is a method call inside one module
- ✚    IPollSet.cs                              Task<List<string>>  — host adapter, Phase 3
- ✚    IHoldersOfTicker.cs                      Task<List<Guid>>    — alert evaluation, Phase 4
+ ✚    ITickersHeldByAnyUser.cs                 Task<List<string>>  — host adapter, Phase 3
+ ✚    IUsersHoldingTicker.cs                   Task<List<Guid>>    — alert evaluation, Phase 4
 
     …Portfolio.Domain/
  ✚    HoldingId.cs                             UUIDv7, six lines, copied from UserId.cs
@@ -451,7 +451,7 @@ src/
  ✚    Persistence/Converters/HoldingIdConverter.cs
  ✚    Persistence/Converters/TickerConverter.cs
  ✚    Persistence/HoldingRepository.cs         self-commits, like Identity's (§2.7)
- ✚    Persistence/HoldingQueries.cs            IPollSet + IHoldersOfTicker, AsNoTracking
+ ✚    Persistence/HoldingQueries.cs            ITickersHeldByAnyUser + IUsersHoldingTicker, AsNoTracking
  ⛔    Persistence/DispatchDomainEventsInterceptor.cs   withdrawn with Task 10
  ⛔    Persistence/DomainEventPublisher.cs              withdrawn with Task 10
  ✚    Persistence/Migrations/                  generated by dotnet ef
@@ -997,7 +997,7 @@ git commit -m "Portfolio's first two types: an id and a ticker that owns its can
 > **Partly withdrawn by §0.0.** `HoldingRemoved.cs` is **not** created, `Portfolio.Contracts` gains **no**
 > `ProjectReference` to `Shared.Kernel`, and `Portfolio.Domain` gains **no** reference to
 > `Portfolio.Contracts` — all three existed only to carry a cross-module event that no longer crosses
-> anything. `IPollSet.cs` and `IHoldersOfTicker.cs` still ship, unchanged, and Step 3's check (rule 2 going
+> anything. `ITickersHeldByAnyUser.cs` and `IUsersHoldingTicker.cs` still ship, unchanged, and Step 3's check (rule 2 going
 > live for the first time on any module) still applies. Skip Step 1 entirely and build only the two
 > interfaces in Step 2. Task numbering is preserved.
 >
@@ -1008,14 +1008,14 @@ Written before `Holding`, because `Holding` raises `HoldingRemoved` and therefor
 **Files:**
 - ⛔ Modify: `src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/StockPortfolio.Modules.Portfolio.Contracts.csproj`
 - ⛔ Create: `.../Portfolio.Contracts/HoldingRemoved.cs`
-- Create: `.../Portfolio.Contracts/IPollSet.cs`
-- Create: `.../Portfolio.Contracts/IHoldersOfTicker.cs`
+- Create: `.../Portfolio.Contracts/ITickersHeldByAnyUser.cs`
+- Create: `.../Portfolio.Contracts/IUsersHoldingTicker.cs`
 - ⛔ Modify: `src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Domain/StockPortfolio.Modules.Portfolio.Domain.csproj`
 
 **Interfaces:**
 - Produces: ⛔ `HoldingRemoved(Guid UserId, string Ticker) : IDomainEvent`;
-  `IPollSet.GetPollSetAsync(CancellationToken) → Task<List<string>>`;
-  `IHoldersOfTicker.GetHoldersAsync(string ticker, CancellationToken) → Task<List<Guid>>`.
+  `ITickersHeldByAnyUser.GetAsync(CancellationToken) → Task<List<string>>`;
+  `IUsersHoldingTicker.GetAsync(string ticker, CancellationToken) → Task<List<Guid>>`.
 - Consumed by: Task 14 (implementations), Phase 3 (host adapter), Phase 4 (alert evaluation, inside Portfolio).
 
 - [ ] ⛔ **Step 1: Give Contracts and Domain the references they need — WITHDRAWN, skip it**
@@ -1067,26 +1067,26 @@ still clear **both** keys, because there is no single direction to clear. Phase 
 `RemoveHoldingCommandHandler` — a direct call inside Portfolio, not an event handler.
 
 ```csharp
-// src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/IPollSet.cs
+// src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/ITickersHeldByAnyUser.cs
 namespace StockPortfolio.Modules.Portfolio.Contracts;
 
 /// <summary>Every ticker anyone holds, read live each poll cycle rather than cached in MarketData.</summary>
-public interface IPollSet
+public interface ITickersHeldByAnyUser
 {
     /// <summary>Returns the distinct tickers across all users, including hidden holdings.</summary>
-    Task<List<string>> GetPollSetAsync(CancellationToken ct);
+    Task<List<string>> GetAsync(CancellationToken ct);
 }
 ```
 
 ```csharp
-// src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/IHoldersOfTicker.cs
+// src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Contracts/IUsersHoldingTicker.cs
 namespace StockPortfolio.Modules.Portfolio.Contracts;
 
 /// <summary>Who holds a given ticker. Alerts asks this to decide whom a breach concerns.</summary>
-public interface IHoldersOfTicker
+public interface IUsersHoldingTicker
 {
     /// <summary>Returns the distinct user ids holding the ticker, including hidden holdings.</summary>
-    Task<List<Guid>> GetHoldersAsync(string ticker, CancellationToken ct);
+    Task<List<Guid>> GetAsync(string ticker, CancellationToken ct);
 }
 ```
 
@@ -1247,7 +1247,7 @@ public sealed class HoldingTests
                 raised => raised.Ticker.ShouldBe("AAPL"));
     }
 
-    // The poll set is read live from Portfolio each cycle, so nothing needs telling about an addition.
+    // The held-ticker list is read live from Portfolio each cycle, so nothing needs telling about an addition.
     [Fact]
     public void Create_And_Merge_RaiseNoEvents()
     {
@@ -1613,7 +1613,7 @@ internal sealed class PortfolioDbContext(DbContextOptions<PortfolioDbContext> op
 
 **Both `Properties<T>()` and `DefaultTypeMapping<T>()` for both types.** The second line is the one people
 miss: without it, a `Ticker` used anywhere other than a mapped entity property — such as the `ticker`
-parameter of `GetHoldersAsync`'s LINQ closure in Task 14 — has no mapping and throws at runtime, long after
+parameter of `GetAsync`'s LINQ closure in Task 14 — has no mapping and throws at runtime, long after
 model building succeeded.
 
 **The namespace prefix in the predicate is load-bearing.** `"StockPortfolio.Modules.Portfolio"` — get it
@@ -2677,7 +2677,7 @@ git commit -m "Four use cases; add returns two successes because the merge is th
 - Create: `.../Portfolio.Infrastructure/Persistence/HoldingQueries.cs`
 
 **Interfaces:**
-- Produces: `internal sealed class HoldingQueries : IPollSet, IHoldersOfTicker`.
+- Produces: `internal sealed class HoldingQueries : ITickersHeldByAnyUser, IUsersHoldingTicker`.
 - Consumed by: Phase 3's host adapter, Phase 4's alert evaluation (inside Portfolio), and Task 15's integration test.
 
 - [ ] **Step 1: Write it**
@@ -2692,10 +2692,10 @@ using StockPortfolio.Modules.Portfolio.Domain;
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 
 /// <summary>The set-based reads other modules need, projected to primitives at the boundary.</summary>
-internal sealed class HoldingQueries(PortfolioDbContext context) : IPollSet, IHoldersOfTicker
+internal sealed class HoldingQueries(PortfolioDbContext context) : ITickersHeldByAnyUser, IUsersHoldingTicker
 {
     /// <inheritdoc/>
-    public async Task<List<string>> GetPollSetAsync(CancellationToken ct)
+    public async Task<List<string>> GetAsync(CancellationToken ct)
         => await context.Holdings
             .AsNoTracking()
             .Select(h => h.Ticker.Value)
@@ -2703,9 +2703,9 @@ internal sealed class HoldingQueries(PortfolioDbContext context) : IPollSet, IHo
             .ToListAsync(ct);
 
     /// <inheritdoc/>
-    public async Task<List<Guid>> GetHoldersAsync(string ticker, CancellationToken ct)
+    public async Task<List<Guid>> GetAsync(string ticker, CancellationToken ct)
     {
-        // Named `ticker` because phase-3's GetHolders_GeneratedSql_UsesParameterPlaceholder asserts
+        // Named `ticker` because phase-3's UsersHoldingTicker_GeneratedSql_UsesParameterPlaceholder asserts
         // the command text contains @__ticker_0 — EF derives that name from this closure variable.
         var parsed = new Ticker(ticker);
 
@@ -2725,10 +2725,10 @@ Three things this settles for Phase 3 and Phase 4:
   repository must never gain it, for the reason stated there.
 - **No visibility filter on either.** Phase 5's `is_visible` is a *display* filter; a hidden position is still
   polled and still alerts. `phase-3` has a test named `PollSet_IncludesHiddenHoldings` for exactly this.
-- **`Distinct()` runs in the database**, not in memory — two users holding AAPL is one poll-set entry.
+- **`Distinct()` runs in the database**, not in memory — two users holding AAPL is one held-ticker entry.
 
 ⚠️ `new Ticker(ticker)` bypasses `Ticker.Create`, so an unnormalised argument silently matches nothing. The
-callers are a host adapter and the alert evaluator, both of which pass a value that came out of `GetPollSetAsync` and is
+callers are a host adapter and the alert evaluator, both of which pass a value that came out of `GetAsync` and is
 already canonical. Documented rather than defended, because re-validating on a hot read is the guard-in-the-
 constructor trap again.
 
@@ -2808,8 +2808,8 @@ public static class PortfolioModule
 
         // One instance, two contracts: the same reads, and neither consumer sees the other's.
         services.AddScoped<HoldingQueries>();
-        services.AddScoped<IPollSet>(sp => sp.GetRequiredService<HoldingQueries>());
-        services.AddScoped<IHoldersOfTicker>(sp => sp.GetRequiredService<HoldingQueries>());
+        services.AddScoped<ITickersHeldByAnyUser>(sp => sp.GetRequiredService<HoldingQueries>());
+        services.AddScoped<IUsersHoldingTicker>(sp => sp.GetRequiredService<HoldingQueries>());
 
         services.AddPortfolioHandlers();
 
@@ -3851,9 +3851,9 @@ public sealed class HoldingsTests(ApiFixture fixture)
         await Wire.AddHoldingAsync(client, token, "GOOG", 1m, 100m);
 
         using var scope = _fixture.Services.CreateScope();
-        var pollSet = scope.ServiceProvider.GetRequiredService<IPollSet>();
+        var pollSet = scope.ServiceProvider.GetRequiredService<ITickersHeldByAnyUser>();
 
-        (await pollSet.GetPollSetAsync(TestContext.Current.CancellationToken)).ShouldContain("GOOG");
+        (await pollSet.GetAsync(TestContext.Current.CancellationToken)).ShouldContain("GOOG");
     }
 
     [Fact]
@@ -3863,9 +3863,9 @@ public sealed class HoldingsTests(ApiFixture fixture)
         await Wire.AddHoldingAsync(client, token, "META", 1m, 100m);
 
         using var scope = _fixture.Services.CreateScope();
-        var holders = scope.ServiceProvider.GetRequiredService<IHoldersOfTicker>();
+        var holders = scope.ServiceProvider.GetRequiredService<IUsersHoldingTicker>();
 
-        (await holders.GetHoldersAsync("META", TestContext.Current.CancellationToken)).ShouldNotBeEmpty();
+        (await holders.GetAsync("META", TestContext.Current.CancellationToken)).ShouldNotBeEmpty();
     }
 }
 ```

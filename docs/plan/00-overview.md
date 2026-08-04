@@ -40,7 +40,7 @@ The task-giver said *«Используй все что посчитаешь н�
 | **UI: match the mockup, minus polish** | Same screens, controls, layout. No hero, no ticker strip, no ornament. |
 | **No alert replay** | Req 9 asks for an event on breach, a background check, and a simulate button. Persistence, offline delivery and cursor replay are `Initial.md:134-136`, not the requirement. Alerts are written to Postgres and the panel loads history with a plain `GET`. |
 | **No watchlist** | «Перелік акцій» in req 8 sits inside *dashboard settings*, so it means which of your holdings show on the dashboard — an `is_visible` flag, not a second list of stocks you don't own. |
-| **No cached ticker table** | `Initial.md:74` gives MarketData its own table of distinct tickers kept in step by events. The poll set is read live from Portfolio each cycle instead, which removes the table, both handlers, a reconciliation pass and a divergence failure mode. |
+| **No cached ticker table** | `Initial.md:74` gives MarketData its own table of distinct tickers kept in step by events. The held-ticker list is read live from Portfolio each cycle instead, which removes the table, both handlers, a reconciliation pass and a divergence failure mode. |
 | **Alerts is not a module** | Reversed during Phase 2. Alerts is a feature area inside Portfolio; the module count is three. Reasoning below. |
 
 ---

@@ -17,7 +17,7 @@
 > |---|---|
 > | `Alerts.Domain` / `Alerts.Application` / `Alerts.Api` | `Portfolio.Domain/Alerts/` and the matching folders |
 > | `alerts.alert_settings`, `alerts.fired_alerts`, `alerts_svc` | `portfolio.alert_settings`, `portfolio.fired_alerts`, `portfolio_svc`, in `PortfolioDbContext` |
-> | *"ask Portfolio which users hold this ticker"* via `IHoldersOfTicker` | an ordinary query inside Portfolio; the contract interface is still there but no boundary is crossed |
+> | *"ask Portfolio which users hold this ticker"* via `IUsersHoldingTicker` | an ordinary query inside Portfolio; the contract interface is still there but no boundary is crossed |
 >
 > Two further consequences, called out where they occur: `HoldingRemoved` no longer exists (§2.3), and the
 > entity snippets' `UserId` is `Identity.Domain`'s type, which Portfolio may not reference — it is a plain
@@ -108,7 +108,7 @@ A price alert is **a moment that passed, not a condition that persists** (`Initi
 
 Runs **immediately after each fetch, in the same cycle** — the natural trigger for "did this move sharply" is "a new price just arrived". Evaluating on any other schedule means re-checking data you already checked, or checking stale data.
 
-Per ticker, compute **current, min, max** once from the Redis window. Look up which users hold that ticker, then test each of their thresholds against the same three numbers. That lookup used to be a cross-module call through `IHoldersOfTicker`; since Phase 2 it is an ordinary query inside Portfolio, against the same `DbContext` that holds the thresholds.
+Per ticker, compute **current, min, max** once from the Redis window. Look up which users hold that ticker, then test each of their thresholds against the same three numbers. That lookup used to be a cross-module call through `IUsersHoldingTicker`; since Phase 2 it is an ordinary query inside Portfolio, against the same `DbContext` that holds the thresholds.
 
 #### ⚠️ Fix the false positive
 

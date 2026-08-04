@@ -51,7 +51,7 @@ No base class — see `phase-1-implementation.md` §5.2. `Holding` declares its 
 
 ⛔ ~~Deleting raises `HoldingRemoved(UserId, Ticker)`, consumed by Alerts in Phase 4 to clear any pending cooldown for that user and ticker. `Create` and `Merge` raise nothing.~~ **Withdrawn.** Alerts is a feature area inside Portfolio, not a module, so Phase 4 clears the cooldown with a call at the end of `RemoveHoldingCommandHandler`. `Holding` raises nothing and has no event surface. See `phase-2-implementation.md` §0.0.
 
-That asymmetry is deliberate and worth understanding, because an earlier draft had events on both. The poll set is read live from Portfolio at the start of every cycle (Phase 3 §2.5), so *adding* a holding needs no notification — the next cycle simply sees it. Only removal has an effect nothing else would notice: a cooldown key sitting in Redis for a position you no longer own. One event, one consumer, one real job.
+That asymmetry is deliberate and worth understanding, because an earlier draft had events on both. The held-ticker list is read live from Portfolio at the start of every cycle (Phase 3 §2.5), so *adding* a holding needs no notification — the next cycle simply sees it. Only removal has an effect nothing else would notice: a cooldown key sitting in Redis for a position you no longer own. One event, one consumer, one real job.
 
 The dispatch machinery below is still worth building for that single consumer — it is about forty lines, it is the seam every later cross-module event goes through, and Phase 4's `HoldingRemoved_ClearsCooldown` test exercises it end to end.
 
@@ -217,7 +217,7 @@ This is the point of front-loading infrastructure: a whole feature phase costs z
 | `Merge_DifferentCurrency_ReturnsInvalidInput` | |
 | `Correct_ReplacesRatherThanAverages` | 20@$125 corrected to 10@$100 → 10@$100, not an average |
 | ⛔ `Remove_RaisesHoldingRemoved_Once` | Withdrawn — no events; removal is `HoldingRepository.RemoveAsync` |
-| ⛔ `Create_And_Merge_RaiseNoEvents` | Withdrawn — the poll set is read live and nothing raises anything |
+| ⛔ `Create_And_Merge_RaiseNoEvents` | Withdrawn — the held-ticker list is read live and nothing raises anything |
 | `Ticker_Normalises_ToUppercase` | `aapl` → `AAPL` |
 | `Ticker_RejectsTooLong` | `TOOLONG` invalid |
 

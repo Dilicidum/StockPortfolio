@@ -2,7 +2,7 @@
 
 Three modules in one ASP.NET Core process. A module references only other modules' `.Contracts` projects; everything else is `internal`. The compiler enforces it, and `Architecture.Tests` asserts it.
 
-> **Reversal, Phase 2.** This file previously drew **four** modules with Alerts as its own subgraph, an `IHoldersOfTicker` call from Alerts into Portfolio, and a dotted `HoldingRemoved` domain event back the other way. Alerts is now a feature area **inside** Portfolio. The reason is in [00-overview.md](00-overview.md) §"Three modules, not four": `Ticker` meant the same thing on both sides of that boundary, so it was one bounded context split in two — and the only domain event in the whole project existed purely to talk across the split. Both edges below the fold are therefore gone, and so is the domain-event infrastructure that carried one of them.
+> **Reversal, Phase 2.** This file previously drew **four** modules with Alerts as its own subgraph, an `IUsersHoldingTicker` call from Alerts into Portfolio, and a dotted `HoldingRemoved` domain event back the other way. Alerts is now a feature area **inside** Portfolio. The reason is in [00-overview.md](00-overview.md) §"Three modules, not four": `Ticker` meant the same thing on both sides of that boundary, so it was one bounded context split in two — and the only domain event in the whole project existed purely to talk across the split. Both edges below the fold are therefore gone, and so is the domain-event infrastructure that carried one of them.
 
 ---
 
@@ -34,7 +34,7 @@ flowchart TB
     Host --> IdI
     Host --> PfI
     Host --> MdI
-    Host -.->|"adapts Portfolio → IPollSetSource"| MdC
+    Host -.->|"adapts Portfolio → ITickersHeldByAnyUser"| MdC
 
     PfI -->|"IQuoteReader — dashboard needs prices"| MdC
     PfI -->|"price window: current / min / max — alert evaluation"| MdC
@@ -53,11 +53,11 @@ Every arrow is a synchronous call through a contract interface. **There are no d
 
 The graph is one edge: **Portfolio → MarketData**, with Identity off to the side.
 
-**MarketData depends on nothing.** It needs to know which tickers to poll, but it declares that need as its own interface — `IPollSetSource` in `MarketData.Contracts` — and the host supplies a ten-line adapter backed by `Portfolio.Contracts`. Dependency inversion, and it is what keeps the graph acyclic. Without it, MarketData reading holdings directly would make Portfolio and MarketData mutually dependent, which quietly undermines the extraction-order argument the whole shape rests on.
+**MarketData depends on nothing.** It needs to know which tickers to poll, but it declares that need as its own interface — `ITickersHeldByAnyUser` in `MarketData.Contracts` — and the host supplies a ten-line adapter backed by `Portfolio.Contracts`. Dependency inversion, and it is what keeps the graph acyclic. Without it, MarketData reading holdings directly would make Portfolio and MarketData mutually dependent, which quietly undermines the extraction-order argument the whole shape rests on.
 
 **Nothing points at Identity at runtime.** The JWT is self-contained, so no module calls Identity during a request. That makes it the cheapest module to extract into its own process later — a new host project, a Dockerfile, its own connection string, one swapped DI registration. MarketData is at the other end: Portfolio depends on it on two paths, both synchronously — the dashboard join and alert evaluation — so extracting *that* would put a network hop on every dashboard render.
 
-**Alerts is not on this diagram because it is not a module.** It is a feature area in Portfolio, reading price windows through the same `MarketData.Contracts` seam the dashboard uses and reading holdings by direct call rather than through `IHoldersOfTicker`. See the reversal note above.
+**Alerts is not on this diagram because it is not a module.** It is a feature area in Portfolio, reading price windows through the same `MarketData.Contracts` seam the dashboard uses and reading holdings by direct call rather than through `IUsersHoldingTicker`. See the reversal note above.
 
 Nothing is being extracted now. The graph is why the answer to "should auth be a service?" is a reading of the structure rather than an opinion.
 
@@ -67,12 +67,12 @@ Nothing is being extracted now. The graph is why the answer to "should auth be a
 
 | From → To | Mechanism | Carries |
 |---|---|---|
-| Host → MarketData | `IPollSetSource` adapter | `SELECT DISTINCT ticker` across all holdings |
+| Host → MarketData | `ITickersHeldByAnyUser` adapter | `SELECT DISTINCT ticker` across all holdings |
 | Portfolio → MarketData | `IQuoteReader` | Latest price per ticker, for the dashboard join |
 | Portfolio → MarketData | `IPriceWindowReader` | Current / min / max over the user's window, for alert evaluation |
 | Anything → Identity | **Nothing at runtime** | The token already carries what anyone needs |
 
-Two rows were deleted in Phase 2 rather than rewritten, and it is worth knowing which: `Alerts → Portfolio | IHoldersOfTicker` and `Portfolio → Alerts | HoldingRemoved event`. Both were module-boundary machinery for a boundary that should not have existed. `IHoldersOfTicker` becomes an ordinary query inside Portfolio; `HoldingRemoved` becomes a call in the remove-holding handler.
+Two rows were deleted in Phase 2 rather than rewritten, and it is worth knowing which: `Alerts → Portfolio | IUsersHoldingTicker` and `Portfolio → Alerts | HoldingRemoved event`. Both were module-boundary machinery for a boundary that should not have existed. `IUsersHoldingTicker` becomes an ordinary query inside Portfolio; `HoldingRemoved` becomes a call in the remove-holding handler.
 
 ---
 
@@ -96,7 +96,7 @@ sequenceDiagram
     R-->>P: acquired
     Note over P,R: two keys — the window claim picks WHO,<br/>the in-flight guard prevents overlap
 
-    P->>DB: IPollSetSource — SELECT DISTINCT ticker
+    P->>DB: ITickersHeldByAnyUser — SELECT DISTINCT ticker
     P->>F: GetQuotes(symbols) — token-bucket spread
     F-->>P: quotes, each with its own timestamp
     P->>R: ZADD prices:{ticker} + trim to 1h01m
@@ -151,7 +151,7 @@ sequenceDiagram
     Q-->>B: DashboardDto — money as STRINGS
 ```
 
-Read-through is why the poller is an **optimisation** rather than the only path to a price. It covers a blank dashboard outside market hours and a just-added ticker that the poller has not reached yet — and, now that the poll set is read live from Portfolio each cycle, there is no cached ticker table left to drift out of sync.
+Read-through is why the poller is an **optimisation** rather than the only path to a price. It covers a blank dashboard outside market hours and a just-added ticker that the poller has not reached yet — and, now that the held-ticker list is read live from Portfolio each cycle, there is no cached ticker table left to drift out of sync.
 
 Money is serialised as strings. `System.Text.Json` writes `decimal` as a JSON number and `JSON.parse` makes it a double, so server-side `decimal` maths is destroyed at the boundary otherwise. Weight is computed server-side for the same reason.
 
