@@ -28,6 +28,8 @@
   --mu: #6c7280;
   --up: oklch(0.55 0.14 152);
   --dn: oklch(0.55 0.17 25);
+  /* Degraded, not failed — the amber a stale price wears, which `Alert` has no tone for. */
+  --warn: oklch(0.62 0.15 75);
   --ac: oklch(0.55 0.13 252);
   --ac-soft: oklch(0.55 0.13 252 / 0.1);
   --ac-contrast: #ffffff;
@@ -42,6 +44,7 @@
   --mu: #8a90a0;
   --up: oklch(0.74 0.15 152);
   --dn: oklch(0.67 0.17 25);
+  --warn: oklch(0.80 0.14 80);
   --ac: oklch(0.72 0.13 252);
   --ac-soft: oklch(0.72 0.13 252 / 0.14);
   --ac-contrast: #0b0c0f;
@@ -56,6 +59,7 @@
   --color-mu: var(--mu);
   --color-up: var(--up);
   --color-dn: var(--dn);
+  --color-warn: var(--warn);
   --color-ac: var(--ac);
   --color-ac-soft: var(--ac-soft);
   --color-ac-contrast: var(--ac-contrast);

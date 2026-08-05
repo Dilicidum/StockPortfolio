@@ -1,43 +1,202 @@
+import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Alert } from '../../components/Alert'
+import { ApiHealth } from '../../components/ApiHealth'
 import { AppShell } from '../../components/AppShell'
 import { Card } from '../../components/Card'
+import { Freshness } from '../../components/Freshness'
+import { StatTile } from '../../components/StatTile'
+import { Table, type Column } from '../../components/Table'
 import { useAuth } from '../../auth/useAuth'
+import { formatAge, formatMoney, formatPercent, isNegative, NO_VALUE, type Money } from '../../lib/format'
+import { dashboardKeys, fetchDashboard, type DashboardPosition } from '../../marketdata/dashboardApi'
 
+/**
+ * NO LOADER AND NO ERROR COMPONENT, unlike `portfolio.tsx` — whose own comment says so.
+ *
+ * Holdings are the page and are worth waiting for; quotes are not. A loader failure
+ * takes the whole route down with an error component, and the brief grades visible
+ * degraded state rather than a blank screen. Plain `useQuery` keeps the last good table
+ * on screen and puts the failure in a banner above it.
+ */
 export const Route = createFileRoute('/_authenticated/dashboard')({
   component: DashboardPage,
 })
 
 /**
- * Phase 1 ships the shell and nothing else. Totals, holdings and P&L arrive in
- * phase 2 with the Portfolio module behind them; the placeholder says so rather
- * than showing zeroes, because a $0.00 total is indistinguishable from a broken
- * fetch and a reviewer cannot tell which they are looking at.
+ * 60s is not free to change: §3's free-tier arithmetic — twenty of sixty calls a minute
+ * for one viewer — assumes it, and 15s quadruples that figure for anyone who picks it.
  */
+const INTERVALS = [
+  { label: 'every 15s', value: 15_000 },
+  { label: 'every 30s', value: 30_000 },
+  { label: 'every 60s', value: 60_000 },
+  { label: 'every 5m', value: 300_000 },
+]
+
+const DEFAULT_INTERVAL_MS = 60_000
+
+function toneOf(money: Money | null | undefined): 'neutral' | 'up' | 'down' {
+  if (!money) return 'neutral'
+  return isNegative(money) ? 'down' : 'up'
+}
+
+/** A row worth stamping individually: served from the last-known store, or well behind its peers. */
+function isTrailing(position: DashboardPosition, newestObservedAt: number, staleAfterMs: number): boolean {
+  if (position.isLastKnown) return true
+  if (!position.observedAt) return false
+
+  return newestObservedAt - Date.parse(position.observedAt) > staleAfterMs
+}
+
 function DashboardPage() {
   const { user } = useAuth()
+  const [intervalMs, setIntervalMs] = useState(DEFAULT_INTERVAL_MS)
+
+  // The app's first `useQuery` — every other query is a `useSuspenseQuery` behind a
+  // loader. All three options below override a global default deliberately.
+  const { data, isPending, isError, error } = useQuery({
+    queryKey: dashboardKeys.view(),
+    queryFn: ({ signal }) => fetchDashboard(signal),
+    refetchInterval: intervalMs,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  })
+
+  const positions = data?.positions ?? []
+  const totals = data?.totals
+
+  const newestObservedAt = Math.max(
+    0,
+    ...positions.map((position) => (position.observedAt ? Date.parse(position.observedAt) : 0)),
+  )
+
+  const unpriced = totals ? totals.positionCount - totals.pricedPositionCount : 0
+
+  const columns: Array<Column<DashboardPosition>> = [
+    { header: 'Asset', cell: (position) => position.ticker },
+    { header: 'Qty', cell: (position) => position.quantity, numeric: true },
+    { header: 'Buy', cell: (position) => formatMoney(position.averagePrice), numeric: true },
+    {
+      header: 'Price',
+      numeric: true,
+      // The per-row stamp §3 asks for: a single headline figure hides the one thinly
+      // traded ticker that is minutes behind everything else on the page.
+      cell: (position) => {
+        if (!position.currentPrice) {
+          return (
+            <span className="text-mu" title="Awaiting a price for this position">
+              {NO_VALUE}
+            </span>
+          )
+        }
+
+        const trailing = isTrailing(position, newestObservedAt, intervalMs)
+
+        return (
+          <span title={position.observedAt ? `Observed at ${position.observedAt}` : undefined}>
+            {formatMoney(position.currentPrice)}
+            {trailing && position.observedAt ? (
+              <span className="text-warn ml-1.5 text-[11.5px]">
+                {formatAge(Date.now() - Date.parse(position.observedAt))}
+              </span>
+            ) : null}
+          </span>
+        )
+      },
+    },
+    { header: 'Value', cell: (position) => formatMoney(position.marketValue), numeric: true },
+    {
+      header: 'P/L',
+      numeric: true,
+      cell: (position) => (
+        <span className={position.profit ? (isNegative(position.profit) ? 'text-dn' : 'text-up') : 'text-mu'}>
+          {formatMoney(position.profit)}
+        </span>
+      ),
+    },
+    {
+      header: 'P/L %',
+      numeric: true,
+      cell: (position) => (
+        <span className={position.profit ? (isNegative(position.profit) ? 'text-dn' : 'text-up') : 'text-mu'}>
+          {formatPercent(position.profitPercent)}
+        </span>
+      ),
+    },
+    { header: 'Weight', cell: (position) => formatPercent(position.weight), numeric: true },
+  ]
 
   return (
     <AppShell title="Dashboard" subtitle={user ? `Signed in as ${user.email}` : undefined}>
+      {isError ? (
+        <Alert tone="error" title="Could not refresh prices">
+          {error instanceof Error && error.message ? error.message : 'The server did not answer.'}
+          {data ? ' Showing the last figures that arrived.' : ''}
+        </Alert>
+      ) : null}
+
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        {['Total value', 'Invested', 'Unrealised P&L', 'Positions'].map((label) => (
-          <div
-            key={label}
-            className="flex flex-col gap-2 rounded-xl border border-bd bg-panel px-[18px] py-4"
-          >
-            <span className="text-mu text-[11.5px] tracking-[0.04em] uppercase">{label}</span>
-            <span className="font-mono text-2xl font-semibold tracking-[-0.02em] text-mu">—</span>
-            <span className="text-mu font-mono text-xs">Phase 2</span>
-          </div>
-        ))}
+        <StatTile label="Total value" value={formatMoney(totals?.value)} />
+        <StatTile label="Invested" value={formatMoney(totals?.cost)} />
+        <StatTile
+          label="Unrealised P&L"
+          value={formatMoney(totals?.profit)}
+          hint={totals ? formatPercent(totals.profitPercent) : undefined}
+          tone={toneOf(totals?.profit)}
+        />
+        <StatTile
+          label="Positions"
+          value={totals ? totals.positionCount : NO_VALUE}
+          hint={totals ? `${totals.pricedPositionCount} priced` : undefined}
+        />
       </div>
 
-      <Card title="Holdings">
-        <p className="text-mu text-[12.5px] leading-relaxed">
-          Nothing here yet. Phase 1 covers sign-up, sign-in, sign-out and session
-          persistence; holdings, live quotes and P&amp;L land with the Portfolio
-          and MarketData modules.
-        </p>
+      <Card
+        title="Holdings"
+        action={
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            <Freshness
+              asOf={data?.asOf}
+              stalestObservedAt={data?.stalestObservedAt}
+              // Two cycles: one missed refresh is a blip, two is a story worth telling.
+              staleAfterMs={intervalMs * 2}
+            />
+            <label className="text-mu flex items-center gap-2 text-[12.5px]">
+              Refresh
+              <select
+                className="border-bd bg-panel-2 text-tx rounded-lg border px-2 py-1 text-[12.5px]"
+                value={intervalMs}
+                onChange={(event) => setIntervalMs(Number(event.target.value))}
+              >
+                {INTERVALS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        }
+      >
+        <Table
+          caption="Your positions, priced"
+          columns={columns}
+          rows={positions}
+          rowKey={(position) => position.id}
+          empty={isPending ? 'Fetching prices…' : 'No positions yet. Add one on the Portfolio page.'}
+        />
+
+        {unpriced > 0 ? (
+          <p className="text-mu mt-3 text-[11.5px]">
+            {unpriced} of {totals?.positionCount} positions have no price yet and are excluded from the
+            totals above.
+          </p>
+        ) : null}
       </Card>
+
+      <ApiHealth />
     </AppShell>
   )
 }

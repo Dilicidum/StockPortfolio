@@ -62,7 +62,8 @@ services:
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
-  # Redis - price windows, alert cooldowns, SSE tickets (phases 3-4).
+  # Redis - the last known price per symbol, which is the dashboard's only fallback
+  # when the quote provider is down. Price windows and SSE tickets arrive in phase 4.
   # ---------------------------------------------------------------------------
   redis:
     image: redis:8-alpine

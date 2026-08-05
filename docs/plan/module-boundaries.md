@@ -235,8 +235,16 @@ per cycle), independent failure (alerts can be down while the dashboard renders)
 table. Three aggregates with no invariant spanning any two of them is not one context.
 
 **A side effect worth knowing:** `db/init/01-roles.sql`, `docker-compose.yml`, `infra/*.bicep` and both
-workflows were never stripped of `ALERTS_PW`, the `alerts` schema or the `alerts_svc` role. With Alerts back,
-they are correct again, and the deferred cleanup item they created disappears.
+workflows were never stripped of `ALERTS_PW`, the `alerts` schema or the `alerts_svc` role. ~~With Alerts back,
+they are correct again, and the deferred cleanup item they created disappears.~~
+
+> ⚠️ **Corrected (Phase 3).** They are **not** correct again and the cleanup item does not disappear.
+> **Alerts is back as a decision, not as code** — `src/Modules/` holds three folders, there is no
+> `AlertsDbContext` and nothing connects as `alerts_svc`, so every leftover is still an orphan. It is the
+> right *shape* for the module Phase 4 will build, which is a genuinely better position than before; it is not
+> the same as being owned. `deferred-work.md` E1 was closed on this sentence and has been **reopened**, with a
+> closing condition that is checkable rather than anticipatory: the item closes when an `AlertsDbContext`
+> actually connects as `alerts_svc`.
 
 ---
 

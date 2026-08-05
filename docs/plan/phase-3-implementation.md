@@ -37,16 +37,36 @@ directly.**
 | 7 | §2.2 and §6 "`Retry-After` on 429 is honoured **by default**" | True, and it is a **`Microsoft.Extensions.Http.Resilience`/Polly fact, not a Finnhub fact**. No evidence Finnhub emits the header; [#122](https://github.com/finnhubio/Finnhub-API/issues/122) shows a free-plan 429 with no headers named. Keep the "never assign a `DelayGenerator`" rule — it costs nothing — but the client-side token bucket is what actually carries the limit | §2.6 |
 | 8 | §2.5's degradation table | Written as if the provider is wholly up or wholly down. **That is the least likely real failure.** The common one is 3 of 20 tickers timing out or 429ing, and the table has no row for it. Implemented as the table reads — one `try { provider } catch { redis }` — 17 good prices get thrown away because one ticker failed | §2.5 |
 | 9 | §4 "Add the AMR connection string as an ACA secret" · "Add `Finnhub__ApiKey` as a secret" | **Both already exist.** `infra/modules/redis.bicep:76` builds the AMR string inside the module and returns it `@secure()`; `containerapp-api.bicep:99-106,153-160` carry the `finnhub-api-key` secret and its env var, guarded by `empty()` because **an ACA secret with an empty value is rejected**. Phase 3's Bicep delta is **zero lines** | §2.9 |
-| 10 | §2.7's query snippet `.Select(h => new HoldingRow(h.Ticker.Value, h.Quantity, h.AveragePrice))` | `AveragePrice` is a **`ComplexProperty`** (`HoldingConfiguration.cs:52-62`). Projecting the complex type will not translate; project `h.AveragePrice.Amount` and `.Currency` and rebuild `Money` after materialisation. Also `GetVisibleHoldingsAsync` **does not exist** — `HoldingQueries.cs` has exactly one method, `HoldsAsync` | Task 12 |
+| 10 | §2.7's query snippet `.Select(h => new HoldingRow(h.Ticker.Value, h.Quantity, h.AveragePrice))` | `AveragePrice` is a **`ComplexProperty`** (`HoldingConfiguration.cs:52-62`). Project `h.AveragePrice.Amount` and `.Currency` and rebuild `Money` after materialisation. ⚠️ **The reason first given here was wrong — see the correction below the table.** Also `GetVisibleHoldingsAsync` **does not exist** — `HoldingQueries.cs` has exactly one method, `HoldsAsync` | Task 12 |
 | 11 | §5 puts `Position_*` / `Totals_*` / `Weight_*` in `Portfolio.UnitTests` | That project has **no fakes and no handler tests** — deferred item B4/B6 was never actioned, and no handler in any module is unit-tested. Either Phase 3 builds the repo's first fake repository, or those tests target a pure calculator. Build the calculator | §2.8, Task 13 |
 | 12 | §3 "Route `src/routes/_authenticated/dashboard.tsx`" | The file **already exists** — 43 lines of Phase 1 placeholder, already in `routeTree.gen.ts`, with four hardcoded `—` tiles captioned "Phase 2". This is a rewrite, not a new file, and the stale caption is itself a correction Phase 3 owes | Task 20 |
 | 13 | §3 "Parse with `Intl.NumberFormat`" | Pass the **string straight to `format()`**. `Number(money.amount)` reintroduces exactly the IEEE-754 loss the string serialisation exists to prevent — and `portfolio.tsx:86-91` does precisely that today, so it must be rewritten rather than copied. Separately `format('')` and `format(null)` both render `$0.00`, so a null price must be branched on **before** the formatter or §5's "renders as pending, not `$0.00`" fails in production while passing on a fixture | §2.10, Task 20 |
 | 14 | §5 `Fetch_RedisUnreachable_StillReturnsThePrice` | `CommandFlags.FireAndForget` does **not** satisfy it. It only means the caller gets the default return value immediately; connection and backlog-timeout exceptions still surface at the call site. `await` the write inside `try/catch (RedisException)` — which also keeps `redis-cli GET marketdata:last:AAPL` (§8) non-racy | §2.7 |
 | 15 | §2.2 "Resilience via `Microsoft.Extensions.Http.Resilience`… retry, circuit breaker, timeout" | The **defaults are decorative and the validator is startup-fatal**. `CircuitBreaker.MinimumThroughput` is 100, so the breaker can never open for a twenty-ticker dashboard; and `HttpStandardResilienceOptionsCustomValidator` registers with `AddOptionsWithValidateOnStart`, so `AttemptTimeout > TotalRequestTimeout` or `SamplingDuration < 2 × AttemptTimeout` **takes `docker compose up` down** — the P0 gate | §2.6 |
 
+> ⚠️ **Item 10's instruction is right and its *stated reason* was wrong.** This row said "projecting the
+> complex type will not translate." **It translates.** EF Core documents complex types as projectable and
+> translates them to their constituent columns; the only documented restriction is projecting one through an
+> **optional navigation**, which `Holding.AveragePrice` is not. The instruction stands unchanged, because the
+> real justification is a different and better one: `Money`'s constructor calls `ToUpperInvariant()`, EF binds
+> a complex type's own constructor for materialisation exactly as it does an entity's, and projecting the
+> whole `Money` would put that allocation on every row of every `SELECT` — a breach `CLAUDE.md` already
+> records, and this dashboard query is the one that would have paid for it.
+>
+> Corrected rather than quietly fixed because the failure mode is specific: a wrong reason attached to a right
+> instruction travels further than either alone. The next reader avoids a translation problem that does not
+> exist, and does not know to avoid the materialisation cost that does — so the moment a query appears where
+> the cost is irrelevant, they will "correct" this back.
+
 ### Nine more, from `docs/plan/` and `CLAUDE.md` rather than from the spec
 
 These are documents Phase 3 disproves. Task 23 fixes them.
+
+> ✅ **All actioned in the Task 23 pass**, with three deviations recorded there: the count of dangling links is
+> **ten references across eight files**, not nine; the `00-overview.md` section was **not** renamed back
+> (renaming `## Four modules` to `§"Three modules, not four"` would restore the anchors by making the heading
+> a lie), so all ten references were repointed instead; and three of the stale comments live in **code and
+> compose files** that the documentation pass was scoped out of — they are listed as outstanding under Task 23.
 
 - **`CLAUDE.md` Deployment: *"Phase 3 must put `minReplicas` back to 1"* is stale.** The poller moved to
   Phase 4 (`phase-3-live-prices.md:107,111,207`), `infra/main.bicep:250` stays at **0**, and the §8 checkbox
@@ -252,6 +272,21 @@ Corollary for the test table: `Dashboard_ProviderReturns429_Returns200NotError` 
 not all, or it does not distinguish the two implementations. Add
 `Dashboard_PartialProviderFailure_MixesFreshAndLastKnown` — that is the test that actually pins this.
 
+> ⚠️ **Necessary but not sufficient — found during execution, and it is the more interesting half.** Failing
+> one of three tickers and asserting the other two came back with their prices **still does not discriminate.**
+> The rejected implementation passes it. The reason is ordering: `QuoteReader` writes every quote the provider
+> returned to `marketdata:last:*` *before* the set difference is computed, so a `try { provider } catch
+> { redis-for-everything }` that discards the two good prices then re-reads them out of the store the same
+> request had only just written. Same symbols, same amounts, same `pricedPositionCount`. Every assertion on a
+> **number** is satisfied by the implementation the number was chosen to reject.
+>
+> The only observable difference is `IsLastKnown`, and the test now asserts it is **false** on the served
+> symbols. The generalisation is worth carrying past this phase: *a fallback path that reproduces the happy
+> path's values is invisible to any assertion on values.* "Can this test go red?" is the wrong question when
+> the answer is yes and it still cannot go red **on the mistake it is named after**. It is a subtler form of
+> the failure `CLAUDE.md`'s "a test that cannot fail is worse than no test" already records, and it is written
+> up there beside it.
+
 Full failure matrix, every row returning **200**:
 
 | Failure | Absorbed where | Result |
@@ -439,10 +474,35 @@ add against a 60/min budget is nothing; a Finnhub outage rejecting valid purchas
 degraded read into a broken write. That is why `IsKnownSymbolAsync` returns **`true` on provider failure**,
 and why it is a separate interface from `IQuoteReader` (§2.4).
 
-Cheapest implementation is a `/quote` call asserting a non-null `c` — the same call you were going to make.
+~~Cheapest implementation is a `/quote` call asserting a non-null `c` — the same call you were going to make.~~
 `/search?q=` is **fuzzy** (`q=AAP` returns AAPL), so if you use it, existence must be an exact
 case-insensitive match on `result[].symbol`, **never `count > 0`**. `/stock/symbol?exchange=US` returns the
 entire US listing per call and is the wrong tool.
+
+> ⚠️ **REVERSED during execution. It ships as `/search` with an exact case-insensitive match, not `/quote`.**
+>
+> The `/quote` recommendation above and §0 item 6 genuinely conflict, and the conflict is not a matter of
+> emphasis. Item 6 establishes that Finnhub returns `c: 0` — present, and zero — both for a symbol that does
+> not exist *and* for a healthy symbol it blipped on ([Finnhub-API#54](https://github.com/finnhubio/Finnhub-API/issues/54)).
+> If that is true, then **no reading of a `/quote` response can discriminate the two cases**, and "assert a
+> non-null `c`" is not a cheap approximation of an existence check — it is not an existence check at all. It
+> answers *unknown* to every transient failure, which is precisely the outcome item 6 exists to prevent, on
+> the one path where the answer is destructive: a rejected purchase.
+>
+> `/search` can discriminate, because a non-existent symbol is genuinely absent from the results rather than
+> present with a zero. The extra call is one per add against a 60/minute budget, which is the trade §2.11
+> already accepted.
+>
+> **`SymbolAnswered` was deleted.** It existed only to carry the third state `/quote` forced —
+> *the provider replied but the reply says nothing* — and with `/search` there is no such state: a null
+> response means the provider could not answer, and the check fails open. A result case that can never be
+> produced is a case every `.Match` call site still has to name.
+>
+> The two-in-one appeal ("the same call you were going to make") is what made the wrong option look cheap, and
+> it is worth naming as a pattern: the calls are not the same call. One asks *what is this worth*, whose
+> failure mode is falling back to a stale price; the other asks *does this exist*, whose failure mode is
+> rejecting a valid write. §2.4 already split them into two interfaces for exactly that reason, and this
+> paragraph then quietly rejoined them at the HTTP layer.
 
 ⚠️ `FakeQuoteProvider` must accept any well-shaped ticker, or every existing `HoldingsTests` case using an
 invented symbol goes red. The consequence: the fake never produces `UnknownTicker`, so this swap is exercised
@@ -1225,38 +1285,98 @@ Picking 15s quadruples that figure. `<select>` options: 15s / 30s / 60s / 5m.
 - [ ] Run the four §8 drills by hand: provider down · provider down + Redis flushed · Redis down with the
       provider up · `redis-cli GET marketdata:last:AAPL`.
 
-### Task 22: Deploy
+### Task 22: Deploy — ❌ **NOT DONE, and "no `az` CLI" is not the reason.**
 
-- [ ] `az bicep build --file infra/main.bicep` (§2.9) — first time it has ever run.
-- [ ] `az deployment group what-if` → expect **no changes**. If it reports any, something in this phase
-      touched Bicep that should not have.
+> ⚠️ **This task was first recorded as blocked on the missing Azure CLI. That was wrong, and the correction
+> came from a document nothing linked to** —
+> [docs/superpowers/specs/2026-08-02-azure-deployment-design.md](../superpowers/specs/2026-08-02-azure-deployment-design.md),
+> whose only inbound reference was inside itself. Two facts it carries change this task:
+>
+> 1. **There has been a live, healthy Azure deployment since 2026-08-02.** Re-verified 2026-08-05:
+>    `/health/ready` → 200, SPA → 200. It serves **pre-Phase-3** code — `/api/dashboard` and
+>    `/api/marketdata/health` both 404.
+> 2. **`deploy.yml` installs Bicep and runs `az deployment group what-if` in the runner**, and fires on push
+>    to `main` or `workflow_dispatch`. A local `az` only buys the rehearsal.
+>
+> So what is actually outstanding is a **merge to `main`** and the **`FINNHUB_API_KEY` secret** — not a tool
+> install. The local rehearsal stays genuinely blocked, and with it the one cheap thing §2.9 wanted: whether
+> the `@secure()` module output trips the `outputs-should-not-contain-secrets` linter class. `bicep build`
+> has never run locally in any phase, though the deployed stack proves the template compiles and applies.
+> `infra/` was not touched this phase, so "what-if reports no changes" is a good prediction — still a
+> prediction.
+
+- [ ] `az bicep build --file infra/main.bicep` (§2.9) — **not run locally, and genuinely blocked**: no `az`
+      here. This is the rehearsal, and it is the only part of Task 22 the missing CLI actually stops.
+- [ ] `az deployment group what-if` → expect **no changes**. **Not run locally.** Note the workflow runs it
+      too, so merging to `main` executes this check even if the local rehearsal never happens — it just
+      executes it a moment before the deploy rather than a day before.
 - [ ] Set the real `FINNHUB_API_KEY` repository secret, deploy, and confirm the deployed dashboard shows
-      genuine prices and the health panel names Finnhub rather than Fake.
+      genuine prices and the health panel names Finnhub rather than Fake. **Not done — the secret is not set,
+      so the deployed app would price real tickers from the generated walk.** This also blocks the exit item
+      "adding a genuinely non-existent symbol with a real key returns `UnknownTicker`": `FakeQuoteProvider`
+      accepts any well-shaped ticker by design (§2.11), so the only host that can produce `UnknownTicker` is
+      one holding a real key, and `finnhub.io` was unreachable from here besides. The response mapping is
+      unit-tested and `IsKnownSymbolAsync` can now return `false`; the end-to-end path is unexercised.
 
-### Task 23: Correct the documents Phase 3 disproved
+### Task 23: Correct the documents Phase 3 disproved — ✅ **DONE, with three items outstanding**
 
-- [ ] `CLAUDE.md`: the `minReplicas` line · the module-count self-contradiction (`:11` vs `:41`) · the project
-      count (23 → 25) · the Tests table and skip arithmetic **re-derived, not copied** · the "one DbContext per
-      module" exception (§2.1) · the connection-budget number.
-- [ ] `docs/plan/00-overview.md`: rename the section back so the **nine dangling links** resolve, or fix all
-      nine. The solution-layout block at `:128` still annotates Portfolio "holdings **and alerts**".
-- [ ] `docs/plan/module-interactions.md`: `minReplicas: 1` in the diagram and at `:225` · `IQuoteReader` is
-      correct there already, so `phase-3-live-prices.md:123` is the file to change.
-- [ ] `docs/plan/er-diagram.md`: the `23505` line (`:121`) · the stale §2.4 cross-reference (`:175`).
-- [ ] `docs/plan/phase-3-live-prices.md`: mark the fifteen §0 corrections in place, the way
-      `phase-2-implementation.md` §0.0 does — **do not silently rewrite it to the new shape**, because a
-      reversal that does not show what it reversed is how the next reader follows a rule the code does not obey.
-- [ ] `docs/deferred-work.md`: **reopen E1** · mark C4 done · record C8 as examined-and-still-deferred with
-      the reason, so it is not re-triggered next phase · note C7 was considered and does not apply.
-- [ ] `README.md`: the "empty shells" line (`:277-278`) · the subdomain-classification line (`:74`) · the
-      connection-budget arithmetic · the new sections (below).
-- [ ] `src/Api/Extensions/HealthCheckExtensions.cs:35-37`'s comment moves with the code in Task 11.
-- [ ] Two more comments this phase makes false. `docker-compose.yml:65` —
-      `# Redis - price windows, alert cooldowns, SSE tickets (phases 3-4).` — is the same claim §2.6 of the
-      spec moved to Phase 4; reword it to match the text `RedisExtensions` ends up carrying.
-      `portfolio.tsx:295` — `{/* No price and no P&L columns — those need MarketData, which is Phase 3. */}`
-      — points at a phase that has now shipped: either the portfolio table gains those columns, or the
-      comment says the dashboard owns them. Decide and record which.
+- [x] `CLAUDE.md`: the `minReplicas` line (now Phase 4, with the cold-start cost stated) · the module-count
+      self-contradiction (four designed, three on disk, `ShouldBe(17)` as the pin) · the project count
+      (23 → **25**) · the Tests table and skip arithmetic **re-derived from `ModuleBoundaryTests.cs`, not
+      copied** · the "one DbContext per module" exception (§2.1) · the connection-budget number (→ **8**).
+      Three additions the checklist did not ask for: the `/quote`-cannot-discriminate trap, the
+      resilience-defaults trap, and the discriminating-test lesson from §2.5 beside the existing
+      "a test that cannot fail" rule.
+- [x] `docs/plan/00-overview.md`: the solution-layout block (Portfolio no longer "holdings **and alerts**";
+      MarketData annotated as having no `DbContext`; Alerts listed as Phase 4 with nothing on disk) and the
+      connection budget at `:149`.
+      ⚠️ **The section was *not* renamed back, and the link count was wrong.** Renaming `## Four modules` to
+      "Three modules, not four" would resolve the anchors by making the heading contradict the decision it
+      documents, which is the failure this whole task exists to prevent. All references were repointed
+      instead — and there are **ten of them across eight files**, not nine: `phase-1-implementation.md` ×2,
+      `phase-1-sign-in.md`, `phase-2-implementation.md` ×2, `phase-2-my-portfolio.md`, `phase-4-alerts.md`,
+      `phase-5-make-it-mine.md`, `phase-6-doesnt-break.md`, `deferred-work.md`. Three of those carried a
+      substantive claim as well as a dead anchor and were corrected in place: `phase-5-make-it-mine.md`
+      (the alert threshold is `alerts`' again, not `portfolio`'s), `phase-4-alerts.md` (the cooldown clear is
+      not an in-process call any more — and that still does not bring the domain event back), and
+      `phase-1-implementation.md` (project count).
+- [x] `docs/plan/module-interactions.md`: `minReplicas: 1` in the diagram **and** at `:225`, plus the
+      "3 roles × pool size 2" edge label, which had the same miscount as the budget figures.
+- [x] `docs/plan/er-diagram.md`: the `23505` line · the stale §2.4 cross-reference · and the connection budget
+      at `:153`, which the checklist did not list but which was wrong in the same way as the other three.
+- [x] `docs/plan/phase-3-live-prices.md`: a §0 correction header plus eleven in-place markers, in
+      `phase-2-implementation.md` §0.0's style — the original text struck through and left visible, never
+      rewritten to the new shape.
+- [x] `docs/deferred-work.md`: **E1 reopened** with the reason (Alerts was reinstated as a decision, not as
+      code) and a new, checkable closing condition · **C4 marked done**, including the two things doing it
+      revealed · **C8 recorded as examined-and-still-deferred**, with both clauses of its trigger shown to
+      have failed and the trigger restated for Phase 4 · **C7 noted as considered and not applicable**,
+      because MarketData has no database and contributes no `AddDbContextCheck<T>()`. Also corrected the
+      "Checked and found correct" entry on `Maximum Pool Size=2`, whose arithmetic was wrong.
+- [x] `README.md`: the "empty shells" line · the subdomain-classification line · the connection-budget
+      arithmetic · the status banner (Phase 1 → Phase 3) · the Testing table · and a new **Live prices**
+      section carrying all four required topics, with the 60/minute free-tier figure stated as **inferred**
+      rather than laundered into fact.
+- [x] `src/Api/Extensions/HealthCheckExtensions.cs`'s comment — **already done in Task 11.** The text moved to
+      `RedisExtensions.cs` and was reworded to name `marketdata:last:*` rather than price windows, alert
+      cooldowns and SSE tickets. Nothing left to do.
+
+⚠️ **Outstanding — two stale comments in files the documentation pass was scoped out of.** Both are one-line
+comments, neither affects behaviour, and each is a claim the tree now contradicts. The decision each one needs
+is made and recorded here, so applying them is a mechanical edit:
+
+| File | Comment | What it should say |
+|---|---|---|
+| `docker-compose.yml:65` | `# Redis - price windows, alert cooldowns, SSE tickets (phases 3-4).` | Phase 3's only Redis use is `marketdata:last:*` — the last known price of every symbol, and the dashboard's only fallback. The other three moved to Phase 4. Match the wording `RedisExtensions.cs` now carries |
+| `src/Web/src/routes/_authenticated/portfolio.tsx:297` | `{/* No price and no P&L columns — those need MarketData, which is Phase 3. */}` | **Decided: the dashboard owns them, and the comment should say so.** Not "Phase 3 has not got to it" — adding price columns here would make a CRUD screen pay the provider fan-out on every render, for a page that exists to edit positions. Recorded in the README's Known gaps so the decision survives the comment |
+
+The third comment this task listed, `portfolio.tsx`'s `totalInvested` `Number()` reduce, **needs no edit**: the
+implementer already replaced the bare code with a doc comment that names it as the `CLAUDE.md`
+"never compute money in the browser" breach, defers it explicitly, and gives the reason — reaching
+`GetDashboardResult.totals.cost` means calling `/api/dashboard`, which spends one provider call per position
+against the free tier's budget from a page that shows no prices. The real fix it names, a cost total on
+`GET /api/holdings`' own response, is unscheduled and should be picked up by whichever phase next touches that
+endpoint.
 
 ### Task 24: The phase is done when it runs, not when tests pass
 
@@ -1366,38 +1486,84 @@ exposes `Map<M>Endpoints`" — reusing `SkipIfEmptyShell`. Written naively it go
 
 ## 8. Phase 3 exit checklist
 
-- [ ] `docker compose up` from a clean clone with **no** `Finnhub__ApiKey` → the log says
-      `FakeQuoteProvider`, and the dashboard shows prices
-- [ ] Add a brand-new ticker → it has a price on the **very first render**, no pending state
-- [ ] KPI tiles and the totals row agree with the per-row numbers
-- [ ] Weights sum to 100% within `pricedCount × 0.005`
-- [ ] **Kill the provider and refresh** → every position still listed with its last known price and an amber
-      age, no 500, no blank table
-- [ ] Kill the provider **and** flush Redis → positions still list, prices and P&L blank, totals footnoted,
-      still no 500
-- [ ] Kill **Redis** with the provider up → prices fresh, nothing degraded, and `/health/ready` returns **503**
-- [ ] Fail **three of twenty** tickers → seventeen fresh, three amber, one response, 200
-- [ ] `redis-cli GET marketdata:last:AAPL` returns `"{price}:{epochMs}"` after one dashboard load
-- [ ] Adding a genuinely non-existent symbol with a **real key** returns `UnknownTicker`; adding a valid one
-      with the provider **down** still succeeds
-- [ ] No `BackgroundService`, `PeriodicTimer` or `IHostedService` anywhere in `src/`
-- [ ] `dotnet test` green — passing **and** skipped both quoted, and the skip count is **2** against a freshly
+- [x] `docker compose up` from clean volumes with **no** `Finnhub__ApiKey` → the log says *"No
+      Finnhub__ApiKey configured; serving generated prices from the Fake quote provider"*, and the dashboard
+      shows prices
+- [x] Add a brand-new ticker → priced on the **very first request**, no pending state. Verified with NVDA
+      added seconds before the read
+- [x] KPI tiles and the totals row agree with the per-row numbers — $1,708.52 + $1,587.22 + $4,203.83 =
+      **$7,499.57**, against invested $5,980.00 and P&L $1,519.57
+- [x] Weights sum to 100% within `pricedCount × 0.005` — 22.78 + 21.16 + 56.05 = **99.99**, tolerance 0.015
+- [x] **Kill the provider and refresh** → every position still listed, `isLastKnown: true`, the original
+      `observedAt` preserved so the age renders, **200**, no blank table. Exercised against a second API
+      container carrying a real-shaped key pointed at an unreachable base URL, so `FinnhubQuoteProvider`'s
+      own failure path ran rather than a simulation of it. It cost **5.8s** — the resilience pipeline
+      spending its retries and timeouts, which stacks on cold start while `minReplicas` is 0
+- [x] Kill the provider **and** flush Redis → positions still list; `currentPrice`, `marketValue`, `profit`,
+      `profitPercent`, `weight` and `observedAt` all `null` **and present in the JSON**;
+      `pricedPositionCount: 0`; still **200**
+- [x] Kill **Redis** with the provider up → prices fresh and `isLastKnown: false` on every row, and
+      `/health/ready` returns **503**
+- [x] Fail **some** tickers, not all → fresh and last-known mixed in one 200 response. Covered by
+      `Dashboard_PartialProviderFailure_MixesFreshAndLastKnown` rather than by a hand drill: the compose path
+      runs the fake, which has no per-ticker failure mode. §2.5's ⚠️ is why this test exists — and
+      `Dashboard_ProviderReturns429_Returns200NotError` was found to pass under the rejected implementation
+      and had to be strengthened to assert `IsLastKnown == false` on served symbols
+- [x] `redis-cli GET marketdata:last:AAPL` returns `"{price}:{epochMs}"` after one dashboard load —
+      measured `210.3684:1785956606311`
+- [ ] ❌ **UNVERIFIED.** Adding a genuinely non-existent symbol with a **real key** returns `UnknownTicker`;
+      adding a valid one with the provider **down** still succeeds. The second half is covered
+      (`SymbolValidator` fails open, and there is a test). The first half cannot be exercised here: no
+      `FINNHUB_API_KEY` is set, `finnhub.io` was unreachable, and `FakeQuoteProvider` accepts any well-shaped
+      ticker by design (§2.11) so it can never produce the case. What *is* covered is the `/search` response
+      mapping, unit-tested, and `IsKnownSymbolAsync` returning `false` on a non-matching result — which is
+      more than the old `/quote` design could ever have been tested for, since its "unknown" and its "provider
+      blipped" were the same response
+- [x] No `BackgroundService`, `PeriodicTimer` or `IHostedService` anywhere in `src/` — grep clean
+- [x] `dotnet test` green — passing **and** skipped both quoted, and the skip count is **2** against a freshly
       measured baseline (the 11 this plan quotes is derived, not measured). It was green after **every** task
-      along the way, not only at the end
-- [ ] `GET /api/marketdata/health` names the active provider, and the SPA panel shows the same string
-- [ ] `stalestObservedAt` is populated on a dashboard with a last-known row, and `null` when nothing is priced
-- [ ] One architecture rule broken on purpose and seen red, then restored
-- [ ] `/openapi/v1.json` names `GetDashboardResult`; no `.Application` request type appears in it
-- [ ] `weight` and `profitPercent` are JSON **strings** in a real response, and a null price is `null` rather
-      than absent
-- [ ] `npm test` green including "a provider error keeps the last good table on screen" — **and** the two
-      Phase 1 session tests that mount `/dashboard` still pass under MSW's `onUnhandledRequest: 'error'`
-- [ ] `az bicep build` clean, and `az deployment group what-if` reports **no changes**
-- [ ] Deployed **with a real `FINNHUB_API_KEY`**; the public dashboard shows genuine prices and the health
-      panel names Finnhub rather than Fake
-- [ ] Table → cards at 375px, totals still legible
-- [ ] README: why the dashboard asks the provider directly rather than reading a cache · the last-known-price
+      along the way, not only at the end.
+      **Measured: 416 passed, 2 skipped, of 418 discovered**, at 0 build warnings — `Shared.Kernel` 21,
+      `Identity` 98, `Portfolio` 90, `MarketData` 61, `Architecture` 46 + **2 skipped**, `Api.IntegrationTests`
+      100. The skip arithmetic in Task 3 predicted 2 and measured 2. Both remaining skips are
+      `Identity.Contracts` — rules 1 and 2 — and both are correct: nothing reaches into Identity, so its
+      `.Contracts` is deliberately empty. The **shell list is now one entry**, which is a different quantity
+      from the skip count and must not be read off it
+- [x] `GET /api/marketdata/health` names the active provider, and the SPA panel shows the same string —
+      `{"provider":"Fake"}` anonymous, and the browser panel reads **Fake**. One source feeds the log line
+      and the page, so they cannot drift
+- [x] `stalestObservedAt` is populated on a dashboard with a last-known row, and `null` when nothing is
+      priced — both halves seen in the drills
+- [x] One architecture rule broken on purpose and seen red, then restored — rule 1 reported
+      `MarketData.Domain -> Portfolio.Domain` with the `<ProjectReference>` **plus** a fully-qualified field,
+      because a `using` alone is a compile error and a bare `Ticker` binds locally and reports green
+- [x] `/openapi/v1.json` names `GetDashboardResult`; no `.Application` request type appears in it — read off
+      a running host, not the source
+- [x] `weight` and `profitPercent` are JSON **strings** in a real response, and a null price is `null` rather
+      than absent. Stripping `JsonIgnore(Condition = Never)` left every *deserialised* assertion passing —
+      only the raw-JSON check catches it, because a deserialiser cannot tell absent from null.
+      `DashboardTotals.ProfitPercent` was later made `string?` too: `"0.00"` on a dashboard where nothing is
+      priced claims break-even at the moment nothing is known, which is the same argument that already made
+      `Weight` null rather than zero
+- [x] `npm test` green — **26 passing across 6 files**, including "a provider error keeps the last good table
+      on screen" and the two Phase 1 session tests that mount `/dashboard` under MSW's
+      `onUnhandledRequest: 'error'`
+- [ ] ❌ **NOT RUN LOCALLY — no `az` CLI here, and this is the only part of Task 22 that blocks on it.**
+      `az bicep build` clean, and `az deployment group what-if` reports **no changes**. Zero lines under
+      `infra/` were touched, so no changes is the expectation. `deploy.yml` runs `what-if` in the runner, so
+      merging to `main` executes it regardless. See Task 22
+- [ ] ❌ **NOT DONE — needs a merge to `main` and the secret, not a tool install.** Deployed **with a real
+      `FINNHUB_API_KEY`**; the public dashboard shows genuine prices and the health panel names Finnhub rather
+      than Fake. A live deployment exists and is healthy, but serves pre-Phase-3 code. See Task 22
+- [x] Table → cards at 375px, totals still legible — table hidden, card list carrying the same rows, and
+      `documentElement.scrollWidth === innerWidth`, so no horizontal overflow
+- [x] README: why the dashboard asks the provider directly rather than reading a cache · the last-known-price
       fallback and the staleness call from §2.6 · why `dp` is not used for thresholds · the free tier's
-      60-calls-per-minute ceiling and what it means for concurrent viewers
-- [ ] The counts and claims Task 23 lists are corrected in `CLAUDE.md`, `README.md`, four `docs/plan/` files
-      and `docs/deferred-work.md`
+      60-calls-per-minute ceiling and what it means for concurrent viewers. **Provenance is stated rather than
+      laundered**: the 30/second burst cap is marked confirmed, the 60/minute free-tier figure is marked
+      inferred from a search snippet because `finnhub.io` was unreachable, and the all-zero semantics are
+      described by what shipped rather than by the spec's contradicted claim
+- [x] The counts and claims Task 23 lists are corrected in `CLAUDE.md`, `README.md`, `docs/deferred-work.md`
+      and **seven** `docs/plan/` files — the four named plus the three that carried a dangling anchor together
+      with a substantive claim. The two remaining comments — `docker-compose.yml`'s Redis header and
+      `portfolio.tsx`'s price-columns note — are now corrected as well

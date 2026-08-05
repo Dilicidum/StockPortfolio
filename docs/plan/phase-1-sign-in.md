@@ -14,7 +14,7 @@ Covers P0 req 1 (auth incl. session persistence), the auth half of req 3 (routin
 
 ### 2.1 Shared.Kernel
 
-`Shared.Kernel` is framework-free and deliberately small. An `AggregateRoot<TId>` base and an `IDomainEvent` were written here and then **deleted**: nothing raised an event, so the event list was always empty and the type parameter existed only to satisfy the base. ~~Phase 2 brings an event type back, at `HoldingRemoved` — the first one anything actually raises.~~ **It did not.** `HoldingRemoved` existed only to cross the Portfolio/Alerts module boundary, and Phase 2 merged Alerts into Portfolio; with no raiser again, the type stayed deleted. See [00-overview.md](00-overview.md) §"Three modules, not four".
+`Shared.Kernel` is framework-free and deliberately small. An `AggregateRoot<TId>` base and an `IDomainEvent` were written here and then **deleted**: nothing raised an event, so the event list was always empty and the type parameter existed only to satisfy the base. ~~Phase 2 brings an event type back, at `HoldingRemoved` — the first one anything actually raises.~~ **It did not.** `HoldingRemoved` existed only to cross the Portfolio/Alerts module boundary, and Phase 2 merged Alerts into Portfolio; with no raiser again, the type stayed deleted. See [00-overview.md](00-overview.md) §"Four modules".
 
 ```csharp
 public readonly record struct Money(decimal Amount, string Currency)

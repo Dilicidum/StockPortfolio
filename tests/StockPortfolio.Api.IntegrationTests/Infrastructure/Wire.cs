@@ -31,9 +31,45 @@ public sealed record HoldingPayload(
     bool IsVisible,
     DateTimeOffset UpdatedAt);
 
+/// <summary>One dashboard row. Every nullable member is nullable on the wire too — null means unknown.</summary>
+public sealed record DashboardPositionPayload(
+    Guid Id,
+    string Ticker,
+    decimal Quantity,
+    MoneyPayload AveragePrice,
+    MoneyPayload Cost,
+    MoneyPayload? CurrentPrice,
+    MoneyPayload? MarketValue,
+    MoneyPayload? Profit,
+    string? ProfitPercent,
+    string? Weight,
+    DateTimeOffset? ObservedAt,
+    bool IsLastKnown);
+
+/// <summary>The KPI row. ProfitPercent is a string on purpose — a bare decimal would be a JSON number.</summary>
+public sealed record DashboardTotalsPayload(
+    MoneyPayload Value,
+    MoneyPayload Cost,
+    MoneyPayload Profit,
+
+    // Nullable: with nothing priced there is no cost to divide by, and "0.00" would claim break-even.
+    string? ProfitPercent,
+    int PositionCount,
+    int PricedPositionCount);
+
+/// <summary>The body of GET /api/dashboard.</summary>
+public sealed record DashboardPayload(
+    IReadOnlyList<DashboardPositionPayload> Positions,
+    DashboardTotalsPayload Totals,
+    DateTimeOffset AsOf,
+    DateTimeOffset? StalestObservedAt);
+
 /// <summary>Thin helpers over the five /api/auth routes, so the tests read as assertions rather than as.</summary>
 internal static class Wire
 {
+    /// <summary>The dashboard route, which is Portfolio's even though the prices are MarketData's.</summary>
+    public const string DashboardPath = "/api/dashboard";
+
     /// <summary>Media type the API must use for RFC 7807 errors.</summary>
     public const string ProblemJson = "application/problem+json";
 
@@ -43,6 +79,22 @@ internal static class Wire
     /// <summary>Mints an address no other test can collide with.</summary>
     public static string UniqueEmail(string prefix) =>
         $"{prefix}-{Guid.NewGuid():N}@example.test";
+
+    /// <summary>Mints a symbol no earlier test has fetched — marketdata:last:* is never trimmed and the
+    /// one Redis container outlives every test in the assembly, so a reused symbol is already warm.</summary>
+    public static string UniqueTicker()
+    {
+        // Five letters, the longest the shape allows, so it can also never collide with the three- and
+        // four-letter literals ("AAPL", "IBM", "TSLA"…) the rest of the suite hardcodes.
+        Span<char> symbol = stackalloc char[5];
+
+        for (var index = 0; index < symbol.Length; index++)
+        {
+            symbol[index] = (char)('A' + Random.Shared.Next(26));
+        }
+
+        return new string(symbol);
+    }
 
     /// <summary>Posts to /api/auth/register.</summary>
     public static Task<HttpResponseMessage> RegisterAsync(HttpClient client, string email, string password) =>
@@ -113,6 +165,30 @@ internal static class Wire
         payload.ShouldNotBeNull();
 
         return payload;
+    }
+
+    /// <summary>Reads /api/dashboard, asserting the 200 on the way.</summary>
+    public static async Task<DashboardPayload> GetDashboardAsync(HttpClient client, string accessToken)
+    {
+        using var response = await SendAsync(client, HttpMethod.Get, DashboardPath, accessToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        var payload = await response.Content.ReadFromJsonAsync<DashboardPayload>(JsonSerializerOptions.Web);
+
+        payload.ShouldNotBeNull();
+
+        return payload;
+    }
+
+    /// <summary>Reads /api/dashboard as text, for the assertions a deserialiser cannot make.</summary>
+    public static async Task<string> GetDashboardJsonAsync(HttpClient client, string accessToken)
+    {
+        using var response = await SendAsync(client, HttpMethod.Get, DashboardPath, accessToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        return await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>Reads the field names a 400 blames, compared case-insensitively so casing is not the assertion.</summary>

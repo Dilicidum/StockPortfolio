@@ -28,10 +28,24 @@ execution is already keyed to them and renumbering would desynchronise it.
 
 **The decision.** Alerts stops being a fourth module and becomes a feature area inside Portfolio. Three
 modules: `Identity`, `Portfolio`, `MarketData`. Full reasoning in
-[00-overview.md](00-overview.md) §"Three modules, not four"; in short, `Ticker` meant exactly the same thing on
+[00-overview.md](00-overview.md) §"Four modules"; in short, `Ticker` meant exactly the same thing on
 both sides of the Portfolio/Alerts line, so ubiquitous language never diverged and there was only ever one
 bounded context there. What does apply is subdomain classification: Portfolio-with-alerts is **core**, Identity
 is **generic**, MarketData is **supporting**.
+
+> ⚠️ **This decision was itself reversed, and both halves of it went.** Alerts is a module again — language
+> divergence is *sufficient* to conclude two contexts exist, not *necessary*, so a shared vocabulary proves
+> nothing — and **subdomain classification is not used at all**: it changed no code and conflated problem
+> space (a subdomain), a model boundary (a bounded context) and a namespace inside a context (a module in
+> Evans' sense). Boundaries are argued from extraction cost instead. See
+> [00-overview.md](00-overview.md) §"Four modules" and [module-boundaries.md](module-boundaries.md) §5.
+>
+> **What this section withdrew stays withdrawn**, and that is the part worth keeping: the domain-event
+> infrastructure was deleted for a reason that survives the reversal — a cooldown key has a TTL and expires by
+> itself, so `HoldingRemoved` had no work to do on either side of any boundary. The rest of the table below
+> is a record of what Phase 2 actually built, and is accurate as such.
+>
+> ⚠️ Alerts is a module in the documents and **not on disk**. Phase 4 builds it.
 
 **What it withdraws from this plan:**
 
@@ -4913,7 +4927,7 @@ since between them they were about ninety lines and six tests.
 
 **Phase 2's biggest deviation is §0.0: Alerts is merged into Portfolio and domain events are withdrawn.**
 It reverses the module split that `docs/plan/` argues for throughout, and it is argued in full in
-[00-overview.md](00-overview.md) §"Three modules, not four". The deferred consequence is real and is tracked
+[00-overview.md](00-overview.md) §"Four modules". The deferred consequence is real and is tracked
 in [../deferred-work.md](../deferred-work.md): the `alerts` schema, the `alerts_svc` role and the Alerts
 deployment variables are still in `db/init/`, `docker-compose.yml`, `infra/` and the workflows, because
 `docker compose up` is the P0 gate and removing them was not verifiable in the environment that made the

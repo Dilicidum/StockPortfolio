@@ -1,5 +1,6 @@
 import { queryOptions } from '@tanstack/react-query'
 import { apiFetch } from '../lib/apiClient'
+import type { Money } from '../lib/format'
 
 /**
  * The API contract, verbatim:
@@ -15,12 +16,11 @@ import { apiFetch } from '../lib/apiClient'
 
 /**
  * Money arrives as a string so nothing here parses it as a float. The server
- * computes every monetary value; the browser only ever formats one.
+ * computes every monetary value; the browser only ever formats one — which is why
+ * the shape and its formatter now live together in `lib/format`, shared with the
+ * dashboard rather than declared a second time beside it.
  */
-export interface Money {
-  amount: string
-  currency: string
-}
+export type { Money } from '../lib/format'
 
 export interface Holding {
   id: string

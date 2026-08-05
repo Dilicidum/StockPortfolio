@@ -9,6 +9,7 @@ using OneOf.Types;
 using StockPortfolio.Modules.Portfolio.Api.Requests;
 using StockPortfolio.Modules.Portfolio.Api.Validators;
 using StockPortfolio.Modules.Portfolio.Application;
+using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboard;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
@@ -19,11 +20,14 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Api;
 
-/// <summary>The Portfolio module's entire inbound HTTP surface: four routes under /api/holdings, plus the one DI seam.</summary>
+/// <summary>The Portfolio module's entire inbound HTTP surface: four routes under /api/holdings, the dashboard, and the one DI seam.</summary>
 public static class PortfolioEndpoints
 {
     /// <summary>Where a position is addressable.</summary>
     private const string BasePath = "/api/holdings";
+
+    /// <summary>The dashboard is a portfolio read that happens to need prices, so it is Portfolio's route.</summary>
+    private const string DashboardPath = "/api/dashboard";
 
     /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
@@ -36,7 +40,7 @@ public static class PortfolioEndpoints
         return services;
     }
 
-    /// <summary>Maps the four holdings routes onto /api/holdings.</summary>
+    /// <summary>Maps the four holdings routes onto /api/holdings, and the dashboard beside them.</summary>
     public static IEndpointRouteBuilder MapPortfolioEndpoints(this IEndpointRouteBuilder app)
     {
         // Every route needs a bearer token and every route can 500, so both are declared once here.
@@ -79,7 +83,33 @@ public static class PortfolioEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
+        // Outside the group, and deliberately not nested under /api/holdings: it is one resource of its
+        // own, not a sub-resource of a position.
+        app.MapGet(DashboardPath, GetDashboardAsync)
+            .RequireAuthorization()
+            .WithTags("Dashboard")
+            .WithName("GetDashboard")
+            .WithSummary("Prices every visible position and totals the portfolio.")
+            .WithDescription("An unpriced position is listed with nulls rather than zeros, and is excluded from the totals and from the weight denominator.")
+            .Produces<GetDashboardResult>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         return app;
+    }
+
+    /// <summary>Prices the caller's positions.</summary>
+    private static async Task<IResult> GetDashboardAsync(
+        ClaimsPrincipal principal,
+        IQueryHandler<GetDashboardQuery, GetDashboardResult> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        return TypedResults.Ok(await handler.Handle(new GetDashboardQuery(userId), ct));
     }
 
     /// <summary>Lists the caller's positions.</summary>
@@ -122,7 +152,7 @@ public static class PortfolioEndpoints
             // The handler's own InvalidInput case, not the filter's.
             invalid => invalid.ToValidationProblem(),
 
-            // Phase 3 turns this into a real symbol lookup, and this is the line to revisit then.
+            // Shape or existence: the handler asked the provider, and it said no.
             unknownTicker => new InvalidInput(
                     "ticker",
                     $"'{unknownTicker.Ticker}' is not a ticker this application recognises.")

@@ -11,9 +11,10 @@ import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Table, type Column } from '../../components/Table'
 import { TextField } from '../../components/TextField'
+import { formatMoney } from '../../lib/format'
 import { applyServerErrors } from '../../lib/formErrors'
 import { EditHoldingForm, type EditHoldingValues } from '../../portfolio/EditHoldingForm'
-import { holdingsQuery, type Holding, type Money } from '../../portfolio/holdingsApi'
+import { holdingsQuery, type Holding } from '../../portfolio/holdingsApi'
 import { useAddHolding, useRemoveHolding, useUpdateHolding } from '../../portfolio/useHoldingMutations'
 
 /**
@@ -83,13 +84,6 @@ const addHoldingSchema = z.object({
 type AddHoldingInput = z.input<typeof addHoldingSchema>
 type AddHoldingValues = z.output<typeof addHoldingSchema>
 
-function formatMoney(money: Money): string {
-  return Number(money.amount).toLocaleString(undefined, {
-    style: 'currency',
-    currency: money.currency,
-  })
-}
-
 /**
  * Invested is summed from the server's own per-row figures, never recomputed from
  * quantity x price. The server rounds the average to 6dp on store; multiplying a
@@ -98,6 +92,14 @@ function formatMoney(money: Money): string {
  *
  * `Number(...)` on a money string is a float, and that is acceptable ONLY because this
  * value is displayed and then thrown away. It must never be sent back or compared.
+ *
+ * DEFERRED, not overlooked — this is the `CLAUDE.md` "never compute money in the
+ * browser" breach, carried one more phase. Phase 3's server-computed equivalent is
+ * `GetDashboardResult.totals.cost`, and the only way to reach it is `/api/dashboard`,
+ * which fans out one provider HTTP call per position against a 60-calls-per-minute
+ * budget. Spending that budget from a page that shows no prices is a worse trade than
+ * the breach. The real fix is a cost total on `GET /api/holdings`' own response, which
+ * no phase has scheduled yet.
  */
 function totalInvested(holdings: Holding[]): string {
   const total = holdings.reduce((sum, holding) => sum + Number(holding.invested.amount), 0)
@@ -292,7 +294,8 @@ export function PortfolioPage() {
           />
         ) : null}
 
-        {/* No price and no P&L columns — those need MarketData, which is Phase 3. */}
+        {/* No price and no P&L columns on purpose: the dashboard owns them. Adding them here would
+            make a CRUD screen pay MarketData's one-call-per-position fan-out on every render. */}
         <Table
           caption="Your positions"
           columns={columns}

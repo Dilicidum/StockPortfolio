@@ -17,17 +17,23 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     private static readonly string[] AuthRouteNames =
         ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"];
 
-    /// <summary>The four names WithName gives the /api/holdings routes.</summary>
+    /// <summary>The five names WithName gives Portfolio's routes: four under /api/holdings, plus the dashboard.</summary>
     private static readonly string[] PortfolioRouteNames =
-        ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding"];
+        ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"];
+
+    /// <summary>MarketData's one route that ships in every environment; the dev nudge is not mapped in all.</summary>
+    private static readonly string[] MarketDataRouteNames = ["GetMarketDataHealth"];
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
     /// <summary>The five routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
-    /// <summary>The four holdings routes, as theory data.</summary>
+    /// <summary>The five Portfolio routes, as theory data.</summary>
     public static TheoryData<string> PortfolioRoutes => [.. PortfolioRouteNames];
+
+    /// <summary>The MarketData routes, as theory data.</summary>
+    public static TheoryData<string> MarketDataRoutes => [.. MarketDataRouteNames];
 
     /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
@@ -35,7 +41,11 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheFourHoldingsRoutes() => ShouldExposeExactly(PortfolioRouteNames);
+    public void EndpointDataSource_ExposesTheFivePortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
+
+    /// <summary>And for MarketData, whose .Api assembly exists only because this route ships everywhere.</summary>
+    [Fact]
+    public void EndpointDataSource_ExposesTheMarketDataHealthRoute() => ShouldExposeExactly(MarketDataRouteNames);
 
     /// <summary>The check the typed Results union used to make: a status the route emits must be a status it.</summary>
     [Theory]
@@ -66,7 +76,20 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("UpdateHolding", "stranger", 404)]
     [InlineData("RemoveHolding", "own", 204)]
     [InlineData("RemoveHolding", "missing", 404)]
+    [InlineData("GetDashboard", "bearer", 200)]
+    [InlineData("GetDashboard", "anonymous", 401)]
     public async Task PortfolioRoute_DeclaresTheStatusItReturned(
+        string routeName,
+        string scenario,
+        int expectedStatus)
+    {
+        await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
+    }
+
+    /// <summary>The health route is anonymous by design, so 200 is the only status a caller can drive.</summary>
+    [Theory]
+    [InlineData("GetMarketDataHealth", "anonymous", 200)]
+    public async Task MarketDataRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
         int expectedStatus)
@@ -84,6 +107,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [Theory]
     [MemberData(nameof(PortfolioRoutes))]
     public void PortfolioRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
+        ShouldDeclareProblemJsonForEveryFailure(routeName);
+
+    /// <summary>And over MarketData's, whose only declared failure is the 500 every route can reach.</summary>
+    [Theory]
+    [MemberData(nameof(MarketDataRoutes))]
+    public void MarketDataRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
         ShouldDeclareProblemJsonForEveryFailure(routeName);
 
     private void ShouldDeclareProblemJsonForEveryFailure(string routeName)
@@ -146,7 +175,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>Reads the response metadata off the endpoint the host actually built.</summary>
     private IReadOnlyList<IProducesResponseTypeMetadata> DeclaredResponses(string routeName)
     {
-        var endpoints = EndpointsByName([.. AuthRouteNames, .. PortfolioRouteNames]);
+        var endpoints = EndpointsByName([.. AuthRouteNames, .. PortfolioRouteNames, .. MarketDataRouteNames]);
 
         endpoints.ShouldContainKey(routeName);
 
@@ -372,6 +401,33 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                     HttpMethod.Delete,
                     $"/api/holdings/{Guid.NewGuid()}",
                     token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetDashboard", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard");
+
+                // A position first: an empty portfolio short-circuits before the read model materialises
+                // anything, so the 200 would prove nothing about the projection behind it.
+                _ = await OpenPositionAsync(client, token, "AAPL");
+
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/dashboard", token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetDashboard", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/dashboard");
+
+                return response.StatusCode;
+            }
+
+            case ("GetMarketDataHealth", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/marketdata/health");
 
                 return response.StatusCode;
             }

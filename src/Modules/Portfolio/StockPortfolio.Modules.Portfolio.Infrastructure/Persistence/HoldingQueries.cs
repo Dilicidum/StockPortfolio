@@ -1,12 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 
+using StockPortfolio.Modules.Portfolio.Application.Abstractions;
 using StockPortfolio.Modules.Portfolio.Contracts;
 using StockPortfolio.Modules.Portfolio.Domain;
+using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 
-/// <summary>The read another module needs, taking and returning primitives at the boundary.</summary>
-internal sealed class HoldingQueries(PortfolioDbContext context) : IUserHoldsTicker
+/// <summary>The untracked reads: one another module needs, one the dashboard needs.</summary>
+internal sealed class HoldingQueries(PortfolioDbContext context) : IUserHoldsTicker, IDashboardHoldingReader
 {
     /// <inheritdoc/>
     public async Task<bool> HoldsAsync(Guid userId, string ticker, CancellationToken ct)
@@ -24,4 +26,39 @@ internal sealed class HoldingQueries(PortfolioDbContext context) : IUserHoldsTic
             .AsNoTracking()
             .AnyAsync(h => h.UserId == userId && h.Ticker == parsed, ct);
     }
+
+    /// <inheritdoc/>
+    public async Task<IReadOnlyList<HoldingRow>> GetVisibleHoldingsAsync(Guid userId, CancellationToken ct)
+    {
+        // AveragePrice's MEMBERS, never AveragePrice itself: Money is rebuilt below, which also keeps
+        // its ToUpperInvariant off the materialiser. No Include here, and a .Select would ignore one.
+        var rows = await context.Holdings
+            .AsNoTracking()
+            .Where(h => h.UserId == userId && h.IsVisible)
+            .OrderByDescending(h => h.CreatedAt)
+            .Select(h => new Projected(
+                h.Id,
+                h.Ticker,
+                h.Quantity,
+                h.AveragePrice.Amount,
+                h.AveragePrice.Currency))
+            .ToListAsync(ct);
+
+        return
+        [
+            .. rows.Select(row => new HoldingRow(
+                row.Id.Value,
+                row.Ticker.Value,
+                row.Quantity,
+                new Money(row.Amount, row.Currency))),
+        ];
+    }
+
+    /// <summary>What the query materialises: converter-backed ids and scalars, no complex type.</summary>
+    private sealed record Projected(
+        HoldingId Id,
+        Ticker Ticker,
+        decimal Quantity,
+        decimal Amount,
+        string Currency);
 }

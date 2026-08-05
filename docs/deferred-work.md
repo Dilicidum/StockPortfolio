@@ -85,17 +85,24 @@ context.
 
 **Trigger:** the next project rename, or Phase 2 adding projects — whichever comes first.
 
-### C4 — the application's Redis multiplexer is registered inside the health-check extension
+### C4 — the application's Redis multiplexer is registered inside the health-check extension — **DONE (Phase 3)**
 
-`src/Api/Extensions/HealthCheckExtensions.cs:43-49` parses the connection string and registers
-`IConnectionMultiplexer` as a singleton, then registers two checks. The multiplexer is the app's Redis client;
-a readiness probe merely observes it.
+`HealthCheckExtensions` parsed the connection string and registered `IConnectionMultiplexer` as a singleton,
+then registered two checks. The multiplexer is the app's Redis client; a readiness probe merely observes it.
 
-**Fix:** extract `AddStockPortfolioRedis(IServiceCollection, IConfiguration)` called before the health checks.
+**Done.** `src/Api/Extensions/RedisExtensions.cs` now owns the connection-string name, the blank-string throw,
+`ConfigurationOptions.Parse`, `AbortOnConnectFail = false` and the singleton registration.
+`AddStockPortfolioHealthChecks` lost its now-unused `IConfiguration` parameter — an unused parameter is a lie
+the compiler will not flag — and `RedisHealthCheck` was unchanged, since it already took the multiplexer from
+DI. The call sits immediately after `AddSingleton(TimeProvider.System)`, before any module.
 
-**Trigger:** Phase 3, which needs the multiplexer for price windows, alert cooldowns and SSE tickets. If it
-is still here then, MarketData either depends on a health-check registration having run or opens a second
-connection pool — and both failures are silent.
+Two things came out of doing it that the item did not anticipate. The **throw's message had to be reworded**:
+it named "price windows, alert cooldowns and SSE tickets", two of which moved to Phase 4, and Phase 3's only
+Redis use is `marketdata:last:*`. And the trigger's stated failure mode was the right one but for a slightly
+different reason — MarketData does not open a second pool, it **injects `IConnectionMultiplexer` and thereby
+depends on a host registration it never names**. Delete or reorder that one line in `Program.cs` and the
+dashboard fails on the first request, not at boot. That is now recorded in `CLAUDE.md` under "Where Identity
+is not a safe template".
 
 ### C6 — the connection-string name and the `MigrationsHistoryTable` block are duplicated
 
@@ -124,6 +131,11 @@ to the consuming project.
 
 **Trigger:** Phase 2, when the second role exists.
 
+> **Phase 3: considered, and it does not apply.** MarketData is the module Phase 3 added and it has **no
+> `DbContext`** (see `CLAUDE.md`'s stated exception), so it contributes no `AddDbContextCheck<T>()` and does
+> not widen the gap this item describes. Readiness still probes one of two real roles. Recorded so the item is
+> not read as having been triggered and skipped.
+
 ### C8 — the Migrator fabricates a JWT signing key
 
 `src/Migrator/Program.cs:30-32` supplies `"migrator-placeholder-signing-key-unused-32b"` because
@@ -136,6 +148,21 @@ tightens the `ServiceCollection` walk, since the collection then holds nothing b
 
 **Trigger:** Phase 3, or whichever module first adds eager validation of a runtime concern — a Finnhub key, a
 Polly-wrapped `HttpClient`, a `BackgroundService`. Each one otherwise adds another placeholder line here.
+
+> **Phase 3: examined, and still deferred — the trigger was not met.** Both clauses failed, and it is worth
+> saying why so this is not re-triggered on sight of the phase number. The **second clause** assumed Phase 3
+> would add eager validation of a runtime concern; it added the opposite. A missing `Finnhub__ApiKey` is a
+> *supported* state, `FinnhubOptions.FromConfiguration` must not throw, and `AddMarketDataModule` branches to
+> the fake — validating eagerly there would take down `docker compose up`, the P0 gate. MarketData therefore
+> adds **no** placeholder line to the Migrator. The **first clause** was written when Phase 3 was expected to
+> bring a `DbContext`; it does not.
+>
+> Doing it anyway would have cost three coordinated edits — split `AddIdentityPersistence` out of
+> `IdentityModule`, change `MigratedModules.cs`, change `ApiFixture`'s `MigratorConfiguration` — and bought
+> nothing the phase could demonstrate.
+>
+> **Trigger restated for Phase 4**, which is where it genuinely fires: Alerts brings a real `DbContext` **and**
+> a `BackgroundService`, so the placeholder stops being one line and the split stops being speculative.
 
 Related, same file: `IsSubclassOf(typeof(DbContext))` at `:46` finds nothing if a module uses
 `AddDbContextFactory<T>` — the service type is then `IDbContextFactory<T>`. With one module the `Count == 0`
@@ -167,13 +194,32 @@ shell-based probe.
 
 **Trigger:** before the first deploy or any demo where someone else runs `docker compose up`.
 
-### E1 — ~~the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables outlive the module~~ RESOLVED
+### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables outlive the module — **REOPENED**
 
-**Resolved by reinstating Alerts as a module.** `db/init/01-roles.sql`, `docker-compose.yml`, `infra/*.bicep` and both workflows were never stripped of `ALERTS_PW`, the `alerts` schema or the `alerts_svc` role — deliberately, because touching them meant re-verifying the P0 gate without Docker. With Alerts a module again they are correct as they stand, and the cleanup this item tracked is not needed. Original text below for the record.
+> **Closed 2026-08-04, reopened 2026-08-05 (Phase 3).** It was closed on the grounds that "Alerts is a module
+> again, so these are correct as they stand". That reasoning does not hold: **Alerts was reinstated as a
+> decision, not as code.** `src/Modules/` has three folders, `ModuleBoundaryTests.cs` pins seventeen
+> assemblies, and no `.csproj`, `DbContext` or connection string for Alerts exists anywhere. Every orphan this
+> item tracks is therefore still an orphan, still inert, and still unowned — `db/init/01-roles.sql:57-59,84,138-145`,
+> `docker-compose.yml:43,127`, `.env.example:39`, `containerapp-api.bicep:126`, `ci.yml:129`,
+> `deploy.yml:202,222,314`. `module-boundaries.md:237-239` makes the same false "resolved" claim and is wrong
+> for the same reason.
+>
+> The item is reopened rather than deleted-and-rewritten because the mistake is worth keeping visible: a
+> decision recorded in the documents was mistaken for a change made in the tree, and closing an item on that
+> basis is how leftovers become permanent. **Phase 3 does not clean it up either** — the trade below is
+> unchanged, and this environment still has no Docker daemon to re-verify the P0 gate with. The difference is
+> that it is now honestly open.
+>
+> **New closing condition.** Phase 4 builds Alerts. If it does, this item closes *by the orphans becoming
+> owned*, which is a real resolution and checkable — an `AlertsDbContext` connecting as `alerts_svc`. If Phase
+> 4 slips, the fix below is the fallback and its trigger stands. Do not close it a second time on the strength
+> of a plan.
 
+Original text follows, unchanged.
 
 Phase 2 merged the Alerts module into Portfolio (three modules, not four — see
-[plan/00-overview.md](plan/00-overview.md) §"Three modules, not four"). The five `.csproj` files, the
+[plan/00-overview.md](plan/00-overview.md) §"Four modules"). The five `.csproj` files, the
 `Shared.Kernel/DomainEvents/` folder and the solution entries went with it. The **database and deployment
 surface did not**:
 
@@ -250,8 +296,12 @@ Recorded so the same ground is not re-covered.
   suppress the framework's auto-insertion *before* `UseCors` — deleting them silently reverses the ordering.
 - **The liveness/readiness split** — `Predicate = _ => false` on liveness, and a test that boots a host with
   unreachable dependencies and asserts live=200 / ready=503. Not decorative.
-- **`Maximum Pool Size=2`** on every production connection string — five when Alerts was a module, four since
-  (three service roles plus `migrator`).
+- **`Maximum Pool Size=2`** on every production connection string. The *setting* is correct everywhere; the
+  **arithmetic quoted around it was wrong in four places** and was re-derived in Phase 3. Connection strings
+  are defined for five roles, but a pool is only opened for a context that exists, and `Program.cs` registers
+  two — Identity's and Portfolio's. Two pools per replica × size 2 × `maxReplicas: 2` = **8** of the B1ms
+  budget of 35. MarketData has no `DbContext` and `alerts_svc` has no consumer (E1); `migrator` runs as a
+  separate job. Do not restate this figure from memory — count `AddDbContext` calls.
 - **`AddProblemDetails()` and `UseStatusCodePages()` both registered**, so the 415/500 `problem+json`
   declarations are honest — for JSON `Accept` headers. A client sending `Accept: text/html` gets the
   plain-text fallback.

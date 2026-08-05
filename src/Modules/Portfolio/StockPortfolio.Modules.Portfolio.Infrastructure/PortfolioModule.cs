@@ -47,6 +47,9 @@ public static class PortfolioModule
         // The one read another module makes of Portfolio: does this user hold this ticker?
         services.AddScoped<IUserHoldsTicker, HoldingQueries>();
 
+        // One class, two contracts, two registrations: DI here is hand-written, not convention-scanned.
+        services.AddScoped<IDashboardHoldingReader, HoldingQueries>();
+
         services.AddPortfolioHandlers();
 
         return services;
