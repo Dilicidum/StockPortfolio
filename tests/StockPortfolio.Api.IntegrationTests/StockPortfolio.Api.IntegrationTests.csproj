@@ -16,6 +16,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Api\StockPortfolio.Api.csproj" />
+
+    <!-- The fixture migrates through the Migrator's own module list rather than a copy of it, so that
+         deleting a module from that list fails these tests exactly as it would fail docker compose. -->
+    <ProjectReference Include="..\..\src\Migrator\StockPortfolio.Migrator.csproj" />
   </ItemGroup>
 
 </Project>

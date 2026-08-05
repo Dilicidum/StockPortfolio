@@ -2,6 +2,12 @@
 
 Four Postgres schemas, one per module. Price observations are **not** here — they live in Redis (§3).
 
+> **Reversal, twice.** Phase 2 moved the alert tables into the `portfolio` schema when Alerts was merged
+> into Portfolio; that merge was reversed, so `alert_settings` and `fired_alerts` are back in the **`alerts`**
+> schema, in `AlertsDbContext`, reached by `alerts_svc` — which `db/init/` has been creating all along.
+> Separately, `alert_settings` is now keyed on **user + ticker** rather than one row per user, so a threshold
+> belongs to a position rather than to an account. See [module-boundaries.md](module-boundaries.md).
+
 ## The rule that shapes this diagram
 
 **There are no foreign keys across schemas.** Each module connects as its own database role with no `USAGE` on the others, so `portfolio.holdings.user_id` *cannot* be a real FK to `identity.users.id` — the constraint would fail to create, and the query to validate it would fail with a permission error.
@@ -72,7 +78,8 @@ erDiagram
 
     alerts_alert_settings {
         uuid id PK
-        uuid user_id UK "logical FK — Alerts owns this, not Identity"
+        uuid user_id "logical FK — Alerts owns this, not Identity"
+        text ticker "one threshold per position, not per account"
         boolean enabled
         numeric threshold_percent "5,2 — 0.1..50"
         int window_minutes "1..60, must be < retention"
@@ -97,15 +104,15 @@ erDiagram
     identity_users ||..o{ portfolio_holdings : "user_id — no FK"
     identity_users ||..o| portfolio_dashboard_settings : "user_id — no FK"
     identity_users ||..o| marketdata_user_api_keys : "user_id — no FK"
-    identity_users ||..o| alerts_alert_settings : "user_id — no FK"
+    identity_users ||..o{ alerts_alert_settings : "user_id — no FK"
     identity_users ||..o{ alerts_fired_alerts : "user_id — no FK"
 ```
 
 Seven tables plus the Data Protection key ring. Two tables from an earlier draft are gone, and it is worth saying why so they don't creep back:
 
-**`marketdata.tracked_tickers`** — `Initial.md:74` gives MarketData its own table of distinct tickers, maintained by subscribing to holding events. Once the poller reads the poll set live from Portfolio at the start of each cycle, that table is duplicated state with no job — and it was the reason for the event subscription, the periodic reconciliation, and the whole "a lost publish diverges the two permanently" failure mode. All three go with it.
+**`marketdata.tracked_tickers`** — `Initial.md:74` gives MarketData its own table of distinct tickers, maintained by subscribing to holding events. Once the poller reads its ticker list live from Alerts at the start of each cycle, that table is duplicated state with no job — and it was the reason for the event subscription, the periodic reconciliation, and the whole "a lost publish diverges the two permanently" failure mode. All three go with it.
 
-**`alerts.cooldowns`** — moved to Redis as `alerts:cooldown:{userId}:{ticker}:{direction}` with a TTL. Expiry is the entire semantics of a cooldown, so a store with native expiry is the right one; a table needs a cleanup job to do the same thing worse.
+**`alerts.cooldowns`** — moved to Redis as `alerts:cooldown:{userId}:{ticker}:{direction}` with a TTL. Expiry is the entire semantics of a cooldown, so a store with native expiry is the right one; a table needs a cleanup job to do the same thing worse. The Redis key prefix stays `alerts:` even though the owning module is now Portfolio — it names the feature, and renaming it would invalidate live keys for nothing.
 
 ---
 
@@ -153,7 +160,8 @@ Price observations are derived and re-fetchable, so losing them costs alert hist
 
 | Key | Type | Contents | Lifetime |
 |---|---|---|---|
-| `marketdata:prices:{ticker}` | Sorted set | Member `"{epochMs}:{price}"`, score `epochMs` | Trimmed on write to 1h 1m ≈ 61 entries |
+| `marketdata:last:{ticker}` | String | `"{price}:{epochMs}"` — the last price any path fetched | **Never trimmed.** The dashboard's only fallback when the provider is unreachable |
+| `marketdata:prices:{ticker}` | Sorted set | Member `"{epochMs}:{price}"`, score `epochMs` | Trimmed on write to 1h 1m ≈ 61 entries. Written only for tickers with an active alert |
 | `marketdata:claim:{windowStart}` | String | `"1"` — decides *who* polls this window | `EX 120` |
 | `marketdata:cycle-inflight` | String | Instance id — decides *whether* any cycle is running | `EX 110`, deleted in `finally` |
 | `alerts:cooldown:{user}:{ticker}:{dir}` | String | `"1"` — presence means suppressed | `EX` = the user's cooldown |
@@ -161,5 +169,7 @@ Price observations are derived and re-fetchable, so losing them costs alert hist
 | `alerts:user:{userId}` | Pub/sub channel | Fired alert payloads, fanned out to whichever replica holds the stream | — |
 
 The sorted-set member is `timestamp:price`, not `price`. Members must be unique — if the member were the bare price, a ticker hitting the same value twice would **update the existing entry's score rather than adding a new one**, silently erasing the earlier reading.
+
+**The two price structures are separate on purpose, and it is not redundancy.** `last:` answers *what is it worth*, `prices:` answers *how has it moved*, and their lifetimes differ — one is kept for as long as someone might look, the other is trimmed to an hour and only exists while an alert does. Turn alerts off for a ticker and it has no window at all, which is exactly when the dashboard still needs a fallback. Collapsing them would also couple the dashboard's degradation to the alert retention setting.
 
 The two claim keys are separate on purpose. The window claim guarantees one winner *within* a window and says nothing *across* windows, so a cycle that overruns is still fetching when the next window opens and a different replica claims it. The in-flight guard closes that. See [phase-3-live-prices.md](phase-3-live-prices.md) §2.4.

@@ -1,0 +1,39 @@
+using Microsoft.Extensions.DependencyInjection;
+
+using OneOf;
+using OneOf.Types;
+
+using StockPortfolio.Modules.Portfolio.Application;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Queries.GetHoldings;
+using StockPortfolio.Shared.Kernel;
+using StockPortfolio.Shared.Kernel.Cqrs;
+
+namespace StockPortfolio.Modules.Portfolio.Infrastructure;
+
+/// <summary>Handler registrations, kept out of PortfolioModule so the public seam stays one method.</summary>
+internal static class DependencyInjection
+{
+    internal static IServiceCollection AddPortfolioHandlers(this IServiceCollection services)
+    {
+        services.AddScoped<
+            ICommandHandler<AddHoldingCommand, OneOf<HoldingCreated, HoldingMerged, InvalidInput, UnknownTicker>>,
+            AddHoldingCommandHandler>();
+
+        services.AddScoped<
+            ICommandHandler<UpdateHoldingCommand, OneOf<HoldingSummary, NotFound, InvalidInput>>,
+            UpdateHoldingCommandHandler>();
+
+        services.AddScoped<
+            ICommandHandler<RemoveHoldingCommand, OneOf<Success, NotFound>>,
+            RemoveHoldingCommandHandler>();
+
+        services.AddScoped<
+            IQueryHandler<GetHoldingsQuery, IReadOnlyList<HoldingSummary>>,
+            GetHoldingsQueryHandler>();
+
+        return services;
+    }
+}

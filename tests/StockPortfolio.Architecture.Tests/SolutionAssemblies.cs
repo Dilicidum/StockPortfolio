@@ -12,9 +12,9 @@ internal static class SolutionAssemblies
     /// <summary>The one layer of a module every other module is allowed to see.</summary>
     public const string ContractsLayer = "Contracts";
 
-    /// <summary>The four modules of the monolith.</summary>
+    /// <summary>The three modules of the monolith.</summary>
     public static ImmutableArray<string> ModuleNames { get; } =
-        ["Identity", "Portfolio", "MarketData", "Alerts"];
+        ["Identity", "Portfolio", "MarketData"];
 
     /// <summary>The five projects each module is built from, innermost first.</summary>
     public static ImmutableArray<string> LayerNames { get; } =

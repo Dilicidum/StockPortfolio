@@ -1,0 +1,190 @@
+using System.Security.Claims;
+using FluentValidation;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using OneOf;
+using OneOf.Types;
+using StockPortfolio.Modules.Portfolio.Api.Requests;
+using StockPortfolio.Modules.Portfolio.Api.Validators;
+using StockPortfolio.Modules.Portfolio.Application;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Queries.GetHoldings;
+using StockPortfolio.Shared.Api;
+using StockPortfolio.Shared.Kernel;
+using StockPortfolio.Shared.Kernel.Cqrs;
+
+namespace StockPortfolio.Modules.Portfolio.Api;
+
+/// <summary>The Portfolio module's entire inbound HTTP surface: four routes under /api/holdings, plus the one DI seam.</summary>
+public static class PortfolioEndpoints
+{
+    /// <summary>Where a position is addressable.</summary>
+    private const string BasePath = "/api/holdings";
+
+    /// <summary>The claim carrying the user id.</summary>
+    private const string SubjectClaimType = "sub";
+
+    /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
+    public static IServiceCollection AddPortfolioApi(this IServiceCollection services)
+    {
+        services.AddValidatorsFromAssemblyContaining<AddHoldingRequestValidator>();
+
+        return services;
+    }
+
+    /// <summary>Maps the four holdings routes onto /api/holdings.</summary>
+    public static IEndpointRouteBuilder MapPortfolioEndpoints(this IEndpointRouteBuilder app)
+    {
+        // Every route needs a bearer token and every route can 500, so both are declared once here.
+        // 415 and 500 carry problem+json because AddProblemDetails and UseStatusCodePages give even
+        // framework-generated responses a body - verified against the running API, not assumed.
+        var group = app.MapGroup(BasePath)
+            .RequireAuthorization()
+            .WithTags("Holdings")
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapGet("/", GetHoldingsAsync)
+            .WithName("GetHoldings")
+            .WithSummary("Lists every position the caller holds.")
+            .Produces<IReadOnlyList<HoldingSummary>>(StatusCodes.Status200OK);
+
+        group.MapPost("/", AddHoldingAsync)
+            .AddEndpointFilter<ValidationFilter<AddHoldingRequest>>()
+            .WithName("AddHolding")
+            .WithSummary("Records a purchase, opening a position or merging into an existing one.")
+            .WithDescription("201 when the position is new, 200 when the purchase merged into one you already held. Location points at the position on the 201.")
+            .Produces<HoldingSummary>(StatusCodes.Status201Created)
+            .Produces<HoldingSummary>(StatusCodes.Status200OK)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
+
+        group.MapPatch("/{id:guid}", UpdateHoldingAsync)
+            .AddEndpointFilter<ValidationFilter<UpdateHoldingRequest>>()
+            .WithName("UpdateHolding")
+            .WithSummary("Corrects a mistyped position.")
+            .WithDescription("Replaces quantity and price. This is not a purchase, so nothing is averaged.")
+            .Produces<HoldingSummary>(StatusCodes.Status200OK)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
+
+        group.MapDelete("/{id:guid}", RemoveHoldingAsync)
+            .WithName("RemoveHolding")
+            .WithSummary("Closes a position.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        return app;
+    }
+
+    /// <summary>Lists the caller's positions.</summary>
+    private static async Task<IResult> GetHoldingsAsync(
+        ClaimsPrincipal principal,
+        IQueryHandler<GetHoldingsQuery, IReadOnlyList<HoldingSummary>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        return TypedResults.Ok(await handler.Handle(new GetHoldingsQuery(userId), ct));
+    }
+
+    /// <summary>Records a purchase.</summary>
+    private static async Task<IResult> AddHoldingAsync(
+        AddHoldingRequest request,
+        ClaimsPrincipal principal,
+        ICommandHandler<AddHoldingCommand, OneOf<HoldingCreated, HoldingMerged, InvalidInput, UnknownTicker>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        var result = await handler.Handle(
+            new AddHoldingCommand(userId, request.Ticker, request.Quantity, request.Price),
+            ct);
+
+        return result.Match<IResult>(
+            // 201 with a Location, because this position did not exist a moment ago.
+            created => TypedResults.Created($"{BasePath}/{created.Holding.Id}", created.Holding),
+
+            // 200 and no Location: the position already existed and this purchase changed it.
+            merged => TypedResults.Ok(merged.Holding),
+
+            // The handler's own InvalidInput case, not the filter's.
+            invalid => invalid.ToValidationProblem(),
+
+            // Phase 3 turns this into a real symbol lookup, and this is the line to revisit then.
+            unknownTicker => new InvalidInput(
+                    "ticker",
+                    $"'{unknownTicker.Ticker}' is not a ticker this application recognises.")
+                .ToValidationProblem());
+    }
+
+    /// <summary>Corrects a position.</summary>
+    private static async Task<IResult> UpdateHoldingAsync(
+        Guid id,
+        UpdateHoldingRequest request,
+        ClaimsPrincipal principal,
+        ICommandHandler<UpdateHoldingCommand, OneOf<HoldingSummary, NotFound, InvalidInput>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        var result = await handler.Handle(
+            new UpdateHoldingCommand(userId, id, request.Quantity, request.Price),
+            ct);
+
+        return result.Match<IResult>(
+            corrected => TypedResults.Ok(corrected),
+
+            // 404 and never 403: a 403 would confirm to a stranger that this id exists.
+            missing => ProblemDetailsExtensions.NotFoundProblem("No such position."),
+
+            invalid => invalid.ToValidationProblem());
+    }
+
+    /// <summary>Closes a position.</summary>
+    private static async Task<IResult> RemoveHoldingAsync(
+        Guid id,
+        ClaimsPrincipal principal,
+        ICommandHandler<RemoveHoldingCommand, OneOf<Success, NotFound>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        var result = await handler.Handle(new RemoveHoldingCommand(userId, id), ct);
+
+        return result.Match<IResult>(
+            closed => TypedResults.NoContent(),
+            missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
+    }
+
+    /// <summary>Reads the subject claim. Totality over a string?, not a security control.</summary>
+    private static bool TryReadUserId(ClaimsPrincipal principal, out Guid userId, out IResult rejection)
+    {
+        // OnTokenValidated already rejects a subject-less token; this only gives null a branch.
+        if (Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out userId))
+        {
+            rejection = TypedResults.Empty;
+            return true;
+        }
+
+        rejection = ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");
+        return false;
+    }
+}

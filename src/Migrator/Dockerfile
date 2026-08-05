@@ -43,12 +43,6 @@ COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Application/StockP
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Infrastructure/StockPortfolio.Modules.MarketData.Infrastructure.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Infrastructure/
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Api/StockPortfolio.Modules.MarketData.Api.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Api/
 
-COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/StockPortfolio.Modules.Alerts.Contracts.csproj                   src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/
-COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/StockPortfolio.Modules.Alerts.Domain.csproj                         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/
-COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/StockPortfolio.Modules.Alerts.Application.csproj               src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/
-COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/StockPortfolio.Modules.Alerts.Infrastructure.csproj         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/
-COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/StockPortfolio.Modules.Alerts.Api.csproj             src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/
-
 RUN dotnet restore src/Migrator/StockPortfolio.Migrator.csproj
 
 COPY src/Shared.Kernel/       src/Shared.Kernel/

@@ -8,19 +8,19 @@ Covers P1 req 8 in full and P2 req 11.
 
 Near-greenfield: `Initial.md` gives settings three words in a build-order line (`:196`) and **hard-codes the 60-second cadence in two places** (`:66`, `:150`) that this phase is meant to make configurable.
 
-**On «перелік акцій».** Req 8 reads *«налаштування дашборду (перелік акцій, частота оновлення котирувань)»* — dashboard settings, a list of stocks, the refresh frequency. It sits inside *dashboard settings*, so it means which stocks appear on your dashboard, not a separate watchlist of stocks you don't own. That is an `is_visible` flag on `holdings`, not a new aggregate, a child table, a union in the poll set, and a second dashboard section with no P&L in it.
+**On «перелік акцій».** Req 8 reads *«налаштування дашборду (перелік акцій, частота оновлення котирувань)»* — dashboard settings, a list of stocks, the refresh frequency. It sits inside *dashboard settings*, so it means which stocks appear on your dashboard, not a separate watchlist of stocks you don't own. That is an `is_visible` flag on `holdings`, not a new aggregate, a child table, a union in the held-ticker list, and a second dashboard section with no P&L in it.
 
 ---
 
 ## 2. Backend
 
-Settings are split across the modules that own them. A single `user_settings` table would be a fifth module nobody designed.
+Settings are split across the modules that own them. A single `user_settings` table would be a module nobody designed. There are three modules, not four — Alerts merged into Portfolio in Phase 2 ([00-overview.md](00-overview.md) §"Three modules, not four") — so refresh interval, holding visibility *and* the alert threshold all land in the `portfolio` schema. That is one fewer `PATCH` target crossing a boundary; the endpoint list below is unchanged.
 
 | Setting | Owner |
 |---|---|
 | Theme, language | `Identity` |
 | Refresh interval, holding visibility | `Portfolio` |
-| Threshold, window, enabled | `Alerts` (settled in Phase 4) |
+| Threshold, window, enabled | `Portfolio`, alerts feature area (ownership settled in Phase 4; the module merged into Portfolio in Phase 2) |
 | BYOK key | `MarketData` |
 
 The frontend fetches one aggregated `GET /api/settings` view and PATCHes each section separately — one read, targeted writes.
@@ -55,7 +55,7 @@ public void SetVisible(bool visible);   // no validation to fail — a plain sta
 
 No new aggregate, no new table, no events. `is_visible` defaults to `true`, so every existing holding keeps working with no migration data step.
 
-**The poll set ignores it.** Phase 3 polls all held tickers regardless of visibility — hiding a position must not stop its price being collected, or unhiding it would show a stale number until the next cycle. Visibility is a display filter and nothing more.
+**The held-ticker list ignores it.** Phase 3 polls all held tickers regardless of visibility — hiding a position must not stop its price being collected, or unhiding it would show a stale number until the next cycle. Visibility is a display filter and nothing more.
 
 **Alerts ignore it too.** You still own the position; a 6% drop still matters to your money whether or not the row is on screen. Worth a README line, because it is the first thing a reviewer will ask.
 
@@ -75,7 +75,7 @@ The brief's req 11 and the mockup both have it, and it is genuinely awkward agai
 
 The user's key is stored **server-side, encrypted at rest**, and used only for that user's **read-through** calls. The shared poll cycle keeps using the app key.
 
-Why this rather than a per-user poller: per-user polling multiplies cycles by user count, needs a per-user rate limiter and a per-user claim, and buys nothing, because the poll set is shared and two users holding AAPL would fetch it twice. Read-through is already per-request and already rate-limited, so it is the natural seam.
+Why this rather than a per-user poller: per-user polling multiplies cycles by user count, needs a per-user rate limiter and a per-user claim, and buys nothing, because the held-ticker list is shared and two users holding AAPL would fetch it twice. Read-through is already per-request and already rate-limited, so it is the natural seam.
 
 Encrypted with ASP.NET Core Data Protection, keys persisted to Postgres via `PersistKeysToDbContext` — the default stores them in the container filesystem, so every ACA revision would generate a new key ring and turn every stored BYOK key into undecryptable ciphertext.
 
@@ -122,7 +122,7 @@ The server value is the source of truth across devices; `localStorage` is the bo
 
 `react-i18next` + `i18next-browser-languagedetector`, which gives persistence for free. EN and UK — the brief requires a minimum of two.
 
-Namespaces per feature (`auth`, `portfolio`, `dashboard`, `alerts`, `settings`, `common`), mirroring the backend modules. Phase 2's zod schemas already store message **keys** rather than strings, so validation messages translate with no changes to the schemas. Numbers and dates go through `Intl.NumberFormat` and `Intl.DateTimeFormat` with the active locale — currency stays USD, only the formatting localises.
+Namespaces per feature (`auth`, `portfolio`, `dashboard`, `alerts`, `settings`, `common`), mirroring the backend **features** — `alerts` is a feature area inside Portfolio, not a module of its own. Phase 2's zod schemas already store message **keys** rather than strings, so validation messages translate with no changes to the schemas. Numbers and dates go through `Intl.NumberFormat` and `Intl.DateTimeFormat` with the active locale — currency stays USD, only the formatting localises.
 
 Add a CI check that both locale files have identical key sets. A missing Ukrainian key renders as the raw key path in the UI, which looks far worse than an English fallback, and `fallbackLng` hides the bug from you while showing it to everyone else.
 

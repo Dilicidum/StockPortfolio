@@ -2,6 +2,14 @@
 
 Four modules in one ASP.NET Core process. A module references only other modules' `.Contracts` projects; everything else is `internal`. The compiler enforces it, and `Architecture.Tests` asserts it.
 
+> **Reversal, twice.** Phase 2 merged Alerts into Portfolio and removed both edges to it; that was reversed
+> and Alerts is a module again — the criterion is in [module-boundaries.md](module-boundaries.md).
+> Separately, the **quote poller moved from Phase 3 to Phase 4**: the dashboard asks the provider directly
+> and never needed a cache, so the poller now exists only to build the price history alerts evaluate
+> against, and it polls only tickers with an active alert. Two consequences below the fold: the poller's
+> ticker list comes from **Alerts**, not Portfolio, and the dashboard sequence no longer has a read-through
+> branch.
+
 ---
 
 ## 1. Dependency graph
@@ -9,25 +17,25 @@ Four modules in one ASP.NET Core process. A module references only other modules
 ```mermaid
 flowchart TB
     Web["Web — React SPA<br/>GitHub Pages"]
-    Host["Api host — composition root<br/>endpoints · DI · PollSetAdapter"]
+    Host["Api host — composition root<br/>endpoints · DI · the ITickersToPoll adapter"]
 
     subgraph Id["Identity"]
-        IdC["Identity.Contracts"]
+        IdC["Identity.Contracts — empty"]
         IdI["Identity.Application · Domain · Infrastructure"]
     end
 
-    subgraph Al["Alerts"]
-        AlC["Alerts.Contracts"]
-        AlI["Alerts.Application · Domain · Infrastructure"]
-    end
-
-    subgraph Pf["Portfolio"]
-        PfC["Portfolio.Contracts"]
+    subgraph Pf["Portfolio — holdings, dashboard, P&amp;L"]
+        PfC["Portfolio.Contracts<br/>IUserHoldsTicker"]
         PfI["Portfolio.Application · Domain · Infrastructure"]
     end
 
-    subgraph Md["MarketData"]
-        MdC["MarketData.Contracts"]
+    subgraph Al["Alerts — thresholds, evaluation, SSE"]
+        AlC["Alerts.Contracts<br/>ITickersWithActiveAlerts"]
+        AlI["Alerts.Application · Domain · Infrastructure"]
+    end
+
+    subgraph Md["MarketData — quotes, poller, price window"]
+        MdC["MarketData.Contracts<br/>IQuoteReader · IPriceWindowReader · ITickersToPoll"]
         MdI["MarketData.Application · Domain · Infrastructure"]
     end
 
@@ -36,49 +44,60 @@ flowchart TB
     Web -->|HTTPS + SSE| Host
     Host --> IdI
     Host --> PfI
-    Host --> MdI
     Host --> AlI
-    Host -.->|"adapts Portfolio → IPollSetSource"| MdC
+    Host --> MdI
+    Host -.->|"adapts Alerts → ITickersToPoll"| MdC
 
-    AlI -->|"who holds this ticker"| PfC
-    AlI -.->|HoldingRemoved| PfC
-    AlI -->|"price window: current / min / max"| MdC
-    PfI -->|"IQuoteReader — dashboard needs prices"| MdC
+    PfI -->|"IQuoteReader — current price, on dashboard load"| MdC
+    AlI -->|"IPriceWindowReader — current / min / max over the window"| MdC
+    AlI -->|"IUserHoldsTicker — validation only"| PfC
 
     IdI --> SK
     PfI --> SK
-    MdI --> SK
     AlI --> SK
+    MdI --> SK
 
     style IdC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
     style PfC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
-    style MdC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
     style AlC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
+    style MdC fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
     style SK fill:#3a3a52,stroke:#818cf8,color:#e8eaf6
 ```
 
-Solid arrows are synchronous calls through a contract interface; the dotted one is a domain event.
+Every arrow is a synchronous call through a contract interface. **There are no domain events** — the only
+one the project ever had existed to clear a Redis cooldown across the Portfolio/Alerts line, and a cooldown
+expires by itself.
 
-The graph is a clean line: **Alerts → Portfolio → MarketData**, with Identity off to the side.
+**Nothing depends on Alerts.** It is a leaf: it reads price windows from MarketData and asks Portfolio one
+boolean. The host reads its ticker list to feed the poller, which is an adapter the host owns, not an
+inbound dependency.
 
-**MarketData depends on nothing.** It needs to know which tickers to poll, but it declares that need as its own interface — `IPollSetSource` in `MarketData.Contracts` — and the host supplies a ten-line adapter backed by `Portfolio.Contracts`. Dependency inversion, and it is what keeps the graph acyclic. Without it, MarketData reading holdings directly would make Portfolio and MarketData mutually dependent, which quietly undermines the extraction-order argument the whole shape rests on.
+**MarketData depends on nothing.** It declares `ITickersToPoll` as its own need and the host adapts
+`Alerts.Contracts` to it. The names differ on purpose — MarketData asks *what should I poll*, Alerts answers
+*these have active alerts* — and if the answer ever needs to come from somewhere else, only the adapter
+changes.
 
-**Nothing points at Identity at runtime.** The JWT is self-contained, so no module calls Identity during a request. That makes it the cheapest module to extract into its own process later — a new host project, a Dockerfile, its own connection string, one swapped DI registration. MarketData is at the other end: two modules depend on it, both synchronously, so extracting *that* would put a network hop on every dashboard render.
+**Nothing calls Identity at runtime.** The JWT is self-contained, so `Identity.Contracts` is empty and that
+emptiness is the evidence. It is the cheapest module to extract; MarketData is the dearest, because
+Portfolio calls it on every dashboard render.
 
-Nothing is being extracted now. The graph is why the answer to "should auth be a service?" is a reading of the structure rather than an opinion.
-
-`.Contracts` projects hold records of primitives only — no EF Core reference, no aggregate types, no strongly-typed IDs. A contract carrying `UserId` would drag a value converter and a persistence concern across the boundary, so contracts use raw `Guid`.
+`.Contracts` projects hold records of primitives only — no EF Core reference, no aggregate types, no
+strongly-typed IDs. A contract carrying `UserId` would drag a value converter and a persistence concern
+across the boundary, so contracts use raw `Guid`.
 
 ### What crosses each boundary
 
 | From → To | Mechanism | Carries |
 |---|---|---|
-| Host → MarketData | `IPollSetSource` adapter | `SELECT DISTINCT ticker` across all holdings |
-| Portfolio → MarketData | `IQuoteReader` | Latest price per ticker, for the dashboard join |
-| Alerts → MarketData | `IPriceWindowReader` | Current / min / max over the user's window |
-| Alerts → Portfolio | `IHoldersOfTicker` | Which users hold a ticker, for evaluation |
-| Portfolio → Alerts | `HoldingRemoved` event | Clears any pending cooldown for that user + ticker |
-| Anything → Identity | **Nothing at runtime** | The token already carries what anyone needs |
+| Host → MarketData | `ITickersToPoll` adapter over `Alerts.Contracts` | the distinct tickers with an active alert |
+| Portfolio → MarketData | `IQuoteReader` | current price per ticker, fetched on dashboard load |
+| Alerts → MarketData | `IPriceWindowReader` | current / min / max over the user's window |
+| Alerts → Portfolio | `IUserHoldsTicker` | one boolean, so a subscription for an unheld ticker is rejected |
+| Anything → Identity | **nothing at runtime** | the token already carries what anyone needs |
+
+The poller's ticker list used to come from Portfolio — every ticker anyone held. It comes from Alerts now,
+because polling exists to build alert history and a ticker nobody has an alert on needs none. With no alerts
+configured anywhere, the list is empty and nothing polls.
 
 ---
 
@@ -90,7 +109,7 @@ sequenceDiagram
     participant P as QuotePollingService
     participant R as Redis
     participant F as IQuoteProvider<br/>Finnhub or Fake
-    participant E as Alerts evaluator
+    participant E as Alert evaluator<br/>(Alerts)
     participant DB as Postgres
     participant S as SSE endpoint
     participant B as Browser
@@ -102,15 +121,16 @@ sequenceDiagram
     R-->>P: acquired
     Note over P,R: two keys — the window claim picks WHO,<br/>the in-flight guard prevents overlap
 
-    P->>DB: IPollSetSource — SELECT DISTINCT ticker
+    P->>DB: ITickersToPoll — tickers with an active alert
     P->>F: GetQuotes(symbols) — token-bucket spread
     F-->>P: quotes, each with its own timestamp
     P->>R: ZADD prices:{ticker} + trim to 1h01m
+    P->>R: SET last:{ticker} (the dashboard's fallback)
 
     P->>E: evaluate(ticker, current, min, max)
     Note over E: guards — enough samples,<br/>same session, feed not stale
     E->>R: GET cooldown:{user}:{ticker}:{dir}
-    E->>DB: INSERT fired_alerts
+    E->>DB: INSERT alerts.fired_alerts
     E->>R: SET cooldown … EX
     E->>R: PUBLISH alerts:user:{id} {payload}
 
@@ -127,7 +147,7 @@ Cooldown lives in Redis with a TTL. Expiry is the whole semantics of a cooldown,
 
 ---
 
-## 3. Runtime — dashboard with read-through
+## 3. Runtime — dashboard, and what happens when the provider is down
 
 ```mermaid
 sequenceDiagram
@@ -135,21 +155,20 @@ sequenceDiagram
     participant Q as GetDashboard handler
     participant PG as Postgres (portfolio)
     participant MD as MarketData
-    participant R as Redis
     participant F as Provider
+    participant R as Redis
 
     B->>Q: GET /api/dashboard
     Q->>PG: visible holdings for user (AsNoTracking → DTO)
-    Q->>MD: GetLatest(tickers)
-    MD->>R: newest entry per sorted set
+    Q->>MD: GetQuotes(tickers)
 
-    alt all fresh
-        R-->>MD: observations
-    else some missing or stale
-        Note over MD: coalescer — 10 concurrent<br/>requests → 1 provider call per symbol
-        MD->>F: fetch just the stale symbols
+    alt provider answers
+        MD->>F: fetch, bounded concurrency
         F-->>MD: quotes
-        MD->>R: ZADD (so the next request hits cache)
+        MD->>R: SET last:{ticker}  (best-effort, never fails the request)
+    else provider unreachable
+        MD->>R: GET last:{ticker}
+        R-->>MD: last price + when it was seen
     end
 
     MD-->>Q: prices + per-ticker observedAt
@@ -157,7 +176,10 @@ sequenceDiagram
     Q-->>B: DashboardDto — money as STRINGS
 ```
 
-Read-through is why the poller is an **optimisation** rather than the only path to a price. It covers a blank dashboard outside market hours and a just-added ticker that the poller has not reached yet — and, now that the poll set is read live from Portfolio each cycle, there is no cached ticker table left to drift out of sync.
+**The provider is asked first, always.** Redis is only read when that fails, which is what makes this a
+fallback rather than a cache — read-through would check Redis first and fetch on a miss. A ticker added
+seconds ago is therefore priced on its first render with no special case, and the poller is not involved in
+this diagram at all: it may not even be running, since it polls only tickers with an active alert.
 
 Money is serialised as strings. `System.Text.Json` writes `decimal` as a JSON number and `JSON.parse` makes it a double, so server-side `decimal` maths is destroyed at the boundary otherwise. Weight is computed server-side for the same reason.
 
@@ -189,7 +211,7 @@ flowchart TB
     ACR -.->|"managed identity pull"| API
     ACR -.-> JOB
     JOB -->|"as migrator role"| PG
-    API -->|"4 roles × pool size 2"| PG
+    API -->|"3 roles × pool size 2"| PG
     API -->|"windows · claims · cooldowns · tickets · pub-sub"| RD
 
     style Pages fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9

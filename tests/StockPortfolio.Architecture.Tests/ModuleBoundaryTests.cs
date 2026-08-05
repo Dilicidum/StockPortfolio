@@ -14,8 +14,8 @@ public sealed class ModuleBoundaryTests
     public void ExpectedAssemblies_AllLoadByName_SoNoRuleScansAnEmptySet()
     {
         SolutionAssemblies.ExpectedNames.Length.ShouldBe(
-            22,
-            "Four modules times five layers, plus Shared.Kernel and Shared.Api. "
+            17,
+            "Three modules times five layers, plus Shared.Kernel and Shared.Api. "
                 + "If the project count changed, this list — and the rules below — must change with it.");
 
         var missing = SolutionAssemblies.ExpectedNames
@@ -41,6 +41,13 @@ public sealed class ModuleBoundaryTests
             SolutionAssemblies.NameOf("Identity", "Application"),
             SolutionAssemblies.NameOf("Identity", "Infrastructure"),
             SolutionAssemblies.NameOf("Identity", "Api"),
+
+            // Five where Identity has four: Portfolio.Contracts carries IUserHoldsTicker, Identity.Contracts is empty on purpose.
+            SolutionAssemblies.NameOf("Portfolio", "Contracts"),
+            SolutionAssemblies.NameOf("Portfolio", "Domain"),
+            SolutionAssemblies.NameOf("Portfolio", "Application"),
+            SolutionAssemblies.NameOf("Portfolio", "Infrastructure"),
+            SolutionAssemblies.NameOf("Portfolio", "Api"),
         ];
 
         var shells = populated
@@ -61,22 +68,12 @@ public sealed class ModuleBoundaryTests
         // Hard-coded on purpose: this is the list of rules currently not enforced, so it must change by hand.
         string[] expected =
         [
-            "StockPortfolio.Modules.Alerts.Api",
-            "StockPortfolio.Modules.Alerts.Application",
-            "StockPortfolio.Modules.Alerts.Contracts",
-            "StockPortfolio.Modules.Alerts.Domain",
-            "StockPortfolio.Modules.Alerts.Infrastructure",
             "StockPortfolio.Modules.Identity.Contracts",
             "StockPortfolio.Modules.MarketData.Api",
             "StockPortfolio.Modules.MarketData.Application",
             "StockPortfolio.Modules.MarketData.Contracts",
             "StockPortfolio.Modules.MarketData.Domain",
             "StockPortfolio.Modules.MarketData.Infrastructure",
-            "StockPortfolio.Modules.Portfolio.Api",
-            "StockPortfolio.Modules.Portfolio.Application",
-            "StockPortfolio.Modules.Portfolio.Contracts",
-            "StockPortfolio.Modules.Portfolio.Domain",
-            "StockPortfolio.Modules.Portfolio.Infrastructure",
         ];
 
         var actual = SolutionAssemblies.ScannedNames
@@ -87,8 +84,8 @@ public sealed class ModuleBoundaryTests
         actual.ShouldBe(
             expected,
             ignoreOrder: false,
-            "The set of empty-shell assemblies has moved. Rule 2 already skips all four .Contracts "
-                + "assemblies, so a rule that skips everywhere reports green while enforcing nothing:"
+            "The set of empty-shell assemblies has moved. Rule 2 runs over Portfolio.Contracts alone "
+                + "and skips the other two, so a rule that skips everywhere reports green while enforcing nothing:"
                 + Environment.NewLine
                 + Describe(expected.Except(actual, StringComparer.Ordinal)
                     .Select(name => name + " now carries code — delete it from the expected list, and "
@@ -155,14 +152,14 @@ public sealed class ModuleBoundaryTests
     [InlineData("StockPortfolio.Modules.Portfolio.Infrastructure", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Api", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Contracts", false)]
-    [InlineData("StockPortfolio.Modules.Alerts.Domain", false)]
-    [InlineData("StockPortfolio.Modules.Alerts.Infrastructure", false)]
+    [InlineData("StockPortfolio.Modules.Identity.Domain", false)]
+    [InlineData("StockPortfolio.Modules.Identity.Infrastructure", false)]
     [InlineData("StockPortfolio.Shared.Kernel", false)]
     [InlineData("Microsoft.EntityFrameworkCore", false)]
     public void CrossModuleRule_JudgesAReferenceAsExpected(string referenced, bool isViolation) =>
-        ReachesPastContracts("Alerts", referenced).ShouldBe(
+        ReachesPastContracts("Identity", referenced).ShouldBe(
             isViolation,
-            "Rule 1 misjudged a reference from an Alerts assembly to " + referenced + ".");
+            "Rule 1 misjudged a reference from an Identity assembly to " + referenced + ".");
 
     internal static bool ReachesPastContracts(string? ownModule, string? referenceName) =>
         SolutionAssemblies.TryParseModuleLayer(referenceName, out var module, out var layer)
@@ -173,7 +170,7 @@ public sealed class ModuleBoundaryTests
     {
         if (SolutionAssemblies.IsEmptyShell(assembly))
         {
-            // Portfolio, MarketData and Alerts are shells until their phase lands.
+            // Portfolio and MarketData are shells until their phase lands.
             Assert.Skip(
                 assemblyName
                     + " declares no StockPortfolio type yet (empty shell project), so its reference "
