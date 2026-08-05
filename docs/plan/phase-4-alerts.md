@@ -1,468 +1,277 @@
-# Phase 4 — Alerts · 1.3 days
+# Phase 4 — Alerts
 
-> **Alerts is a module again, and this phase grew.** Phase 2 merged Alerts into Portfolio; that was
-> reversed — see [module-boundaries.md](module-boundaries.md) §5. Build it as five projects under
-> `src/Modules/Alerts/`, owning the `alerts` schema and connecting as `alerts_svc`, exactly as
-> `Initial.md` had it.
->
-> **This phase absorbed the quote poller.** It used to be Phase 3, justified as dashboard infrastructure.
-> It is not: the dashboard asks the provider directly and needs no history. A poller and a price *window*
-> exist for exactly one reason — "did this move 5% in the last 15 minutes?" cannot be answered from a
-> single quote. So they arrive here, with the feature that needs them, and this phase went 0.9 → 1.3 days
-> while Phase 3 went 1.1 → 0.8. See §2.9.
->
-> **`HoldingRemoved` does not exist**, and neither does any other domain event. Clearing a cooldown on
-> delete was the only thing one was ever raised for, and a cooldown key has a TTL — it expires by itself.
-> Not clearing it costs, at worst, one suppressed alert if the user re-buys the same ticker inside the
-> window.
->
-> **`UserId` is a plain `Guid` in these snippets.** It is `Identity.Domain`'s type and no other module may
-> reference it, exactly as `phase-2-implementation.md` §2.1 settled for `Holding`.
+Threshold alerts: you say "tell me if this moves more than 2% in fifteen minutes", and when it does, a row
+appears in the browser without a refresh. This is the last of the four graded requirements, and the one most
+likely to be skipped for time, so it is scheduled fourth rather than last.
 
-## 1. Goal
-
-Set a threshold, click **Simulate** → an alert appears in the panel in under a second. Open `/notifications` → recent alerts are listed. Nudge a price past the threshold → a real, evaluation-driven alert fires.
-
-This is P1 req 9 and, per §1 of the brief, one of the things being assessed. `Initial.md:200` says "protect time for it" — this plan protects it by scheduling it fourth of six rather than eighth of nine.
-
-**What this phase deliberately does not build.** `Initial.md:134-136` designs cursor-based replay: alerts persisted with an orderable sequence, `Last-Event-ID` on reconnect, the last 24 hours on a fresh connect, "since recovered" rendering. None of that is in req 9, which asks for an event when the threshold is breached, threshold checking by a background service, and a manual simulate button — and nothing about persistence, offline delivery or catching up. It is dropped.
-
-What survives is smaller and does the same job for the user: alerts are written to Postgres, the panel loads recent ones with a plain `GET` when it mounts, and SSE only ever pushes new ones. Reconnect after a blip and the panel refetches its history like any other query. No protocol, no cursor.
+The phase is done when you can set a threshold, click **Simulate**, and see an alert in under a second — and
+then push a price past a threshold for real and see the same thing happen without help.
 
 ---
 
-## 2. Backend
+## 1. Alerts is its own module
 
-### 2.0 Resolve the ownership contradiction first
+It is the fourth module. Nothing of it exists on disk yet; building the module is the first job of the phase.
+It gets the same five layers as the others, owns its own database schema, and connects as its own database
+user. The schema and the user already exist and have been sitting unused since Phase 2 — this is what makes
+them real.
 
-`Initial.md:22` says **Identity** owns "user preferences including alert settings" and, one sentence later, that **Alerts** owns "thresholds". Both cannot be true, and the answer is load-bearing: `:32` and `:34` claim *"Identity has zero inbound runtime coupling"*, which is the flagship argument of the whole document. But `:124` says evaluation runs for users "online or not", and offline users have no JWT in flight — so the evaluator must read each threshold from somewhere.
+The reason it is a separate module is not that it speaks a different language from Portfolio. It speaks
+exactly the same one: a ticker is a ticker on both sides. The reason is that nothing ties the two together.
 
-**Resolution: the alerts feature owns thresholds, windows and enabled-state.** Identity keeps account data and UI preferences only. Evaluation then needs no runtime call into Identity and `:34` survives intact.
+- An alert setting and a fired alert never have to be saved in the same transaction as a holding.
+- No rule spans a holding and an alert. Each of the three is complete on its own.
+- They are written at different moments — a holding when you buy, an alert when a price moves.
+- Alerts can be entirely broken and the dashboard still renders correctly.
 
-Since Phase 2 that ownership sits in **Portfolio**, which strengthens the resolution rather than changing it: the evaluator reads holdings and thresholds from the same `DbContext`, and Identity still has zero inbound runtime coupling.
+Those four questions are the test every boundary in this codebase is argued from: would this seam survive
+becoming a network call. This one would.
 
-Update `docs/Initial.md:22` to match. Shipping a design doc that contradicts itself is worse than the contradiction.
+Alerts asks Portfolio exactly one question — does this user hold this ticker — and only when a threshold is
+being created, so you cannot set an alert on something you do not own. Nothing depends on Alerts. It is the
+leaf of the dependency graph, which is also why it is safe to build last.
 
-### 2.1 `AlertSettings` — `Portfolio.Domain/Alerts/`
-
-```csharp
-public sealed class AlertSettings
-{
-    // The only constructor: every mapped value, assign and nothing else.
-    private AlertSettings(
-        AlertSettingsId id, UserId userId, bool enabled,
-        decimal thresholdPercent, TimeSpan window);
-
-    public AlertSettingsId Id { get; private set; }
-    public UserId UserId { get; private set; }
-    public bool Enabled { get; private set; }
-    public decimal ThresholdPercent { get; private set; }   // 0.1 .. 50
-    public TimeSpan Window { get; private set; }            // 1 min .. 1 hour
-
-    public static OneOf<AlertSettings, InvalidInput> Create(UserId userId);
-    public OneOf<Success, InvalidInput> Update(bool enabled, decimal thresholdPercent, TimeSpan window);
-}
-```
-
-No base class, and the entity declares its own `Id` — see `phase-1-implementation.md` §5.2. `UserId` in both snippets is a plain `Guid`: `Identity.Domain`'s `UserId` is not reachable from Portfolio, and `phase-2-implementation.md` §2.1 already settled this for `Holding`.
-
-One threshold and one window **per user**, applied to every ticker they hold. Not a per-ticker rules engine — the brief describes a single user-configured threshold, and a rules table would be a richer product than was asked for.
-
-The window is capped at 1 hour: "moved sharply" is a minutes-to-an-hour concept, and a move over several days is a trend, which is a different feature. `Update` also rejects a window longer than the price-window retention from Phase 3, so a user cannot configure something the store cannot answer.
-
-### 2.2 `FiredAlert` — history, not a cursor · `Portfolio.Domain/Alerts/`
-
-```csharp
-public sealed class FiredAlert
-{
-    private FiredAlert(
-        FiredAlertId id, UserId userId, Ticker ticker, AlertDirection direction,
-        decimal changePercent, Money triggerPrice, Money referencePrice,
-        DateTimeOffset firedAt, bool isSimulated);
-
-    public FiredAlertId Id { get; private set; }
-    public UserId UserId { get; private set; }
-    public Ticker Ticker { get; private set; }
-    public AlertDirection Direction { get; private set; }   // Drawdown | RunUp
-    public decimal ChangePercent { get; private set; }
-    public Money TriggerPrice { get; private set; }         // the price that fired it
-    public Money ReferencePrice { get; private set; }       // the window extreme it was measured against
-    public DateTimeOffset FiredAt { get; private set; }
-    public bool IsSimulated { get; private set; }
-}
-```
-
-No `Sequence` column — that existed only to be an SSE cursor. History is ordered by `FiredAt DESC` and read through one index.
-
-Both prices are kept because they make the alert text specific: *"AAPL fell 6.2% to $141.30, from a window high of $150.60."* Vague alerts are the reason people turn alerts off.
-
-A price alert is **a moment that passed, not a condition that persists** (`Initial.md:138`, and it is the best line in the document). So the panel is titled *recent activity*, not *active alerts*, and rows carry a timestamp rather than implying the move is still happening.
-
-### 2.3 Evaluation
-
-Runs **immediately after each fetch, in the same cycle** — the natural trigger for "did this move sharply" is "a new price just arrived". Evaluating on any other schedule means re-checking data you already checked, or checking stale data.
-
-Per ticker, compute **current, min, max** once from the Redis window. Look up which users hold that ticker, then test each of their thresholds against the same three numbers. That lookup used to be a cross-module call through `IUsersHoldingTicker`; since Phase 2 it is an ordinary query inside Portfolio, against the same `DbContext` that holds the thresholds.
-
-#### ⚠️ Fix the false positive
-
-`Initial.md:128` presents this as the design's showcase:
-
-> A price that falls from $150 to $141 and recovers to $149 reads as −0.7% on an endpoint comparison — invisible — but **+5.7% against the window's low**.
-
-The arithmetic is right (150→149 = −0.67%; 149 vs 141 = +5.67%). The conclusion is not. In that scenario the holding is **down 0.7% over the hour**, and the system fires a **run-up** alert claiming +5.7%. Worse, `:126` makes it systematic: any ticker oscillating inside a band wider than the threshold fires every cycle, forever, gated only by the cooldown. That is a standing property of the window being reported as an event.
-
-It is also the endpoint comparison that *«% за проміжок часу»* in req 9 literally describes. Three viable constraints, and you pick one in §7:
-
-**Recency** — the extreme must be within the last *N* samples. Catches "fell hard just now"; misses a slow grind away from an old extreme.
-
-**Current is the extreme** — only fire at new window highs and lows. Very quiet and very defensible, but gives up the partial-reversal case that min/max was added for.
-
-**Sign agreement** — the endpoint delta and the extreme delta must agree in direction. Kills the oscillation loop, keeps genuine sharp moves, and is closest to the requirement's wording.
-
-Whichever you pick, name the comparison in the alert text and put both deltas in the payload.
-
-#### Guards, then cooldown
-
-Three guards run before any comparison. There must be **enough samples** in the window, because a single stale point is not a window. Both ends must be **in the same trading session**, because a Friday-close-to-Monday-open gap is not a sharp move. And a **stale feed suppresses price alerts entirely**, raising a feed-health signal instead — *no new data must never read as "nothing moved."*
-
-Then cooldown, in Redis:
-
-```
-SET alerts:cooldown:{userId}:{ticker}:{direction} 1 NX EX {cooldownSeconds}
-```
-
-If the `SET` fails the alert is suppressed. Expiry *is* the semantics of a cooldown, so a store with native expiry is the right one — a table would need a cleanup job to do the same thing worse. Per user, ticker **and** direction, so a drawdown cooldown does not mask a subsequent run-up.
-
-Removing a holding clears any cooldown for that user and ticker, in **both** directions — `HoldingRemoved` carried no direction and neither does the delete. This was going to be Phase 2's `HoldingRemoved` domain event, consumed by Alerts across the module boundary, and the domain-event infrastructure was deleted rather than built.
-
-> ⚠️ **Corrected (Phase 3 documentation pass).** This paragraph continued "with Alerts inside Portfolio it is a call at the end of `RemoveHoldingCommandHandler`… it existed only to talk across a boundary that should not have been there." **The merge was reversed** ([00-overview.md](00-overview.md) §"Four modules"), so the boundary is back and the in-process call is not available. That does **not** bring the event back, and reintroducing `IDomainEvent` here would repeat a mistake made twice already: a cooldown key carries a TTL and expires by itself, so nothing has to be told the holding is gone. Deleting the event was the right fix for a reason independent of where the boundary sits. If Phase 4 finds it genuinely needs the cooldown cleared *eagerly* across the line, that is a new argument to make on its own merits, not a restoration.
-
-### 2.4 Delivery
-
-Write to Postgres, then publish. Connection state only decides whether it also arrives right now.
-
-```
-evaluate → INSERT portfolio.fired_alerts → PUBLISH alerts:user:{userId} {payload}
-                                          ↓
-                          every replica subscribes; the one holding
-                          this user's stream writes it to the browser
-```
-
-Redis pub/sub fan-out is **mandatory**, not optional — an alert can be generated on replica A while the user's stream is held by replica B. It is about 20 lines. Without it, alerts silently never arrive for half your users the moment `maxReplicas` exceeds 1.
-
-Persisting first is what makes a failed publish cheap: the row is there, and the panel picks it up on its next history fetch. Nothing is lost, nothing needs replaying.
-
-### 2.5 The SSE endpoint
-
-.NET 10 shipped first-class SSE — `TypedResults.ServerSentEvents(IAsyncEnumerable<SseItem<T>>)`.
-
-```csharp
-group.MapGet("/stream", (HttpContext ctx, IAlertStream stream, CancellationToken ct) =>
-{
-    var userId = ctx.GetTicketUserId();
-
-    ctx.Response.Headers["Cache-Control"]     = "no-cache, no-transform";
-    ctx.Response.Headers["X-Accel-Buffering"] = "no";        // Envoy ignores it; nginx doesn't
-
-    return TypedResults.ServerSentEvents(Live(userId, ct));
-});
-
-static async IAsyncEnumerable<SseItem<AlertDto?>> Live(
-    UserId userId, [EnumeratorCancellation] CancellationToken ct)
-{
-    await foreach (var item in _stream.SubscribeWithHeartbeat(userId, TimeSpan.FromSeconds(20), ct))
-        yield return item;   // "alert" events, plus a "ping" every 20s
-}
-```
-
-Live only. No cursor, no header to read, no backfill query — roughly forty lines less than the replay design, and the endpoint fits on a screen.
-
-⚠️ **The 20-second heartbeat is not optional.** Azure Container Apps' `requestIdleTimeout` is **4 minutes**, and 4 is both the default *and* the floor on Consumption — raising it requires a Dedicated D4+ workload profile with at least two nodes, costing more than the rest of the stack. `SseFormatter` has **no comment API**, so the heartbeat must be a real named event the client ignores: `new SseItem<AlertDto?>(null, eventType: "ping")`.
-
-The same heartbeat keeps you above Kestrel's `MinResponseDataRate` (240 B/s), which applies to SSE — WebSockets are exempt, SSE is not.
-
-### 2.6 The ticket handshake
-
-`EventSource` cannot set headers — the constructor takes only `(url, { withCredentials })`. With the SPA on GitHub Pages and the API on Container Apps the origins differ, and cross-origin cookies are unreliable now that third-party cookies are being phased out. So:
-
-```
-POST /api/alerts/stream-ticket     [Authorize]  → { ticket, expiresIn: 30 }
-GET  /api/alerts/stream?ticket=…   validated by the ticket
-```
-
-The ticket is 32 random bytes in Redis with a 30-second TTL, **deleted on first use**. A long-lived JWT in a query string lands in access logs, browser history and proxy logs; a single-use 30-second ticket does not meaningfully. Set `Microsoft.AspNetCore.Hosting` logging to `Warning` anyway.
-
-### 2.7 Manual trigger — the brief asks for it explicitly
-
-```
-POST /api/alerts/simulate    [Authorize]    202
-```
-
-Picks one of the caller's held tickers, synthesises a `FiredAlert` with a plausible delta, and persists and publishes it through the **real** path — not a fake push straight to the socket. Marked `isSimulated: true` and rendered with a badge.
-
-This is what makes the feature demonstrable outside market hours, when nothing streams and no threshold will breach on its own. Phase 3's fake provider also exposes `POST /api/dev/nudge?ticker=AAPL&pct=-7`, which drives a *genuine* evaluation-triggered alert — worth showing in the README, because it demonstrates the real path rather than the simulate shortcut.
-
-### 2.8 Endpoints
-
-```
-GET   /api/alerts/settings          200 + AlertSettingsDto           [Authorize]
-PUT   /api/alerts/settings          200 | 400                        [Authorize]
-GET   /api/alerts?limit=50          200 + FiredAlertDto[]            [Authorize]
-POST  /api/alerts/stream-ticket     200 + { ticket }                 [Authorize]
-GET   /api/alerts/stream?ticket=    200 text/event-stream
-POST  /api/alerts/simulate          202                              [Authorize]
-```
+**Thresholds belong to Alerts, not to Identity.** Identity keeps account data and display preferences.
+Evaluation runs for users who are not logged in, so it cannot depend on anything arriving in a token, and it
+must be able to read every threshold from storage on its own. This keeps Identity with no inbound runtime
+calls from anywhere, which is the property that makes it the cheapest module to extract.
 
 ---
 
-### 2.9 The poller — moved here from Phase 3
+## 2. What a user configures
 
-Alert evaluation needs a *series*, so something must sample prices repeatedly and keep them.
+A threshold belongs to a **position**, not to an account: it is set per user *and* per ticker. Each one
+carries a percentage, a time window, and whether it is on.
 
-**It polls only tickers with an active alert.** Not every held ticker. If nobody has an alert enabled
-anywhere, the cycle finds an empty list and does nothing, which is the correct amount of work for an
-application nobody is watching. That list is Alerts' own — it comes from the alert subscriptions this
-module already owns, not from Portfolio.
+This is not a rules engine. One threshold, one window, one pair of directions per position. The brief asks
+for a configurable threshold, not a query language.
 
-```
-marketdata:prices:{ticker}   sorted set, member "{epochMs}:{price}", score epochMs
-                             trimmed on write to the longest configurable window + margin (1h 1m)
-marketdata:claim:{window}    who polls this minute            EX 120
-marketdata:cycle-inflight    is any cycle running, anywhere   EX 110, deleted in a finally
-```
+The window is capped at an hour. "Moved sharply" is a minutes-to-an-hour idea; a move over several days is a
+trend, which is a different product. The window is also rejected if it is longer than how much price history
+is actually kept, so a user cannot configure a question the store cannot answer.
 
-Two locks, not one, and the second is the fix for a real bug in `Initial.md:66-68`. The claim key contains
-the window start, so it picks one winner *within* a minute and says nothing *across* minutes. A cycle that
-overruns — fifty tickers, provider latency, an honoured `Retry-After` — is still fetching when the next
-minute opens, which is a different key, so a second replica claims it and starts fetching too. The
-non-window-keyed in-flight guard closes that. Both TTLs are backstops for a process that dies mid-cycle.
-
-The sorted-set member is `"{epochMs}:{price}"`, never the bare price: members must be unique, so a ticker
-hitting the same value twice would update the existing entry's score instead of adding one, silently
-erasing the earlier reading.
-
-**Retention is validated at startup** — `retention > maxConfigurableWindow`, else throw. Without it someone
-raises the window in config, nobody updates retention, and alerts stop firing with no error anywhere.
-
-⚠️ **This sorted set is not the dashboard's fallback.** That is `marketdata:last:{ticker}` from Phase 3 —
-one value, never trimmed, written by any path that fetches. Two structures because their lifetimes differ:
-a last-known price is wanted for as long as someone might look, a window is trimmed to an hour and only
-exists while an alert does. Collapsing them would couple the dashboard's degradation to this retention
-setting, so shortening the window would silently shorten how far back the dashboard can degrade.
-
-The poller writes both — the window for evaluation, the last-known price for whoever needs it next.
-
-**Traps that came with it**, all real and all previously in Phase 3's §6:
-
-- An unhandled exception in a `BackgroundService` **kills the host** — the default is `StopHost`. The
-  in-loop `try/catch` is not defensive style; without it one bad provider response 502s the whole API.
-- `OperationCanceledException` on shutdown is not an error. Catch it separately and break, or every
-  graceful shutdown logs a stack trace.
-- `PeriodicTimer.WaitForNextTickAsync` does not queue missed ticks — an overrun means the next tick fires
-  immediately, which is exactly why the in-flight guard exists.
-- `BackgroundService` is a singleton; resolve `DbContext` through `IServiceScopeFactory` per cycle. Holding
-  one across cycles leaks tracked entities and eventually the connection.
-- `TimeProvider` into `PeriodicTimer` is what makes the cadence testable — `FakeTimeProvider.Advance(60s)`
-  runs exactly one cycle, deterministically, with no `Task.Delay` and no flakiness.
+Keeping the settings per ticker has a second effect worth noticing early: the set of rows in that table
+**is** the list of tickers anyone cares about. Nothing has to ask Portfolio who is watching what.
 
 ---
 
-## 3. Frontend
+## 3. The poller and the price window
 
-### The stream hook
+Alert evaluation needs a series, not a price. "Did this fall 5% in the last fifteen minutes?" cannot be
+answered from one quote. So something has to sample repeatedly and keep what it sampled. That is the only
+reason a background job exists in this application at all — the dashboard asks the provider directly and
+needs none of it.
 
-`src/features/alerts/useAlertStream.ts` — mounted **once** inside `_authenticated`, not per component.
+**It polls only tickers somebody has an active alert on.** If nobody has any alerts, the cycle finds an
+empty list and does nothing, which is the right amount of work for an app nobody is watching. The dashboard
+behaves identically either way.
 
-```ts
-useEffect(() => {
-  let es: EventSource | null = null
-  let retryTimer: ReturnType<typeof setTimeout> | null = null
-  let cancelled = false
+The list is Alerts' own. MarketData declares that it needs a list of tickers to poll, and the host supplies
+the adapter that fills it from Alerts. MarketData depends on nothing, and the dependency graph does not
+cycle.
 
-  async function connect() {
-    if (cancelled) return
-    const { ticket } = await fetchTicket()
-    es = new EventSource(`${API}/api/alerts/stream?ticket=${ticket}`)
-    es.addEventListener('alert', (e) => {
-      const alert = JSON.parse((e as MessageEvent).data)
-      queryClient.setQueryData(alertKeys.list(), (old = []) => [alert, ...old])
-    })
-    es.addEventListener('ping', () => setConnected(true))
-    es.onerror = () => {
-      es?.close()
-      setConnected(false)
-      queryClient.invalidateQueries({ queryKey: alertKeys.list() })   // refetch history on reconnect
-      retryTimer = setTimeout(connect, backoff())
-    }
-  }
-  connect()
+**Price history lives in Redis as a trimmed series per ticker**, one entry per sample, cut back on write to
+the longest configurable window plus a little margin. This is deliberately *not* the single last-known price
+the dashboard falls back on when the provider is down. Their lifetimes differ: a last-known price is wanted
+for as long as somebody might look, a window is trimmed to an hour and only exists while an alert does.
+Merging them would tie how far back the dashboard can degrade to how long alerts keep history. Turn alerts
+off for a ticker and it has no window at all — which is exactly when the dashboard still needs a price.
 
-  return () => { cancelled = true; es?.close(); if (retryTimer) clearTimeout(retryTimer) }
-}, [])
+Retention is checked against the maximum configurable window at startup, and refuses to start if it is
+short. Without that check, somebody raises the window in configuration, nobody raises retention, and alerts
+stop firing with no error anywhere.
+
+Running on more than one replica needs two locks, not one. A claim key picks one winner *within* a minute. A
+separate in-flight flag, not keyed to the minute, stops a cycle that overran from being joined by the next
+minute's cycle on another replica — the first key says nothing across minute boundaries. Both carry expiries
+as a backstop for a process that dies mid-cycle.
+
+Whatever the poller fetches also updates the last-known price, and it must do that through the same single
+writer the rest of the application uses. Two writers means the fake provider path and the real provider path
+can record differently, and the fake path is what makes the whole stack work from a clean clone.
+
+---
+
+## 4. Evaluation
+
+Evaluate immediately after each fetch, in the same cycle. A new price arriving is the natural trigger for
+"did this move sharply". Any other schedule either re-checks data already checked or checks stale data.
+
+Per ticker, compute current, minimum and maximum from the window once, then test every threshold on that
+ticker against the same three numbers.
+
+### The false positive to fix before anything else
+
+Comparing against the window's extremes catches real moves that an endpoint-to-endpoint comparison misses.
+It also fires nonsense. A price that falls from $150 to $141 and recovers to $149 is **down** over the hour,
+but reads as a **+5.7% run-up** against the window's low. Worse, it is systematic: any ticker oscillating
+inside a band wider than the threshold fires every single cycle, forever, held back only by the cooldown.
+That is a standing property of the window being reported as an event.
+
+Three workable constraints, and this phase has to pick one:
+
+- **Recency** — the extreme must be recent. Catches "fell hard just now", misses a slow grind away from an
+  old extreme.
+- **Current is the extreme** — only fire at fresh window highs and lows. Very quiet and very defensible, but
+  gives up the partial-reversal case that the extremes were introduced for.
+- **Sign agreement** — the endpoint move and the extreme move must point the same way. Kills the oscillation
+  loop, keeps genuine sharp moves, and is closest to what the requirement literally asks for.
+
+Whichever is chosen, name the comparison in the alert text and put both figures in the payload. A vague
+alert is why people turn alerts off.
+
+### Guards, then cooldown
+
+Three guards run before any comparison.
+
+- There must be **enough samples**. One stale point is not a window.
+- Both ends must be in the **same trading session**. A Friday-close-to-Monday-open gap is not a sharp move.
+- A **stale feed suppresses price alerts entirely** and raises a feed-health signal instead. No new data must
+  never read as "nothing moved".
+
+Then a cooldown, held in Redis with an expiry, per user *and* ticker *and* direction — so a drawdown
+cooldown does not mask a run-up that follows it. Expiry is the whole meaning of a cooldown, so a store with
+native expiry is the right one; a table would need a cleanup job to do the same thing worse.
+
+**There are no domain events, and none are being added.** One was planned, purely to clear a cooldown when a
+holding was deleted. A cooldown expires by itself, so nothing needs telling. The worst case is one
+suppressed alert if the user re-buys the same ticker inside the window. If eager clearing ever turns out to
+matter, that is a fresh argument to make on its own merits.
+
+---
+
+## 5. Getting alerts to the browser
+
+**Persist, then publish.** The alert is written to the database first and pushed second. Whether anyone is
+connected only decides whether it also arrives right now. A failed push then costs nothing — the row is
+there and the panel picks it up on its next history fetch.
+
+Alerts are pushed over a **one-way server-to-browser stream**, not WebSockets. Two consequences follow from
+that choice and neither is optional.
+
+**A ticket handshake.** The browser cannot attach a login header to this kind of connection, and the SPA and
+the API are on different origins permanently, so cross-origin cookies are not dependable. The page asks an
+authenticated endpoint for a short-lived, single-use ticket and opens the stream with it. Thirty seconds,
+deleted the moment it is used. A long-lived token in a query string ends up in access logs, browser history
+and proxy logs; a spent thirty-second ticket does not meaningfully.
+
+**A twenty-second heartbeat.** The hosting platform closes an idle request after four minutes, and four is
+both the default and the floor on the plan being used — raising it costs more than the rest of the stack put
+together. So the stream must send something every twenty seconds. The stream API has no comment mechanism,
+so the heartbeat is a real named event that the client ignores. The same traffic keeps the connection above
+the server's minimum response data rate, which applies to this kind of stream even though it does not apply
+to WebSockets.
+
+**Fan-out across replicas is mandatory, not an optimisation.** An alert can be produced on one replica while
+the user's stream is held by another. Every replica subscribes to a Redis channel and whichever one holds
+the stream writes it out. Without this, alerts silently stop arriving for half the users the moment there is
+more than one replica.
+
+**There is no replay and no backfill.** No cursor, no last-event id, no "the last 24 hours on connect". The
+requirement asks for an event when a threshold is breached, background checking, and a manual trigger — not
+offline delivery. Fired alerts are saved, the panel loads recent ones with an ordinary request when it
+mounts, and the stream only ever pushes new ones. On a dropped connection the panel refetches its history
+like any other query. Anything missed while disconnected comes back that way, using machinery the query
+layer already provides.
+
+### Simulate
+
+The brief asks for a manual trigger explicitly, and it earns its place: outside market hours nothing moves,
+so without it the feature cannot be demonstrated at all. It picks one of the caller's tickers, synthesises a
+plausible alert, and sends it through the **real** path — saved and published like any other, flagged as
+simulated and badged in the UI. Not a fake push straight to the socket, which would prove nothing.
+
+The development-only price nudge from the previous phase drives a genuine evaluation-triggered alert and is
+the better demonstration where it is available. It is gated to development and to the fake provider, so it
+does not exist on the deployed site — which is why Simulate has to exist.
+
+### Endpoints
+
+```
+GET   /api/alerts/settings
+PUT   /api/alerts/settings
+GET   /api/alerts?limit=50
+POST  /api/alerts/stream-ticket
+GET   /api/alerts/stream?ticket=…
+POST  /api/alerts/simulate
 ```
 
-That `invalidateQueries` on error is the whole replacement for cursor replay. Anything fired while disconnected comes back on the next history fetch, using machinery TanStack Query already provides.
-
-⚠️ **React 19 StrictMode double-invokes effects.** Without `cancelled` and the `clearTimeout` in cleanup you get two live connections, and an SSE stream permanently occupies one of the browser's **6 connections per origin** on HTTP/1.1.
-
-⚠️ `EventSource` reconnects automatically, but the ticket in the URL is already spent, so the server would reject it. That is why `onerror` closes and reconnects manually with a fresh ticket. Note the trade-off in the README: you give up the browser's free reconnect in exchange for header-less auth. About 15 lines.
-
-### Screens
-
-The alerts panel on the dashboard is the mockup's right-hand column — threshold pill (`±2%`), rows of `(ticker, delta, time, text)`, and an empty state. It loads history with `useQuery` on mount and receives new alerts by push. `/notifications` is the mockup's fifth screen, showing the same data with a higher limit.
-
-The live badge in the app shell reads **"Live (SSE)"**, not "WS Live". The brief's §5 grades consistency, and shipping SSE under a WebSocket label is a self-inflicted wound.
+Everything except the stream itself is bearer-authenticated; the stream is authenticated by the ticket.
+Money in the payload is serialised as strings, like everywhere else.
 
 ---
 
-## 4. Infrastructure delta
+## 6. Frontend
 
-**`minReplicas` goes to 1 in this phase, not Phase 3.** Scale-to-zero only breaks something once a
-background service exists, and until now nothing ran between requests. This is the change that makes it
-load-bearing: a sleeping replica evaluates no alerts.
+One stream connection for the whole application, opened once inside the authenticated layout, never per
+component. A held-open stream permanently occupies one of the browser's six connections per origin, and
+React's development mode will happily open two if the effect is not written to survive being invoked twice.
 
-Also add `Alerts__PollIntervalSeconds` and `Alerts__RetentionMinutes` as env vars, in compose and Bicep.
-Phase 3 deliberately shipped neither, because there was nothing to configure.
+The browser's built-in reconnect cannot be used, because the ticket in the URL has already been spent by the
+time it retries. So a dropped connection is closed, a fresh ticket fetched, and a new connection opened with
+backoff. Losing free reconnection is the price of header-less authentication.
 
-```bicep
-scale: {
-  minReplicas: 1
-  maxReplicas: 2
-  rules: [ { name: 'http', http: { metadata: { concurrentRequests: '100' } } } ]
-}
-```
+Two places show alerts: the panel on the dashboard, which is the mockup's right-hand column, and a
+notifications screen showing the same data with a longer history. Both are titled around *recent activity*
+rather than *active alerts*, and every row carries a timestamp — a price alert is a moment that passed, not
+a condition that persists, and the wording should not imply otherwise.
 
-⚠️ The default `concurrentRequests` is **10**. A held-open SSE stream may count as one in-flight request for its entire life, so 30 connected browsers would scale to 3 replicas — scaling on *user count* rather than load. Raise it to 100 and cap `maxReplicas: 2`, which is also what the Postgres connection budget demands.
-
-⚠️ A replica with an open SSE connection **never qualifies for ACA's reduced idle billing rate**, which requires no in-flight HTTP requests. Budget at the active rate; the overview's cost table already does.
-
-Do **not** add `UseResponseCompression()` anywhere — it wraps the body in a buffering stream and the feed dies silently. ACA's Envoy does not buffer `text/event-stream` and exposes no buffering knob, so there is nothing to configure there; `X-Accel-Buffering` is an nginx convention, sent anyway for the compose path. `terminationGracePeriodSeconds` defaults to 480, plenty for streams to close cleanly during a revision swap.
-
-In compose, the nginx SSE location block from Phase 1 finally gets exercised. Verify `proxy_buffering off` is actually in effect — without it, events batch and nothing arrives until the response ends, which never happens.
+The live indicator in the shell says "Live (SSE)". Consistency between what is claimed and what was built is
+graded, and labelling this a WebSocket is a self-inflicted wound.
 
 ---
 
-## 5. Tests
+## 7. Infrastructure
 
-### Unit — `Portfolio.UnitTests`
+**The always-on replica setting has to change with this phase.** Until now nothing ran between requests, so
+scaling to zero was free. A background job changes that: a sleeping replica evaluates no alerts. The two go
+together, and one without the other is a feature that silently stops working whenever traffic does.
 
-| Test | Asserts |
-|---|---|
-| `Evaluate_DrawdownBeyondThreshold_Fires` | Baseline |
-| `Evaluate_RunUpBeyondThreshold_Fires` | |
-| `Evaluate_MoveBelowThreshold_DoesNotFire` | |
-| `Evaluate_PartialReversal_150to141to149_DoesNotFireRunUp` | **The false-positive fix**, encoding whichever constraint you chose |
-| `Evaluate_OscillatingWithinBand_FiresOnceNotEveryCycle` | The systematic version of the same bug |
-| `Evaluate_TooFewSamples_DoesNotFire` | Guard 1 |
-| `Evaluate_WindowSpansSessionBoundary_DoesNotFire` | Guard 2 |
-| `Evaluate_StaleFeed_SuppressesPriceAlert_RaisesFeedHealth` | Guard 3 |
-| `Cooldown_SecondBreachWithinTtl_Suppressed` | |
-| `Cooldown_AfterTtlExpiry_Fires` | |
-| `Cooldown_IsPerTickerAndDirection` | A drawdown cooldown does not suppress a run-up |
-| `RemoveHolding_ClearsCooldown_BothDirections` | Was `HoldingRemoved_ClearsCooldown`; now an in-module call, not an event handler |
-| `Settings_WindowAboveOneHour_Rejected` | |
-| `Settings_WindowExceedingRetention_Rejected` | |
+The scaling rule needs attention too. A held-open stream may count as one in-flight request for its entire
+life, so with the default concurrency setting a few dozen connected browsers would scale on *user count*
+rather than on load. Raise the concurrency threshold and keep the replica ceiling at two, which the database
+connection budget requires anyway. A replica with an open stream also never qualifies for the platform's
+reduced idle billing rate, so budget at the active rate. Adding this module adds a third connection pool per
+replica — the budget still fits, but the arithmetic moves whenever a context is added, and it has been
+published wrong before.
 
-### Integration — `Api.IntegrationTests`
+The poll interval and the retention window become configuration, in both compose and the deployment
+template. The previous phase shipped neither, because there was nothing to configure.
 
-Read the stream with the BCL `SseParser.Create<T>` over `HttpCompletionOption.ResponseHeadersRead`.
+Two things not to do. Never add response compression anywhere in the application — it wraps the body in a
+buffering stream and the feed dies with no error. And in the compose stack, confirm the reverse proxy's
+buffering is genuinely off for this route; with buffering on, events queue up and nothing arrives until the
+response ends, which for a stream is never.
 
-| Test | Asserts |
-|---|---|
-| `Simulate_PersistsAlert_AndPushesToOpenStream` | End to end, under a second |
-| `Simulate_WithNoStreamOpen_StillPersists` | Then appears in the history endpoint |
-| `Stream_WithoutTicket_Returns401` | |
-| `Stream_WithExpiredTicket_Returns401` | |
-| `Stream_TicketIsSingleUse_SecondAttemptFails` | |
-| `Stream_EmitsHeartbeat_WithinTwentyFiveSeconds` | **The ACA 4-minute-timeout test** |
-| `Stream_AlertPublishedOnAnotherConnection_IsReceived` | Redis pub/sub fan-out |
-| `Stream_ClientDisconnects_ServerReleasesSubscription` | No leak |
-| `History_ReturnsMostRecentFirst_RespectsLimit` | |
-| `History_OnlyReturnsCallersAlerts` | |
-| `Evaluation_AfterNudge_FiresRealAlert` | The *real* path, not simulate |
-| `Alert_PersistedBeforePublish_SurvivesPublishFailure` | Kill Redis; the row is still in Postgres and the history endpoint returns it |
-
-### Frontend
-
-`connects once under StrictMode` (count `EventSource` constructions) · `pushes alert into the query cache` · `reconnects with a fresh ticket after an error` · `invalidates history on reconnect` · `renders "Live (SSE)" not "WS Live"`
-
----
-
-## 6. Gotchas
-
-**`SseFormatter` has no comment API.** The idiomatic `:heartbeat\n\n` is unreachable through the typed API, so use a named event the client ignores.
-
-**Response compression buffers SSE to death.** `text/event-stream` is not in the default MIME list, but adding custom MIME types or `EnableForHttps = true` pulls it in. Simplest safe answer: do not add the middleware.
-
-**nginx breaks SSE three independent ways by default** — `proxy_buffering on`, `proxy_read_timeout 60s` (stricter than ACA's 240s), and HTTP/1.0 upstream on older builds. All three are handled in the Phase 1 config block; verify it applies to this location.
-
-**HTTP/1.1's 6-connections-per-origin cap.** An SSE stream never completes, so it holds a slot permanently. Marked "won't fix" in Chrome and Firefox. Fine here — one stream plus five concurrent fetches — but document it, and never open the stream more than once.
-
-**`decimal` in the alert payload** has the same JSON-number problem as Phase 3. Serialise money as strings.
-
-**Redis pub/sub is fire-and-forget.** A subscriber that is down misses the message permanently. Acceptable only because the alert is already in Postgres and the panel refetches history on reconnect — which is exactly why persist-before-publish is not negotiable.
-
-**Redis holds the cooldown, so a Redis outage means every breach fires.** Phase 6 suppresses alerts entirely when the cache is unavailable, which covers this. Worth knowing now so it isn't a surprise then.
-
----
-
-## 7. Your call
-
-### The false-positive constraint — `Portfolio.Domain/Alerts/ThresholdRule.cs`
-
-```csharp
-internal static class ThresholdRule
-{
-    /// <param name="window">Ordered observations, oldest first.</param>
-    public static OneOf<Fires, DoesNotFire> Evaluate(
-        IReadOnlyList<PriceObservation> window, decimal thresholdPercent)
-    {
-        // current / min / max are computed for you above.
-        //
-        // TODO(you): min/max-over-window catches a real move the endpoints miss —
-        // Initial.md:128 is right about that. But as written it also fires
-        // "+5.7% run-up" on a position that closed the hour DOWN 0.7%, and any
-        // ticker oscillating in a band wider than the threshold fires forever.
-        //
-        //   (a) RECENCY — extreme must be within the last N samples.
-        //       Catches "fell hard just now". Misses a slow grind from an old extreme.
-        //
-        //   (b) CURRENT IS THE EXTREME — only fire at new window highs/lows.
-        //       Very quiet, very defensible, and gives up the exact partial-reversal
-        //       case Initial.md added min/max for.
-        //
-        //   (c) SIGN AGREEMENT — endpoint delta and extreme delta must agree.
-        //       Kills the oscillation loop, keeps genuine sharp moves, and is
-        //       closest to what «% за проміжок часу» in req 9 literally says.
-        //
-        // Put BOTH deltas in the payload and name the comparison in the alert text.
-        // This is the decision an interviewer will push hardest on — the reasoning
-        // matters more than the choice.
-    }
-}
-```
-
-About ten lines. Write it before `Evaluate_PartialReversal_150to141to149_DoesNotFireRunUp`, since that test *is* the specification.
+Finally, the architecture rules pin how many module assemblies exist, and that number changes when this
+module lands. Move it one assembly at a time so the suite is green after each step rather than red for the
+whole phase.
 
 ---
 
 ## 8. Done when
 
-- [ ] `docker compose up`, log in, set threshold to 1%
-- [ ] Click **Simulate** → alert appears in the panel in under a second, with the simulated badge
-- [ ] Reload the page → the alert is still listed (history fetch, not replay)
-- [ ] Simulate with the tab closed, then open the app → the alert is in the list
-- [ ] Leave the tab open for **5 minutes** → the connection is still alive (proves the heartbeat)
-- [ ] `POST /api/dev/nudge?ticker=AAPL&pct=-7` → a **real** evaluation-driven alert fires, no simulate involved
-- [ ] Nudge twice inside the cooldown → only one alert
-- [ ] Nudge ±3% repeatedly with a 2% threshold → alerts stay bounded, not one per cycle
-- [ ] Delete the holding → its cooldown is cleared (`redis-cli KEYS 'alerts:cooldown:*'`)
-- [ ] `/notifications` lists history; the shell badge reads **"Live (SSE)"**
-- [ ] `dotnet test` green, including `Stream_EmitsHeartbeat_WithinTwentyFiveSeconds`
-- [ ] `npm test` green, including `connects once under StrictMode`
-- [ ] Deployed: alerts arrive on the GitHub Pages URL from the Azure API, and the stream survives past 4 minutes
-- [ ] `docs/Initial.md:22` corrected — thresholds are owned by the alerts feature in Portfolio, not by Identity
-- [ ] `alert_settings` and `fired_alerts` are in the **`portfolio`** schema, reached by `portfolio_svc`, with no `alerts` schema in the migration
-- [ ] README: the SSE vs WebSocket decision matrix · the ticket handshake and why · the heartbeat and the ACA 4-minute floor · why replay was dropped · the false-positive constraint you chose
-- [ ] Alerts panel usable at 375px
+- Set a threshold, click Simulate, and an alert appears in the panel in under a second with its badge.
+- Reload the page and the alert is still listed — from history, not replay.
+- Simulate with the tab closed, then open the app: the alert is in the list.
+- Leave a tab open for five minutes and the connection is still alive.
+- Nudge a price past a threshold in the local stack and a real, evaluation-driven alert fires.
+- Nudge twice inside the cooldown and only one alert arrives.
+- Nudge back and forth across the threshold repeatedly and alerts stay bounded rather than one per cycle.
+- With no alerts configured anywhere, nothing is polled and the dashboard is unchanged.
+- The notifications screen lists history; the shell badge reads "Live (SSE)"; the panel is usable at 375px.
+- Alerts arrive on the deployed site from the deployed API, and the stream survives past four minutes.
+- The alerts schema is reached by the alerts database user, with its own migration history table — sharing
+  one history table across contexts corrupts all of their bookkeeping.
+- The README records: why a one-way stream rather than WebSockets, the ticket handshake and why it exists,
+  the heartbeat and the four-minute platform limit, why replay was dropped, and which false-positive
+  constraint was chosen and why.
+
+## Reference
+
+These describe the shape of the system rather than the order it gets built in. They live in `docs/reference/`.
+
+- [Module boundaries](../reference/module-boundaries.md) — the full argument for Alerts being its own module.
+- [Module interactions](../reference/module-interactions.md) — every designed edge on that diagram terminates in Alerts, and this phase builds them.
+- [Data model](../reference/er-diagram.md) — the alert tables and the price-window key, all of which arrive here.
+- [Bounded contexts](../reference/bounded-contexts.md) — what kind of relationship each new boundary is.

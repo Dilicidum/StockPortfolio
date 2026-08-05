@@ -1,247 +1,238 @@
-# Phase 5 — Make it mine · 0.6 days
+# Phase 5 — Make it mine
 
-## 1. Goal
+## What you can do at the end
 
-Flip to dark. Switch to Ukrainian. Set refresh to 15s and watch the dashboard speed up. Set the threshold to 2%. Hide a position you don't want cluttering the dashboard. Paste your own Finnhub key.
+Flip the app to dark. Switch it to Ukrainian. Set the dashboard to refresh every fifteen seconds and watch it
+speed up. Set an alert threshold to 2%. Hide a position you don't want cluttering the screen. Paste in your
+own market-data API key and have the app use it for you.
 
-Covers P1 req 8 in full and P2 req 11.
+This covers the brief's settings requirement in full, plus the bring-your-own-key extra.
 
-Near-greenfield: `Initial.md` gives settings three words in a build-order line (`:196`) and **hard-codes the 60-second cadence in two places** (`:66`, `:150`) that this phase is meant to make configurable.
-
-**On «перелік акцій».** Req 8 reads *«налаштування дашборду (перелік акцій, частота оновлення котирувань)»* — dashboard settings, a list of stocks, the refresh frequency. It sits inside *dashboard settings*, so it means which stocks appear on your dashboard, not a separate watchlist of stocks you don't own. That is an `is_visible` flag on `holdings`, not a new aggregate, a child table, a union in the held-ticker list, and a second dashboard section with no P&L in it.
+**On "a list of stocks".** The brief asks for *dashboard settings — a list of stocks, quote refresh
+frequency*. The list sits inside dashboard settings, so it means which of your positions appear on your
+dashboard. It is not a separate watchlist of shares you don't own. That reading costs one flag on a position.
+The other reading costs a new aggregate, a second table, a merged ticker list and a second dashboard section
+with no profit and loss in it — for something the brief never asked for.
 
 ---
 
-## 2. Backend
+## Who owns a setting
 
-Settings are split across the modules that own them. A single `user_settings` table would be a module nobody designed.
-
-> ⚠️ **Corrected (Phase 3 documentation pass).** This paragraph read "There are three modules, not four — Alerts merged into Portfolio in Phase 2 — so refresh interval, holding visibility *and* the alert threshold all land in the `portfolio` schema. That is one fewer `PATCH` target crossing a boundary." **The merge was reversed** ([00-overview.md](00-overview.md) §"Four modules"), so the alert threshold belongs to `alert_settings` in the `alerts` schema and is a separate `PATCH` target again. Refresh interval and holding visibility are still Portfolio's. Note the ordering hazard for whoever executes this phase: Alerts is a module in the documents and **not on disk** — Phase 4 builds it — so if Phase 4 has slipped when Phase 5 starts, the threshold has nowhere to live and that is the thing to resolve first, not to work around by putting it back in `portfolio`.
-
-Refresh interval and holding visibility land in the `portfolio` schema; the alert threshold lands in `alerts`. The endpoint list below is unchanged.
+Settings are split across the modules that own the thing being configured. A single shared settings table
+would be a piece of the system nobody designed and everybody writes to.
 
 | Setting | Owner |
 |---|---|
-| Theme, language | `Identity` |
-| Refresh interval, holding visibility | `Portfolio` |
-| Threshold, window, enabled | `Portfolio`, alerts feature area (ownership settled in Phase 4; the module merged into Portfolio in Phase 2) |
-| BYOK key | `MarketData` |
+| Theme, language | Identity |
+| Refresh interval, position visibility | Portfolio |
+| Alert threshold, window, on/off | Alerts |
+| Your own provider API key | MarketData |
 
-The frontend fetches one aggregated `GET /api/settings` view and PATCHes each section separately — one read, targeted writes.
+The browser reads all of it in one request and writes each section separately. One read, targeted writes.
 
-### 2.1 `UserPreferences` — `Identity.Domain`
-
-```csharp
-public sealed class UserPreferences
-{
-    private UserPreferences(UserPreferencesId id, UserId userId, Theme theme, Language language);
-
-    public UserPreferencesId Id { get; private set; }
-    public UserId UserId { get; private set; }
-    public Theme Theme { get; private set; }        // Light | Dark | System
-    public Language Language { get; private set; }  // En | Uk
-
-    public OneOf<Success, InvalidInput> Update(Theme theme, Language language);
-}
-```
-
-No base class, and the entity declares its own `Id` — see `phase-1-implementation.md` §5.2.
-
-Created lazily on first read with defaults `System` / `En`, so registration stays a single insert.
-
-### 2.2 Holding visibility
-
-One method on the existing `Holding` aggregate from Phase 2:
-
-```csharp
-public void SetVisible(bool visible);   // no validation to fail — a plain state change
-```
-
-No new aggregate, no new table, no events. `is_visible` defaults to `true`, so every existing holding keeps working with no migration data step.
-
-**The held-ticker list ignores it.** Phase 3 polls all held tickers regardless of visibility — hiding a position must not stop its price being collected, or unhiding it would show a stale number until the next cycle. Visibility is a display filter and nothing more.
-
-**Alerts ignore it too.** You still own the position; a 6% drop still matters to your money whether or not the row is on screen. Worth a README line, because it is the first thing a reviewer will ask.
-
-### 2.3 `DashboardSettings` — `Portfolio.Domain`
-
-```csharp
-public int RefreshIntervalSeconds { get; private set; }   // 10 .. 300
-```
-
-**This is a client-side polling cadence, not a server one.** The server keeps polling at 60s regardless, so a user picking 15s gets the same observation four times. The freshness timestamp must make that visible, otherwise the UI implies four fresh fetches and quietly lies.
-
-Surface it: when `refreshInterval < serverPollInterval`, the settings screen shows an inline note — *"Prices are collected every 60s. A faster refresh re-reads the same data sooner, it does not fetch more often."* That sentence is worth more than the feature.
-
-### 2.4 BYOK — `MarketData`
-
-The brief's req 11 and the mockup both have it, and it is genuinely awkward against a single shared-key poller. `Initial.md` does not mention it at all.
-
-The user's key is stored **server-side, encrypted at rest**, and used only for that user's **read-through** calls. The shared poll cycle keeps using the app key.
-
-Why this rather than a per-user poller: per-user polling multiplies cycles by user count, needs a per-user rate limiter and a per-user claim, and buys nothing, because the held-ticker list is shared and two users holding AAPL would fetch it twice. Read-through is already per-request and already rate-limited, so it is the natural seam.
-
-Encrypted with ASP.NET Core Data Protection, keys persisted to Postgres via `PersistKeysToDbContext` — the default stores them in the container filesystem, so every ACA revision would generate a new key ring and turn every stored BYOK key into undecryptable ciphertext.
-
-**Never returned to the browser.** `GET /api/settings` returns `{ byok: { configured: true, lastFour: "a1b2" } }` and nothing more. Validated on save with a single live `/quote` call, so a bad key is rejected at the point of entry rather than silently at 3am.
-
-### 2.5 Endpoints
-
-```
-GET    /api/settings                200 + AggregatedSettingsDto      [Authorize]
-PATCH  /api/settings/appearance     200 | 400     { theme, language }
-PATCH  /api/settings/dashboard      200 | 400     { refreshIntervalSeconds }
-PATCH  /api/settings/alerts         200 | 400     { enabled, thresholdPercent, windowMinutes }
-PATCH  /api/holdings/{id}/visibility 204 | 404    { visible }
-POST   /api/settings/api-key        200 | 400     { key }   → validates, then stores
-DELETE /api/settings/api-key        204
-```
+⚠️ **Check before you start: Alerts is a module in these documents and does not exist on disk.** Phase 4
+builds it. If Phase 4 has slipped when this phase begins, the alert threshold has nowhere to live — and the
+answer is to resolve that, not to work around it by parking the threshold in Portfolio. That was tried as a
+design once and reversed.
 
 ---
 
-## 3. Frontend
+## The settings themselves
 
-### Route
+### Theme and language
 
-`src/routes/_authenticated/settings.tsx` — the mockup's Settings screen, in its order: **Appearance** · **Language** · **Quotes** (refresh interval, threshold) · **BYOK** · **Dashboard** (the visibility list, where the mockup put its stock list).
+A small preferences record beside the user, holding a theme (light, dark or follow the system) and a language
+(English or Ukrainian). It is created the first time it is read, using the defaults, so registration stays a
+single insert and nobody has to remember to seed it.
 
-Each section saves independently with its own mutation and inline saved/failed state. One giant form with a single Save button would make a failed BYOK validation discard a perfectly good theme change.
+### Position visibility
+
+Hiding a position is a **display filter and nothing else**. The flag already exists on a position, already
+defaults to visible, and the dashboard read already honours it — so this phase adds the switch, not the
+filtering.
+
+What must not happen is visibility leaking anywhere else:
+
+- **Alerts ignore it.** You still own the position. A 6% drop still matters to your money whether or not the
+  row is on your screen. This is worth a line in the README, because it is the first thing a reviewer asks.
+- **It has nothing to do with what gets polled.** Phase 4's poller runs for tickers somebody has an active
+  alert on, not for everything anybody holds. So a hidden position with no alert on it is never sampled, and
+  that is correct rather than a regression — the dashboard prices it on the very next load, from the
+  provider, the moment you unhide it.
+
+### Refresh interval
+
+A number of seconds, between 10 and 300, default 60.
+
+**Say plainly what it does.** The dashboard asks the provider for prices when the browser asks the server, so
+a fifteen-second interval genuinely fetches four times as often as a sixty-second one. Every refresh is a
+real fan-out — one provider call per visible position. Twenty positions is twenty calls out of a free tier of
+roughly sixty a minute, for one viewer, at the default. At fifteen seconds a single viewer exhausts the
+budget alone.
+
+So whatever the settings screen says about this, it must not imply that a faster refresh is free. It costs
+the shared quota, and the person spending it is not the only person using it.
+
+⚠️ **Do not lower the 60-second default to make that arithmetic look better.** The default is load-bearing
+for the capacity claim in Phase 3 and for the README paragraph built on it. The 10-to-300 range is not the
+problem — what the screen *claims* is.
+
+### Your own API key
+
+The brief asks for it, and it is genuinely awkward against a shared key.
+
+The key is stored server-side, encrypted at rest, and used only for **that user's own dashboard fetches**.
+The shared poll cycle behind alerts keeps using the application's key.
+
+Why not a per-user poller: polling per user multiplies cycles by the number of users, needs a rate limiter
+and a claim per user, and buys nothing, because the polled ticker list is shared — two people with an alert
+on the same ticker would fetch it twice. The dashboard read, by contrast, is *already* per user and per
+request, which is exactly the shape a per-user key needs.
+
+**The key is never returned to the browser.** Not to the person who set it, not masked beyond the last four
+characters. The settings response says whether one is configured and shows the last four, and that is all.
+There is no product reason to read it back, and every path that can return it is a path that can leak it.
+
+It is validated on save with one live call to the provider, so a bad key is rejected while the user is
+looking at the field rather than silently at three in the morning.
+
+**Two consequences worth planning for, not discovering:**
+
+- **This gives MarketData its first database table.** The module stores nothing in the database today — no
+  context, no migration, nothing in the list of modules the migrator runs. Its schema and its database login
+  already exist and sit unused. Storing user keys is what makes them real, and it means a first migration, a
+  new entry in the migrator's list, and an update to the check that pins which schemas have migration history
+  — after Phase 4 has already added the alerts schema to that same check. It is a task, not a detail.
+- **The provider rate limiter is process-wide and sized for one shared key.** A user supplying their own key
+  brings their own quota, and should not be spending the application's. Either the limiter becomes
+  per-key, or bring-your-own-key users are throttled against a budget that isn't theirs. Decide which before
+  writing the storage.
+
+Encryption uses the framework's data-protection keys, and **those keys must be persisted to Postgres**. The
+default keeps them in the container filesystem, so every new deployment revision would generate a fresh key
+ring and turn every stored key into ciphertext nothing can read.
+
+---
+
+## The API
+
+```
+GET    /api/settings                  everything, in one read
+PATCH  /api/settings/appearance       theme, language
+PATCH  /api/settings/dashboard        refresh interval
+PATCH  /api/settings/alerts           enabled, threshold, window
+PATCH  /api/holdings/{id}/visibility  show or hide one position
+POST   /api/settings/api-key          validates against the provider, then stores
+DELETE /api/settings/api-key
+```
+
+All authenticated. Everything that takes a value can reject it with a validation error.
+
+---
+
+## The screen
+
+One settings route, in the mockup's order: appearance, language, quotes (refresh interval and threshold),
+your own key, then the dashboard's visibility list.
+
+**Each section saves on its own**, with its own inline saved-or-failed state. One big form with a single Save
+button would let a rejected API key throw away a perfectly good theme change.
 
 ### Theme
 
-Tailwind v4 dark mode is a `@custom-variant`, **not** `darkMode: 'class'` — that config key does not exist in v4, and there is no config file to put it in.
+Three-way: light, dark, or follow the system. Following the system means watching the OS preference and
+reacting to it live, so a user who changes their laptop theme sees the app follow without reloading.
 
-```css
-@import "tailwindcss";
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
-```
+⚠️ **No flash on load.** A blocking inline script, before any stylesheet, reads the stored choice and applies
+it to the document. Without it, every page load flashes light before the app mounts — visible on every
+navigation, and exactly the kind of thing a reviewer notices without being able to name.
 
-Three-way Light / Dark / System. System resolves via `matchMedia('(prefers-color-scheme: dark)')` with a listener, so changing the OS theme updates a `System` user live.
+The server value is the source of truth across devices; browser storage is only the bootstrap cache, so the
+inline script has something to read synchronously.
 
-⚠️ **No flash on load.** A blocking inline script in `index.html`, before any CSS, reads the persisted choice and stamps `data-theme` on `<html>`. Without it every page load flashes light before React hydrates — visible on every navigation, and exactly the kind of thing a reviewer notices without being able to name.
+Note that Tailwind v4 has **no config file** — dark mode is declared as a variant in CSS. Every pre-2025
+tutorial gets this wrong, and the failure is silent: the dark styles simply never apply.
 
-The server value is the source of truth across devices; `localStorage` is the bootstrap cache so the inline script has something synchronous to read.
+### Language
 
-### i18n
+English and Ukrainian; the brief asks for at least two. Translations are grouped per feature, mirroring the
+backend's features. Phase 2's form validation already stores message *keys* rather than English strings, so
+validation messages translate with no changes to the forms. Numbers and dates go through the browser's
+locale-aware formatting; the currency stays US dollars and only the presentation localises.
 
-`react-i18next` + `i18next-browser-languagedetector`, which gives persistence for free. EN and UK — the brief requires a minimum of two.
+**Add a build check that both language files have exactly the same set of keys.** A missing Ukrainian key
+renders as a raw key path in the UI, which looks far worse than English would — and falling back to English
+hides the bug from you while showing it to everyone else.
 
-Namespaces per feature (`auth`, `portfolio`, `dashboard`, `alerts`, `settings`, `common`), mirroring the backend **features** — `alerts` is a feature area inside Portfolio, not a module of its own. Phase 2's zod schemas already store message **keys** rather than strings, so validation messages translate with no changes to the schemas. Numbers and dates go through `Intl.NumberFormat` and `Intl.DateTimeFormat` with the active locale — currency stays USD, only the formatting localises.
+Two things that bite: the language detector caches to browser storage by default and will quietly override
+the server's value on the next load, so configure it to let the server win once you're signed in and treat
+the cache as a pre-sign-in bootstrap only. And react-i18next 17 needs i18next 26.2 or later — the mismatch
+fails at runtime, not at install.
 
-Add a CI check that both locale files have identical key sets. A missing Ukrainian key renders as the raw key path in the UI, which looks far worse than an English fallback, and `fallbackLng` hides the bug from you while showing it to everyone else.
+### Visibility and the key field
 
-⚠️ Pin `i18next >= 26.2.0`; `react-i18next@17` requires it and the mismatch fails at runtime, not at install.
+Visibility is a checkbox list of your positions with a "showing 6 of 8" counter and a Show all link. Hidden
+rows disappear from the dashboard table.
 
-### Dashboard visibility
-
-A checkbox list of the user's holdings with a "showing 6 of 8" counter and a Show all link. Hidden rows disappear from the dashboard table.
-
-### BYOK
-
-Password-type input, "configured · ends a1b2" state, Remove button. Saving shows a spinner while the server validates against the live API, then a clear success or a specific failure ("key rejected by Finnhub").
-
----
-
-## 4. Infrastructure delta
-
-Nothing new to provision. Two additions worth a comment in the Bicep: Data Protection keys live in Postgres, so a redeploy does not orphan stored BYOK secrets; and `MarketData__AllowUserApiKeys=true` as an env var, so BYOK can be switched off in one place if it misbehaves. The same var goes in compose. The locale key-parity check joins the CI job.
-
-Third phase in a row where front-loading the infrastructure means a feature costs zero infrastructure work.
-
----
-
-## 5. Tests
-
-### Unit
-
-| Test | Asserts |
-|---|---|
-| `Preferences_InvalidLanguage_Rejected` | |
-| `DashboardSettings_IntervalBelowTen_Rejected` | Lower bound |
-| `DashboardSettings_IntervalAboveThreeHundred_Rejected` | Upper bound |
-| `Holding_SetVisible_TogglesFlag` | |
-| `ApiKey_EncryptedAtRest_CiphertextDiffersFromPlaintext` | |
-| `ApiKey_RoundTripsThroughDataProtection` | |
-
-### Integration — `Api.IntegrationTests`
-
-| Test | Asserts |
-|---|---|
-| `Settings_RoundTrip_AllSections` | PATCH then GET returns what was written |
-| `Settings_PartialFailure_DoesNotDiscardOtherSections` | A bad BYOK key leaves theme intact |
-| `HiddenHolding_ExcludedFromDashboardRows` | The feature |
-| `HiddenHolding_StillInPollSet` | Hiding must not stop price collection |
-| `HiddenHolding_StillTriggersAlerts` | You still own it |
-| `ApiKey_NeverAppearsInAnyResponseBody` | Scans the full JSON of every settings endpoint |
-| `ApiKey_InvalidOnSave_Returns400` | Validated at entry |
-| `ApiKey_Configured_UsedForReadThroughOnly` | The poll cycle still uses the app key |
-| `RefreshInterval_DoesNotChangeServerPollCadence` | The honest-labelling rule, enforced |
-
-### Frontend
-
-`theme toggle updates data-theme and persists across reload` · `no flash: data-theme is set before first paint` · `system theme follows matchMedia changes` · `language switch re-renders translated strings` · `locale files have identical key sets` · `interval change updates refetchInterval without remount` · `BYOK input never renders the stored key` · `hiding a holding removes its row and updates the counter`
+The key field is a password input showing "configured, ends a1b2" once set, with a Remove button. Saving
+shows a spinner while the server checks the key against the live API, then either succeeds or gives a
+specific reason for the rejection.
 
 ---
 
-## 6. Gotchas
+## Infrastructure
 
-**Tailwind v4 has no config file.** `darkMode: 'class'` does not exist; dark mode is `@custom-variant` in CSS. Every pre-2025 tutorial is wrong, and the failure mode is silent — `dark:` classes simply never apply.
-
-**The no-flash script must be blocking and inline**, in `index.html` before the stylesheet. Moving it into React, or adding `defer`, brings the flash straight back.
-
-**`i18next-browser-languagedetector` caches to `localStorage` by default**, which will silently override the server value on next load. Configure `detection.order` so the server value wins once authenticated, and treat the cache as a pre-auth bootstrap only.
-
-**Data Protection keys must be persisted** or every ACA revision orphans every stored BYOK key. `PersistKeysToDbContext` into the `identity` schema.
-
-**Do not return the BYOK key, ever** — not even to the user who set it, not even masked beyond the last four. There is no product reason to read it back, and every path that can return it is a path that can leak it.
+Nothing new to provision — the third phase in a row where front-loading the infrastructure means a feature
+costs no infrastructure work. Two additions: data-protection keys persisted to Postgres, and a switch that
+turns bring-your-own-key off in one place if it misbehaves, set the same way locally and in Azure. The
+language key-parity check joins the existing build job.
 
 ---
 
-## 7. Your call
+## One decision left to you
 
-### Do hidden holdings count toward the totals? — `Portfolio.Application/DashboardProjection.cs`
+**Do hidden positions count toward the dashboard totals?** Someone hides two of their eight positions. What
+do the headline numbers say?
 
-```csharp
-// TODO(you): a user hides two of their eight positions. What do the KPI tiles say?
-//
-//   (a) TOTALS INCLUDE EVERYTHING — hiding is purely visual. Your portfolio is
-//       worth what it's worth. But the visible rows then don't add up to the
-//       total on screen, which reads as an arithmetic bug, and someone will
-//       report it as one.
-//
-//   (b) TOTALS FOLLOW VISIBILITY — what you see adds up. Internally consistent,
-//       but "Total value $12,400" is now not your portfolio's value, and a user
-//       who hid something months ago has a permanently wrong number in front
-//       of them with nothing indicating why.
-//
-//   (c) BOTH — visible totals as the headline, with a muted "8 positions,
-//       $18,900 including hidden" beneath. Honest, costs one extra line of UI,
-//       and makes the choice self-explaining.
-//
-// Whichever you pick, weight (position ÷ total) must use the SAME denominator,
-// or the percentages won't sum to 100 and that really is a bug.
-```
+- **Totals include everything.** Hiding is purely visual; your portfolio is worth what it's worth. But the
+  visible rows then don't add up to the total on screen, which reads as an arithmetic bug, and someone will
+  report it as one.
+- **Totals follow visibility.** What you see adds up. Internally consistent — but "total value $12,400" is
+  now not your portfolio's value, and someone who hid a position months ago has a permanently wrong number in
+  front of them with nothing explaining why.
+- **Both.** Visible totals as the headline, with a quiet "8 positions, $18,900 including hidden" underneath.
+  Honest, costs one line of UI, and explains itself.
 
-About eight lines. Decide before writing `HiddenHolding_ExcludedFromDashboardRows`, since the totals assertion goes in the same test.
+Whichever you pick, a position's weight must be computed against the **same** total that is displayed, or the
+percentages won't sum to 100 and that really is a bug.
 
 ---
 
-## 8. Done when
+## Done when
 
-- [ ] `docker compose up`, log in, open `/settings`
-- [ ] Toggle Dark → applies instantly; reload → **no flash**, still dark
-- [ ] Set System, change the OS theme → the app follows without a reload
-- [ ] Switch to Ukrainian → nav, tables, buttons, validation messages and number/date formats all translate
-- [ ] Reload → still Ukrainian
-- [ ] Set refresh to 15s → dashboard visibly refetches faster, and the "collected every 60s" note is shown
-- [ ] Set threshold to 2% → Phase 4's alerts respect it
-- [ ] Hide a position → its row disappears, the counter updates, and the totals behave the way you decided in §7
-- [ ] Confirm the hidden ticker is still polled (`redis-cli ZCARD marketdata:prices:{ticker}` keeps growing)
-- [ ] Nudge the hidden ticker past the threshold → it still alerts
-- [ ] Paste an invalid Finnhub key → rejected with a specific message
-- [ ] Paste a valid one → stored, shown as "configured · ends ****", and **never** visible in devtools network responses
-- [ ] `dotnet test` green, including `HiddenHolding_StillInPollSet` and `ApiKey_NeverAppearsInAnyResponseBody`
-- [ ] `npm test` green, including the locale key-parity check
-- [ ] Deployed; all of the above on the GitHub Pages URL
-- [ ] README: the settings ownership split, why the refresh interval is client-side only, the BYOK read-through design, and what hiding a holding does and doesn't affect
-- [ ] Settings screen usable at 375px
+- `docker compose up`, sign in, open the settings screen.
+- Switch to dark — applies instantly. Reload — **no flash**, still dark.
+- Choose "follow the system", change the OS theme — the app follows without a reload.
+- Switch to Ukrainian — navigation, tables, buttons, validation messages and number and date formats all
+  translate. Reload — still Ukrainian.
+- Set the refresh to 15 seconds — the dashboard visibly refetches faster, and the screen is honest that each
+  refetch is a real round of provider calls against a shared quota.
+- Set a threshold to 2% — Phase 4's alerts respect it.
+- Hide a position — its row disappears, the counter updates, and the totals behave the way you decided above.
+- Confirm hiding changed nothing but the display: nudge the hidden ticker past its threshold and it still
+  alerts. Set the alert up first, since nothing is sampled for a ticker with no alert on it.
+- Paste an invalid provider key — rejected, with a specific message.
+- Paste a valid one — stored, shown as configured with its last four characters, and **never** visible in the
+  browser's network responses.
+- Backend and frontend test suites green, including the language key-parity check.
+- Deployed, and all of the above works on the public URL.
+- README covers: who owns which setting, what a shorter refresh interval actually costs, how a user's own key
+  is used and where the application's key is still used, and what hiding a position does and does not affect.
+- The settings screen is usable at 375px wide.
+
+## Reference
+
+These describe the shape of the system rather than the order it gets built in. They live in `docs/reference/`.
+
+- [Data model](../reference/er-diagram.md) — the settings tables and the per-user key table, which is the price module's first.
+- [Module boundaries](../reference/module-boundaries.md) — which module owns which setting.

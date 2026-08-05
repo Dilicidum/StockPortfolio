@@ -1,290 +1,258 @@
-# Phase 6 — Doesn't break · 0.75 days
+# Phase 6 — Doesn't break
 
-## 1. Goal
+## What you can do at the end
 
-Kill the quote provider → the app keeps working, shows the last price it saw with an honest age, and the health panel goes amber. Kill Redis → fresh prices still render, because Redis is only the fallback; alerts are suppressed and say so. Kill Postgres → a clear error, not a white screen.
+Kill the quote provider and the app keeps working: it shows the last price it saw, says how old that price
+is, and the health panel goes amber. Kill Redis and fresh prices still render — Redis only holds the fallback
+— while alerts are suppressed and say so. Kill Postgres and you get a clear error with a retry button, not a
+white screen.
 
-> **Corrected.** This line used to read *"kill Redis → prices still render from a last-known-good cache"*, which was circular — the last-known-good cache **was** Redis. With the dashboard asking the provider directly (Phase 3 §2.5), losing Redis costs the fallback and nothing else.
+This covers the brief's error-handling requirement end to end, and the grading criterion about handling
+errors and edge cases.
 
-Covers P1 req 10 end to end, and the brief's grading criterion 3 — *«коректна обробка помилок і edge-кейсів»*.
-
-This is also the **buffer phase**. If an earlier phase overran, this is where the time comes from. Cut in this order: BYOK polish → the Postgres-down path → the responsive re-pass. Never cut the provider-down path, which is the one a reviewer will actually trigger by leaving a bad API key in `.env`.
+**This is also the buffer phase.** If an earlier phase overran, the time comes from here. Cut in this order:
+polish on the bring-your-own-key screen, then the Postgres-down path, then the responsive re-pass. Never cut
+the provider-down path — it is the one a reviewer will actually trigger, by leaving a bad key in their
+environment file.
 
 ---
 
-## 2. Backend
+## The four things that break
 
-### 2.1 A health contract worth rendering
+### The quote provider is down
 
-`GET /api/health/detail` — authorised, distinct from the unauthenticated `/health` that ACA probes.
+Phase 3 already retries, times out and trips a circuit breaker. What this phase adds is what happens
+**after** all of that gives up.
 
-```csharp
-public sealed record HealthDetailDto(
-    ComponentHealth Database,     // Healthy | Degraded | Unhealthy
-    ComponentHealth Cache,
-    ComponentHealth QuoteFeed,
-    DateTimeOffset? LastSuccessfulPoll,
-    DateTimeOffset? OldestObservation,
-    int TickersInPollSet,
-    string ProviderName,          // "Finnhub" | "Fake"
-    int? RateLimitRemaining);
-```
-
-**Three states, not two.** `Degraded` is the whole point: the quote feed is `Degraded` when the last successful poll is older than two cycles but observations still exist, and `Unhealthy` only when there is nothing left to serve. A binary up/down hides exactly the state this phase exists to make visible.
-
-`ProviderName` on the panel is deliberate — a reviewer running without an API key should be able to *see* that the fake provider is active rather than wonder why prices look synthetic.
-
-### 2.2 Feed-health signal
-
-Phase 4 raises a feed-health signal when a stale feed suppresses price alerts. It gets a home here: a `FeedHealthState` singleton, updated by the poller each cycle, read by the health endpoint and by the alert evaluator. The evaluator lives in Portfolio (alerts is a feature area there, not a module), so the singleton is registered by the host and read from both sides.
-
-This closes the loop on `Initial.md:130` — *«no new data must never read as "nothing moved"»*. Until now that rule existed only inside the evaluator. Now the user can see it.
-
-### 2.3 Provider failure
-
-The resilience pipeline from Phase 3 handles retry, circuit breaker and timeout. What this phase adds is what happens **after** the pipeline gives up:
-
-| Failure | Behaviour |
+| Failure | What the user gets |
 |---|---|
-| **429 with `Retry-After`** | Honoured (default — do **not** assign a `DelayGenerator`, it silently disables this). Cycle skips the remaining symbols, logs one warning, `RateLimitRemaining` drops to 0. |
-| **Circuit open** | Poll cycles return immediately without calling the provider. Read-through returns cached values only. Feed → `Degraded`. |
-| **Timeout / 5xx** | Retried, then the cycle ends. Observations already written stay. |
-| **Malformed response** | Logged with the raw body at Debug, symbol skipped, other symbols unaffected. One bad ticker must not kill a cycle. |
+| Rate limited | The provider's own back-off delay is honoured. One warning is logged, not one per symbol. The health panel shows the remaining allowance at zero. |
+| Circuit open | No call is made at all. Every ticker falls back to the last price recorded for it, flagged as a last-known value with its age. There is no cache tier to read instead — the fallback *is* the cache. |
+| Timeout or server error | Retried, then given up on. Prices already fetched in that request stay fetched. |
+| Nonsense response | Logged with the raw body at debug level, that symbol skipped, every other symbol unaffected. One bad ticker must never take down a whole load. |
 
-The critical property: **a provider outage degrades the dashboard's numbers, it never fails the request**. `Initial.md:148` is right that the freshness timestamp does the honest work — this phase makes sure the timestamp is actually reached rather than replaced by a 500.
+The property that matters: **a provider outage degrades the numbers, it never fails the request.** The
+freshness timestamp does the honest work, and this phase makes sure the request actually reaches the point
+where a timestamp can be shown, instead of being replaced by a server error.
 
-### 2.4 Redis failure
+### Redis is down
 
-`Initial.md:96` specifies a last-known-good in-memory cache per replica. **Do not build it.** Its failure mode is silent inconsistency — at two replicas two users see different prices for the same ticker, and every restart empties it. The `marketdata:last:{ticker}` key from Phase 3 §2.4 does the same job, shared across replicas and surviving restarts, and it is already written by the path that fetches. A third tier under it would be a cache for a cache.
+Redis holds two things: the last known price per ticker, and the short price history alerts need. Losing it
+affects those two very differently.
 
-Scope it accordingly — **latest price per ticker only**, not the window. The window is what alerts need, and serving a fabricated window would fire fabricated alerts. So:
+- **Provider up, Redis down → the dashboard renders fresh prices and nothing visible changes.** All that is
+  lost is the ability to degrade gracefully later. This is worth stating clearly because the obvious
+  assumption is the opposite.
+- **Redis down → alerts are suppressed entirely**, the feed reports itself degraded, and the alerts panel
+  says so rather than sitting silently empty.
 
-- Redis down, provider up → dashboard renders **fresh** prices; only the degradation fallback is lost, and nothing visible changes
-- Redis down → **alerts are suppressed entirely**, feed → `Degraded`, and the alerts panel says so rather than sitting silently empty
+That asymmetry is deliberate and belongs in the README: a stale price is a degraded read, but a fabricated
+price history is a wrong alert. Never invent history to keep the alert evaluator busy.
 
-That asymmetry is the correct one and worth a README sentence: a stale price is a degraded read; a fabricated window is a wrong alert.
+**Do not build an in-process fallback under Redis.** An earlier design had a last-known-good cache in each
+replica's memory. Its failure mode is silent inconsistency — with two replicas, two users see different
+prices for the same ticker, and every restart empties it. The stored last-known price does the same job,
+shared across replicas, surviving restarts, and written by whatever path last fetched. A tier beneath it
+would be a cache for a cache.
 
-`abortConnect=false` on the connection string so the multiplexer reconnects rather than staying permanently poisoned after one startup blip.
+One connection setting is load-bearing: the Redis client must be configured not to abort on a failed first
+connect, or a blip at startup leaves it permanently broken even after Redis comes back, and the app looks
+like it never recovers.
 
-### 2.5 Postgres failure
+### Postgres is down
 
-Nothing clever. Health reports `Unhealthy`, the API returns 503 with `ProblemDetails`, and the SPA shows a full-page retry state rather than a white screen. EF's `EnableRetryOnFailure` handles transient blips; a genuinely down database is not something to paper over.
+Nothing clever. Health reports unhealthy, the API returns 503 with a readable problem body, and the SPA shows
+a full-page retry state. Transient blips are retried automatically; a genuinely down database is not
+something to paper over.
 
-⚠️ If `EnableRetryOnFailure` is on, any explicit transaction **must** be wrapped in `Database.CreateExecutionStrategy().ExecuteAsync(...)`, and the enclosed work must be safe to re-run. This is where the Phase 1 transaction decorator gets its test.
+⚠️ With automatic retries enabled, any explicit transaction must be run through the retry strategy, and the
+work inside it must be safe to run twice — the strategy re-runs the whole block on a transient failure.
 
-### 2.6 Startup validation
+### The alert stream drops
 
-Fail fast, with a message that says what to fix:
+**There is no replay.** No cursor, no resumption identifier, no backfill on connect — that protocol was
+deliberately not built. When the connection comes back, the stream hook invalidates the alerts query and the
+ordinary history request returns whatever fired while the browser was disconnected. The user sees the gap
+filled without touching anything; the machinery doing it is the same query cache everything else uses.
 
-- Retention > max configurable alert window (from Phase 3)
-- Every required connection string present and parseable
-- JWT signing key present and at least 32 bytes
-- If `Finnhub__ApiKey` is set, one validation call at startup — log a warning and fall back to the fake provider if it fails, rather than discovering it on the first poll
+A thin "reconnecting" bar, driven by the browser's online state and the stream's connection state, is the
+only UI this needs.
+
+---
+
+## Making the state visible
+
+An authenticated health-detail endpoint, separate from the unauthenticated endpoints the platform probes,
+reports one entry per component — database, cache, quote feed — plus the last successful poll, the age of the
+oldest usable observation, how many tickers are being tracked, which provider is in use, and the remaining
+rate allowance.
+
+**Three states, not two.** Degraded is the whole point of this phase: the quote feed is degraded when the
+last successful poll is older than it should be but there is still something to serve, and unhealthy only
+when there is nothing left. A binary up-or-down hides exactly the state this phase exists to expose.
+
+Naming the provider is deliberate. Someone running without an API key should be able to *see* that the fake
+provider is active rather than wonder why the prices look synthetic.
+
+**Two clocks, not one.** The dashboard's freshness is per request — was this price just fetched, or is it a
+last-known value, and how old. The alert feed's freshness is time since the last successful poll. They are
+different signals with different periods and must not be classified off a single clock.
+
+The feed-health signal is written by MarketData's poller and read by the Alerts evaluator. Those two modules
+may not reference each other, so **the host owns it** — the same shape as the adapter that tells MarketData
+which tickers to poll. It does not belong inside either module's infrastructure.
+
+---
+
+## What the browser does
+
+**Three visible states, and none of them is a zero.**
+
+| State | What it looks like |
+|---|---|
+| Fresh | Normal. "Updated 12s ago." |
+| Stale | Amber banner naming the reason — the quote provider is not responding — with the last known numbers still in the table, dimmed. |
+| Unavailable | The table keeps its structure with a dash in the price columns, totals show cost only, and an explicit note says prices are unavailable. **Never $0.00.** |
+
+**Never retry a client error.** Retrying an unauthorised response three times burns the refresh window;
+retrying a rejected input is pointless. Only server errors and network failures are retried.
+
+**A failed dashboard fetch must not unmount the route.** Keep the last good table on screen with an inline
+banner. This is the reason Phase 3 avoided loading the dashboard in the router — an error there replaces the
+whole screen instead of annotating it.
+
+**Error boundaries per route, plus one at the root.** A crash in the alerts panel must not take the dashboard
+down. Each boundary offers a retry that resets the query rather than reloading the page.
+
+**Mutation failures roll back and explain themselves in place.** Adding, editing or deleting a position that
+fails restores the previous value and shows the server's message inline on the form. Not a toast — the brief
+grades error handling, and an error you have to catch within three seconds does not count as handled.
+
+⚠️ This is where an incorrect optimistic-rollback signature bites hardest, because it only shows up when a
+mutation genuinely fails. Phase 2 has it covered; re-verify it here with the provider actually down.
+
+The health panel polls its own endpoint on its own schedule, independent of the dashboard query, so a
+dashboard failure does not take the health panel down with it.
+
+---
+
+## Probes and startup
+
+**Three probes with genuinely different meanings**, because the platform acts on them differently:
+
+- **Liveness — is the process alive.** It must not touch Postgres or Redis. A dependency blip that fails
+  liveness gets the container killed and restarted in a loop, turning a degraded app into a down one. This is
+  the highest-consequence mistake available in this phase.
+- **Readiness — can it serve traffic.** Database reachable. Failing takes it out of the load balancer; it
+  does not kill it.
+- **Startup — migrations applied, configuration valid.** Generous failure threshold, so a cold start is not
+  mistaken for a crash.
+
+All three must be declared as HTTP probes in the infrastructure definition. Container Apps injects plain TCP
+probes when you don't, and the whole split silently becomes decoration. Compose gets the same split, and the
+API restarts unless deliberately stopped.
+
+**Startup validation fails fast, with a message that says what to fix**: every connection string present and
+parseable, the token signing key present and long enough, and the alert history retention at least as long as
+the longest configurable alert window.
+
+⚠️ **Validating the provider key at startup is harder than it sounds — check the seam before promising it.**
+Which provider is used is decided when services are registered, before anything can make a call. By the time
+a validation call is possible, the choice is already made. Falling back to the fake provider therefore means
+either registering both and choosing behind a seam, or deferring the decision to first use. Neither is free.
+And the standing rule from Phase 3 must survive intact: **a missing key is a supported state and nothing here
+may throw** — an eager failure takes down the one-command startup, which is a gate item.
 
 A container that refuses to start with a clear reason beats one that starts and serves nothing.
 
 ---
 
-## 3. Frontend
+## Proving it
 
-### API health panel
-
-The mockup's panel, wired for real: one row per component with a coloured dot, the provider name, last successful poll as relative time, and tickers tracked. Polls `/api/health/detail` every 30s — independent of the dashboard query, so a dashboard failure doesn't take the health panel down with it.
-
-### Query-level error handling
-
-```ts
-new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: (failureCount, error) =>
-        error instanceof ApiError && error.status >= 400 && error.status < 500
-          ? false                        // never retry a 4xx
-          : failureCount < 3,
-      throwOnError: false,               // handle inline, don't unmount the route
-    },
-  },
-  queryCache: new QueryCache({ onError: (e, query) => toastOnce(e, query) }),
-})
-```
-
-**Never retry a 4xx.** Retrying a 401 three times before refreshing wastes the refresh window; retrying a 400 is pointless. Only 5xx and network errors retry.
-
-`throwOnError: false` on the dashboard query is the reason Phase 3 avoided a route loader: keep the last good table on screen with an inline banner, rather than replacing the whole route with an error component.
-
-### The three visible states
-
-| State | UI |
-|---|---|
-| **Fresh** | Normal. "Updated 12s ago". |
-| **Stale** | Amber banner: "Prices last updated 6 minutes ago — the quote provider is not responding." Table still shows the last known numbers, dimmed. |
-| **Unavailable** | Table shows structure with "—" in price columns, totals show cost only, explicit "prices unavailable" note. **Never $0.00.** |
-
-### Error boundaries
-
-One per route under `_authenticated`, plus a root boundary. A crash in the alerts panel must not take the dashboard down. Each boundary offers Retry, which resets the query rather than reloading the page.
-
-### Mutation failures
-
-Add/edit/delete holdings roll back their optimistic update and show the server's `ProblemDetails` message inline on the form — not a toast that disappears before it is read.
-
-⚠️ This is where Phase 2's TanStack Query v5.89 signature change bites hardest: a wrong `onError` signature rolls back the wrong snapshot, and it only shows up when a mutation actually fails. The Phase 2 test covers it; re-verify here with the provider genuinely down.
-
-### Offline
-
-`navigator.onLine` plus the SSE connection state drive a thin "reconnecting" bar. On reconnect, Phase 4's stream hook invalidates the alerts query, so anything fired while disconnected arrives on the next history fetch — using machinery TanStack Query already provides rather than a replay protocol.
-
----
-
-## 4. Infrastructure delta
-
-**Bicep**
-
-```bicep
-probes: [
-  { type: 'Startup',   httpGet: { path: '/health/startup',  port: 8080 }, failureThreshold: 30, periodSeconds: 2 }
-  { type: 'Liveness',  httpGet: { path: '/health/live',     port: 8080 }, periodSeconds: 30 }
-  { type: 'Readiness', httpGet: { path: '/health/ready',    port: 8080 }, periodSeconds: 10 }
-]
-```
-
-Three endpoints with genuinely different meanings, because ACA acts on them differently:
-
-- `/health/live` — **process is alive**. Must not check Postgres or Redis. A dependency outage that fails liveness gets your container killed and restarted in a loop, turning a degraded app into a down one.
-- `/health/ready` — **can serve traffic**: Postgres reachable. Fails → removed from the load balancer, not killed.
-- `/health/startup` — migrations applied, config validated. Generous `failureThreshold` so a cold start is not mistaken for a crash.
-
-Getting liveness wrong is the single most common way a Container Apps deployment turns a partial outage into a total one.
-
-**Compose** — same split, plus `restart: unless-stopped` on the API.
-
-**Workflow** — a post-deploy smoke step: `/health/detail` returns 200 with `Database: Healthy`, then open the SSE stream and assert a `ping` inside 30s. Fail the deploy if not.
-
----
-
-## 5. Tests
-
-### Unit
-
-| Test | Asserts |
-|---|---|
-| `FeedHealth_NoPollForTwoCycles_ReportsDegraded` | |
-| `FeedHealth_NoObservationsAtAll_ReportsUnhealthy` | The three-state distinction |
-| `FeedHealth_RecoversAfterSuccessfulPoll` | |
-| `LastKnownGood_ServesLatestPrice_WhenCacheUnavailable` | |
-| `LastKnownGood_DoesNotServeWindow` | Fabricated windows would fire fabricated alerts |
-| `Startup_MissingJwtKey_ThrowsWithClearMessage` | |
-| `Startup_ShortJwtKey_Throws` | |
-| `Startup_InvalidProviderKey_FallsBackToFake_WithWarning` | Doesn't refuse to start |
-
-### Integration — `Api.IntegrationTests`
-
-| Test | Asserts |
-|---|---|
-| `Dashboard_ProviderThrows_Returns200WithStaleFlag` | Not 500 |
-| `Dashboard_Provider429_Returns200_HonoursRetryAfter` | And `RateLimitRemaining` is 0 |
-| `Dashboard_CircuitOpen_ServesCachedWithoutCallingProvider` | Call counter stays flat |
-| `Dashboard_RedisStopped_ServesLastKnownGood` | **Stop the Testcontainer mid-test** |
-| `Alerts_RedisStopped_AreSuppressed_NotFabricated` | The asymmetry, enforced |
-| `Health_ProviderDown_ReportsQuoteFeedDegraded` | |
-| `Health_Live_DoesNotTouchDatabase` | The liveness rule — assert with a stopped Postgres container |
-| `Health_Ready_FailsWhenDatabaseDown` | |
-| `OneBadTicker_DoesNotAbortPollCycle` | Malformed response for one symbol; the others still write observations |
-| `Transaction_UnderRetryStrategy_IsWrappedInExecutionStrategy` | The Phase 1 decorator, finally exercised |
-
-### Frontend
-
-`stale response renders amber banner and keeps the table` · `unavailable price renders "—" not $0.00` · `4xx is not retried` (MSW request counter) · `alerts panel crash does not unmount the dashboard` · `mutation failure restores the correct pre-mutation snapshot` · `offline bar appears and clears on reconnect`
-
-### Manual chaos
-
-Scripted in the README so a reviewer can reproduce:
+Tests pin the behaviour, but this phase is judged in a browser, so the proof has to be reproducible by hand.
+Script it in the README:
 
 ```bash
-docker compose stop redis      # dashboard degrades, alerts suppressed
+docker compose stop redis      # dashboard still renders fresh prices; alerts suppressed and say so
 docker compose start redis     # recovers within one cycle
-docker compose stop postgres   # 503 + retry screen, container NOT restart-looping
+docker compose stop postgres   # 503 and a retry screen — and the API is NOT restart-looping
 ```
 
----
+Alongside those, three more done by hand: set a deliberately invalid provider key and restart; block the
+provider mid-session; and force an error inside the alerts panel. The expected outcome of each is in the
+checklist below.
 
-## 6. Gotchas
+Watch the container list as well as the browser. A restart loop looks fine from the outside for the first few
+seconds.
 
-**Liveness must not check dependencies.** A liveness probe that pings Postgres turns a database blip into a container restart loop, and ACA will keep restarting. This is the highest-consequence mistake in the phase.
-
-**`Retry-After` is honoured by default and silently disabled by `DelayGenerator`.** Repeating it from Phase 3 because this is the phase where you will be tempted to tune the retry strategy.
-
-**A circuit breaker needs a minimum throughput before it opens.** With one call per ticker per minute, the default sampling window may never accumulate enough calls to trip. Configure `MinimumThroughput` and `SamplingDuration` against your actual cadence, or the breaker is decoration.
-
-**`abortConnect=false` on Redis.** Without it, a multiplexer that fails its first connect stays permanently broken even after Redis returns — the app looks like it never recovers.
-
-**`EnableRetryOnFailure` + explicit transactions throws** *"The configured execution strategy does not support user initiated transactions"* unless wrapped in `CreateExecutionStrategy().ExecuteAsync(...)`. And the wrapped delegate re-runs wholesale on a transient failure, so everything inside must be idempotent.
-
-**`ProblemDetails` needs `AddProblemDetails()` registered** or unhandled exceptions return an empty body with a status code, and the SPA has nothing to display.
-
-**Do not log the raw provider response at Information.** It contains the API key in the request URL if you fell back to `?token=`. Debug level, and prefer the header form from Phase 3.
-
-**Toast-only errors on mutations get missed.** The brief grades error handling; an error the user has to catch within three seconds does not count as handled.
+The deploy pipeline gets a smoke step for the same reason: after deploying, the health detail must report a
+healthy database, and the alert stream must produce a heartbeat within thirty seconds. Fail the deploy if
+not.
 
 ---
 
-## 7. Your call
+## One decision left to you
 
-### Degradation thresholds — `MarketData.Application/FeedHealthPolicy.cs`
+**When does the UI stop trusting a price?**
 
-```csharp
-internal static class FeedHealthPolicy
-{
-    // TODO(you): when does the UI stop trusting a price?
-    //
-    //   STALE THRESHOLD — after how long without a successful poll does the banner
-    //     appear? Too tight and a single slow cycle cries wolf on every deploy;
-    //     too loose and the reviewer sees confidently-presented 20-minute-old prices.
-    //     Note this interacts with the user's refresh interval from Phase 5: someone
-    //     polling at 15s sees "stale" four times sooner than someone at 60s unless
-    //     you anchor it to the SERVER cadence.
-    //
-    //   UNAVAILABLE THRESHOLD — when do you stop showing numbers at all and switch
-    //     to "—"? Showing an hour-old price with a small amber note is arguably
-    //     worse than showing nothing, because the number still anchors the reader.
-    //
-    //   WEEKEND — Friday's close on a Sunday is stale by every clock-based measure
-    //     and yet is the correct, only, and freshest possible answer. A pure
-    //     time-since-poll rule marks a perfectly healthy weekend app as degraded.
-    //
-    // This is the phase's whole point: honest degradation. The numbers you pick
-    // here are what a reviewer actually sees when they inevitably run it with a
-    // bad API key.
-    public static FeedState Classify(DateTimeOffset? lastPoll, DateTimeOffset? newestObservation) => …;
-}
-```
+- **The stale threshold** — how long without a fresh price before the banner appears. Too tight and a single
+  slow moment cries wolf on every deploy. Too loose and a reviewer is shown confidently presented
+  twenty-minute-old numbers.
+- **The unavailable threshold** — when do you stop showing a number at all and show a dash instead? An
+  hour-old price with a small amber note is arguably worse than no price, because the number still anchors
+  the reader.
+- **The weekend.** Friday's closing price on a Sunday is stale by every clock-based measure, and is
+  simultaneously the correct, only and freshest possible answer. A pure time-since-last-price rule marks a
+  perfectly healthy weekend app as broken.
 
-~10 lines. Write it before `FeedHealth_NoPollForTwoCycles_ReportsDegraded`, since the test encodes the numbers.
+Remember the two clocks: whatever you pick, the dashboard is classified per request from the age of what it
+served, and the alert feed from the time since its last successful poll.
+
+This is the phase's whole point — honest degradation. These numbers are literally what a reviewer sees when
+they inevitably run it with a bad API key.
 
 ---
 
-## 8. Done when
+## Done when
 
-- [ ] `docker compose up`, then `docker compose stop redis` → dashboard still renders prices from last-known-good, marked stale; alerts panel says alerts are suppressed
-- [ ] `docker compose start redis` → recovers within one cycle, banner clears
-- [ ] Set an invalid `Finnhub__ApiKey` and restart → app **starts**, logs a warning, falls back to the fake provider, health panel shows "Fake"
-- [ ] Block the provider mid-session → amber banner within the stale threshold, table keeps the last good numbers, no 500 anywhere in devtools
-- [ ] `docker compose stop postgres` → 503 with a readable message and a Retry button, and `docker ps` shows the API **not** restart-looping
-- [ ] Force an error inside the alerts panel → the dashboard stays up
-- [ ] Fail a holding mutation → the row reverts to its correct previous value, message shown inline on the form
-- [ ] Go offline → reconnecting bar; back online → SSE replays the gap with no manual refresh
-- [ ] `dotnet test` green, including `Health_Live_DoesNotTouchDatabase` and `Alerts_RedisStopped_AreSuppressed_NotFabricated`
-- [ ] `npm test` green
-- [ ] Deployed; repeat the provider-down case against the Azure API
-- [ ] **README complete** — the brief asks for a *короткий* description, so ~1 page plus a link to `docs/Initial.md`:
-  - [ ] `docker compose up` instructions, working from a clean clone with no API key
-  - [ ] The **SSE vs WebSocket decision matrix**
-  - [ ] **Parameterisation evidence** for P0 req 6 — state that the project uses EF Core throughout with no hand-written SQL, because the brief permits "raw or query builder" and asks only for parameterisation, which EF Core makes structural rather than conventional. Then show it rather than claiming it: paste one generated statement with its `@p0` placeholders beside the `DbParameter` values, and name the three tests in `Api.IntegrationTests` that enforce it — including the fixture-wide interceptor asserting no user-supplied value ever appears in `CommandText`
-  - [ ] The fake provider, and why it is the default
-  - [ ] The BYOK design
-  - [ ] The Azure deployment, cost, and `az group delete` teardown
-  - [ ] A trimmed "what we rejected, and why" table from `Initial.md:156-172` — the single best evidence for the brief's grading criterion 4
-  - [ ] Known limits: the recomputed ticker ceiling, the per-replica last-known-good cache's inconsistency, HTTP/1.1's 6-connection cap
-- [ ] `docs/Initial.md` corrections applied — alert-settings ownership, the window-claim overlap guard, the alert example's arithmetic. Its four-module description is **not** corrected: the file is historical, and `00-overview.md` §"Four modules" is where the current shape and its reasoning live
-- [ ] The `alerts` schema, the `alerts_svc` role and the `ALERTS_PW` / Alerts-connection-string variables are gone from `db/init/`, `docker-compose.yml`, `infra/` and the workflows — **verified by a clean-clone `docker compose up`**, which is the only thing that can prove it (see `docs/deferred-work.md`)
-- [ ] Full verification walkthrough from `00-overview.md` §Verification passes end to end, locally and deployed
+- Redis stopped — the dashboard still renders prices, the alerts panel says alerts are suppressed. Started
+  again — it recovers within a cycle and the banner clears.
+- An invalid provider key plus a restart — the app **starts**, logs a warning, uses the fake provider, and
+  the health panel says so.
+- Provider blocked mid-session — amber banner within the stale threshold, the table keeps the last good
+  numbers, no server error anywhere in devtools.
+- Postgres stopped — 503 with a readable message and a retry button, and the API **not** restart-looping.
+- An error forced inside the alerts panel — the dashboard stays up.
+- A failed position mutation — the row reverts to its correct previous value, message inline on the form.
+- Offline, then back online — the reconnecting bar appears and clears, and the gap fills with no manual
+  refresh. Not a replay: the stream carries only new events and the history request fills the gap.
+- Backend and frontend test suites green.
+- Deployed, and the provider-down case repeated against the live API.
+- A clean-clone startup brings up every database schema **in use** — four schemas and every login actually
+  connected by something, rather than one created and orphaned. The alerts schema, its login and its password
+  are Phase 4's plumbing and stay exactly where they are; the deferred item they belong to closes by being
+  consumed, not by being deleted.
+- The full verification walkthrough from the overview passes end to end, locally and deployed.
+- **README complete.** The brief asks for a short description, so roughly a page plus a link to the
+  architecture essay:
+  - How to run it with one command, from a clean clone, with no API key.
+  - The server-sent-events versus WebSockets decision, with its comparison table.
+  - **Evidence of parameterised database access** — state that everything goes through the ORM with no
+    hand-written SQL, then show it rather than claim it: one generated statement with its placeholders beside
+    the parameter values, and a description of the interceptor that watches every command in the test suite
+    and asserts no user-supplied value is ever spliced into one.
+  - The fake provider, and why it is the default.
+  - How a user's own API key is used, and where the application's is still used.
+  - The Azure deployment, what it costs, and how to tear it down.
+  - A trimmed "what we rejected, and why" table — the single best evidence for the grading criterion about
+    justifying decisions.
+  - Known limits: the ticker ceiling, the browser's six-connections-per-origin cap, and the free tier's
+    roughly sixty calls a minute against twenty calls per dashboard load — stated as inferred, since the
+    provider does not publish it.
+
+## Reference
+
+These describe the shape of the system rather than the order it gets built in. They live in `docs/reference/`.
+
+- [Module interactions](../reference/module-interactions.md) — what still works when each dependency fails.
+- [Data model](../reference/er-diagram.md) — what is in Redis and therefore lost when Redis is.

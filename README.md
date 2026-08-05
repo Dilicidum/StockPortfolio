@@ -41,6 +41,29 @@ npm --prefix src/Web run dev
 npm --prefix src/Web test
 ```
 
+### Checking the whole thing by hand
+
+Start from a clean clone with no API key configured. The fake price provider has to carry this on its
+own, because there is no demo key to hand anybody.
+
+1. Register, land on the dashboard, hard-refresh — still signed in.
+2. Add 10 shares of AAPL at $100, then 10 more at $150. One row, 20 shares, average $125.
+3. Prices appear on the first render, including for a stock added seconds ago.
+4. Set a threshold to 1% and press Simulate — an alert arrives in about a second.
+5. Reload. The alert is still listed, because it was saved, not replayed.
+6. Switch to Ukrainian and to dark mode. Both survive a reload.
+7. Hide a position. Its row goes; it is still watched and still alerts.
+8. Set the refresh interval to 15 seconds. The dashboard visibly updates faster.
+9. Stop the price provider. Prices go amber with their age, health goes amber, nothing crashes.
+10. Narrow the window to 375px. The table becomes cards.
+11. `docker compose down && docker compose up`. The data is still there.
+
+Then repeat steps 1 to 5 against the deployed site, watching that the alert connection survives past
+four minutes — the hosting platform closes idle connections at four minutes and will not go higher,
+which is the whole reason the connection sends something every twenty seconds.
+
+Steps 4 to 8 need Phases 4 and 5, which are not built yet.
+
 ---
 
 ## Architecture
@@ -66,36 +89,32 @@ own `.Infrastructure`. The two halves of a module meet only through `Application
 route physically cannot reach a `DbContext` — the reference does not exist.
 
 Only `.Contracts` crosses a module boundary. Since `.Domain` and `.Application` are `public` (they
-have to be — `internal` is per-assembly and a module is five assemblies), the compiler no longer
-enforces that one, so `Architecture.Tests` does. Those tests are load-bearing rather than decorative,
-and there is a test that deliberately looks for edges that *do* exist, so a walker that always found
-nothing could not report a false green.
+have to be — `internal` is per-assembly and a module is five assemblies), the compiler cannot check
+that one, so `Architecture.Tests` does. Those tests actually enforce the rule rather than describe it,
+and there is a test that deliberately looks for references that *do* exist, so a search that always
+found nothing could not report a false green.
 
 ### Decisions worth defending
 
-**Alerts is a module — the Phase 2 merge into Portfolio was reversed, and the reversal is the more
-interesting half.** The merge argued that the test for a bounded context is *ubiquitous language*, that
-`Ticker` meant a stock symbol identically in Portfolio, MarketData and Alerts, and that there was therefore
-one context split in two. That inverts the heuristic. Language divergence is *sufficient* to conclude two
-contexts exist; it is not *necessary*. Two contexts can share a vocabulary entirely and still be two.
+**Alerts is its own module, not part of Portfolio.** Sharing a word does not make two models one:
+`Ticker` means a stock symbol identically in Portfolio, MarketData and Alerts, and they are still three
+contexts. Different words are enough to prove two contexts exist, but they are not required.
 
-What actually decides it is extraction cost — would this seam survive becoming a network call? `AlertSettings`
-and `FiredAlert` never share a transaction with `Holding`, no invariant spans any two of the three aggregates,
-they are written on a different trigger, and alerts can be down while the dashboard renders. Three aggregates
-with nothing spanning them is not one context.
+What decides it is the cost of pulling a module out — would this boundary survive becoming a network
+call? `AlertSettings` and `FiredAlert` never share a transaction with `Holding`, no rule spans any two of
+the three aggregates, they are written at different times, and alerts can be down while the dashboard
+renders. Three aggregates with nothing spanning them is not one context.
 
-**Subdomain classification was dropped with the merge, and is not coming back.** An earlier version of this
-section labelled Portfolio core, Identity generic and MarketData supporting. That vocabulary is real DDD and
-it changed no code here; worse, it conflated three separate ideas — a subdomain is problem space, a bounded
-context is a model boundary, and a module in Evans' sense is a namespace *inside* a context. Boundaries are
-argued from extraction cost instead, which is checkable.
+**Core / supporting / generic subdomain labels are not used.** That vocabulary is real DDD and it
+changed no code here; worse, it mixes up three separate ideas — a subdomain is the problem, a bounded
+context is a model boundary, and a module in Evans' sense is a namespace *inside* a context. Boundaries
+are argued from the cost of pulling a module out instead, which is something you can check.
 
-**What the merge got right stayed deleted: the domain-event apparatus.** `HoldingRemoved` was the only domain
-event in a six-phase plan and existed solely to clear a Redis cooldown across the Portfolio/Alerts line. A
-cooldown has a TTL and expires by itself, so the fix was deleting the event, not the boundary — and
-`IDomainEvent`, a handler interface, a publisher and a `SaveChanges` interceptor were never written. The
-runtime dependency graph today is a single edge, `Portfolio → MarketData`, with Identity carrying zero
-inbound coupling.
+**There is no domain-event machinery.** `HoldingRemoved` was the only domain event in a six-phase plan
+and existed solely to clear a Redis cooldown across the Portfolio/Alerts line. A cooldown has a TTL and
+clears itself, so the answer was to delete the event, not to move the boundary — and `IDomainEvent`, a
+handler interface, a publisher and a `SaveChanges` interceptor were never written. The runtime
+dependency graph today is a single edge, `Portfolio → MarketData`, and nothing depends on Identity.
 
 **SSE, not WebSockets.** The brief lists WebSockets; the task-giver also said to use whatever we
 judge appropriate. Alerts are strictly server→client, one-way, low-frequency.
@@ -119,7 +138,7 @@ asserted: a `DbCommandInterceptor` in the test fixture registers a user whose em
 **One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from
 `identity.users` fails with SQLSTATE `42501`. There is a test for exactly that, because a module
 boundary you cannot demonstrate is a diagram, not a boundary. A fourth role and schema, `alerts_svc` /
-`alerts`, are still created and now unused — see Known gaps.
+`alerts`, are created and unused — see Known gaps.
 
 **Money is `decimal` server-side and serialised as strings.** `System.Text.Json` writes `decimal` as
 a JSON number and `JSON.parse` turns it into a double, which destroys the arithmetic at the
@@ -131,9 +150,8 @@ its list ends with "тощо" (etc.). Every control is hand-built with Tailwind.
 ### Token storage — the honest version
 
 - **Access token in memory only.** A module-scoped variable, never `localStorage`.
-- **Refresh token in `sessionStorage`**, in every deployment. **There is no cookie** — an earlier
-  version of this section claimed an httpOnly cookie under compose, and that half was never built.
-  The server sets no cookie anywhere; every auth endpoint returns the pair in the response body.
+- **Refresh token in `sessionStorage`**, in every deployment. **There is no cookie.** The server sets
+  no cookie anywhere; every auth endpoint returns the token pair in the response body.
 
 `sessionStorage` is weaker than an httpOnly cookie and it is the honest consequence of hosting the
 SPA statically on a different origin from its API: the cookie would be third-party, and Safari
@@ -154,8 +172,8 @@ out. Reusing a superseded token after the grace window closes is rejected.
 
 ## Portfolio
 
-One row per `(user, ticker)`, enforced by a unique index rather than by a C# check — a guard in a handler
-cannot survive two concurrent requests.
+One row per `(user, ticker)`, enforced by a unique index rather than by a C# check — a check in a handler
+cannot survive two requests arriving at the same time.
 
 ### Buying more of something you already hold averages the price
 
@@ -187,7 +205,7 @@ Three edges are rejected rather than accepted quietly: a purchase price of **$0*
 zero and reads as a bug on the dashboard), a quantity below **0.000001** (one unit of the column's
 precision — `0.0000001` rounds to zero on store, and the next merge would then divide by zero), and any value
 above **999999999999.999999**, which is simply more than twelve integer digits and would otherwise reach
-Postgres as a `22003 numeric field overflow` and surface as a bare 500. The ceiling is checked in the request
+Postgres as a `22003 numeric field overflow` and come back as a bare 500. The ceiling is checked in the request
 validator so the client gets a 400 naming the field, and again in the entity — including against the *sum* of
 a merge, which two individually legal quantities can cross.
 
@@ -233,7 +251,7 @@ a user typing `150` into a price field is not a computation. Nothing on the clie
 ### The merge race, and the 500 we accept
 
 Two genuinely simultaneous `POST`s for the same ticker can both read "no existing position" and both try to
-insert. The unique index catches the second one, and it surfaces as a **500, not a 409**.
+insert. The unique index catches the second one, and it comes back as a **500, not a 409**.
 
 That is a deliberate repeat of the decision already made for registration, not an oversight:
 
@@ -291,11 +309,11 @@ Sunday, which is the *correct* price. A cap by market session needs the trading 
 deliberately dropped. And either cap recreates the blank table the fallback exists to prevent — the one thing
 a reviewer killing the provider will see.
 
-So age never disqualifies a price, and `LastKnownPrice.IsWorthShowing` is not a staleness rule at all. What it
-actually guards is **integrity of the stored observation**: a price of zero or less is rejected (a corrupt
+So age never disqualifies a price, and `LastKnownPrice.IsWorthShowing` is not an age rule at all. What it
+actually checks is whether the **stored reading is sound**: a price of zero or less is rejected (a corrupt
 write, and exactly the shape a bad upstream response would leave behind), and a timestamp more than five
-minutes in the future is rejected (a skewed replica). "Always true" would have been a test that cannot fail;
-these three cases can each go red.
+minutes in the future is rejected (a replica with a wrong clock). "Always true" would have been a test that
+cannot fail; these three cases can each go red.
 
 Amber on a row means `isLastKnown`, never age. A fresh provider answer for a thinly traded symbol also carries
 an old timestamp, and colouring on the timestamp would light the whole table up on a healthy Sunday — the
@@ -334,9 +352,9 @@ Taking 60/minute as read, the arithmetic is unkind and worth stating plainly rat
   minute's budget.
 - **Three concurrent viewers exhaust it.**
 
-That is a property of the free tier, not a bug to engineer around, and the 60-second default is load-bearing
-rather than arbitrary — picking 15s quadruples the figure. The interval control offers 15s / 30s / 60s / 5m
-and the shorter options are the user's to spend.
+That is a property of the free tier, not a bug to engineer around, and the 60-second default is a real
+choice rather than an arbitrary one — picking 15s multiplies the figure by four. The interval control offers
+15s / 30s / 60s / 5m and the shorter options are the user's to spend.
 
 Two things bound the damage rather than fix it. Outbound calls go through a single process-wide token bucket
 (25 tokens, refilling at 1/second) with fan-out capped at 4 concurrent requests, so twenty tickers resolve in
@@ -364,7 +382,7 @@ With no `Finnhub__ApiKey` configured the app registers `FakeQuoteProvider`, logs
 active provider, and serves a deterministic seeded random walk — stable per `(ticker, minute)`, continuous
 within a UTC day, priced $20–$500 per symbol and identical across replicas and restarts. `GET
 /api/marketdata/health` returns the active provider's name, and the SPA's health panel renders the same
-string, so the log and the page cannot drift.
+string, so the log and the page cannot disagree.
 
 This is the clean-clone path and the test path, and it is why `docker compose up` needs no credentials. It is
 **not** for the deployed app: leaving the fake on in Azure serves invented prices for real tickers, which
@@ -376,18 +394,19 @@ reads as broken rather than as a thoughtful fallback.
 
 | Suite | Covers |
 |---|---|
-| `Shared.Kernel.UnitTests` | `Money` arithmetic and currency guards |
+| `Shared.Kernel.UnitTests` | `Money` arithmetic and its currency checks |
 | `Modules.Identity.UnitTests` | entities, Argon2id, PHC encoding, validators |
 | `Modules.Portfolio.UnitTests` | the merge/correct rules, rounding, and the dashboard P&L calculator |
 | `Modules.MarketData.UnitTests` | Finnhub response mapping, the fake's determinism, the Redis store's encode/decode |
 | `Architecture.Tests` | the six boundary rules, plus a test that the rules can fail |
 | `Api.IntegrationTests` | Testcontainers Postgres + Redis, real HTTP, real migrations |
 
-`dotnet test` reports **416 passing and 2 skipped of 418** with Docker up. Both skips are
-`Identity.Contracts`, which is empty on purpose — nothing reaches into Identity — and a rule that
-skips is a rule enforcing nothing, so the exact list of skipped assemblies is pinned by a test rather
-than left to drift. `npm --prefix src/Web test` reports 26 passing across 6 files and is counted
-separately.
+`dotnet test` runs all six suites with Docker up; `npm --prefix src/Web test` runs the browser tests
+separately. The exact pass and skip counts are kept in one place only, [CLAUDE.md](CLAUDE.md).
+
+Two architecture rules skip, both on `Identity.Contracts`, which is empty on purpose because nothing
+reaches into Identity. A rule that skips enforces nothing, so the exact list of empty assemblies is
+fixed by a test rather than left to change unnoticed.
 
 Integration tests run the **same** `db/init/01-roles.sql` that ships, so the isolation under test is
 the isolation that deploys.
@@ -404,20 +423,33 @@ Three targets: `docker compose` (the P0 gate), **GitHub Pages** for the SPA, and
 Apps** for the API. Postgres Flexible B1ms and Azure Managed Redis Balanced B0 — *not* Azure Cache
 for Redis, which is retiring.
 
-Cross-origin is therefore permanent, which drives three things designed in from Phase 1: an explicit
-CORS policy in exactly one layer, a ticket handshake for SSE (because `EventSource` cannot set
-headers), and a 20-second heartbeat, since ACA's `requestIdleTimeout` is 4 minutes and 4 is also the
-floor on Consumption.
+**Two of the three are live.** Phase 3 is deployed and verified on the public URL as of 2026-08-05:
+the SPA at `dilicidum.github.io/StockPortfolio` renders live market prices against the ACA API, and
+`/api/marketdata/health` returns `{"provider":"Finnhub"}` — a real key, not the fake. The API runs at
+`stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` in resource group
+`stockportfolio-rg`, at roughly $1.26/day.
+
+**Deploying is `git push origin main` and nothing else.** The full runbook is
+[docs/DEPLOYING.md](docs/DEPLOYING.md) and the reasoning behind the cost model is in
+[the design record](docs/superpowers/specs/2026-08-02-azure-deployment-design.md). Read the runbook
+before touching Bicep or a workflow. Cost is bounded by **time, not budget**: pay-as-you-go has no
+spending limit and a budget only emails, so the deploy stamps a `deleteAfter` tag on the resource
+group and a scheduled workflow deletes the whole group once that date passes. Deploying extends the
+window; not deploying lets it expire.
+
+The SPA and the API sit on different origins and always will, which drives three things. **One is
+built**: an explicit CORS policy in exactly one layer. **Two are designed and do not exist yet** — a
+ticket handshake for SSE (because `EventSource` cannot set headers) and a 20-second heartbeat, since
+ACA's `requestIdleTimeout` is 4 minutes and 4 is also the floor on Consumption. Both arrive with the
+alert stream in Phase 4; search `src/` for `EventSource`, `text/event-stream` or `heartbeat` today
+and you get nothing.
 
 Every connection string carries `Maximum Pool Size=2`: B1ms allows 35 user connections, and a
-different username is a different Npgsql pool.
-
-The arithmetic here used to say 12, and it was wrong — as were the three other figures published
-elsewhere in the docs, in both directions. What matters is **what opens a pool, not what is defined**.
-The database creates five roles and four schemas, but the API registers exactly two `DbContext`s
-(Identity and Portfolio), so there are **two pools per replica**: 2 replicas × 2 pools × 2 = **8**,
-leaving 27 spare. MarketData has no database and opens nothing; `migrator` runs as a separate job, not
-alongside the API. The Npgsql default of 100 would ask for 400.
+different username is a different Npgsql pool. What matters is **what opens a pool, not what is
+defined**. The database creates five roles and four schemas, but the API registers exactly two
+`DbContext`s (Identity and Portfolio), so there are **two pools per replica**: 2 replicas × 2 pools ×
+2 = **8**, leaving 27 spare. MarketData has no database and opens nothing; `migrator` runs as a
+separate job, not alongside the API. The Npgsql default of 100 would ask for 400.
 
 ---
 
@@ -427,29 +459,32 @@ Stated plainly rather than left for you to find.
 
 - **`what-if` has never been read by a human.** `az` is not installed on the development machine.
   `ci.yml`'s **Bicep build** job compiles the templates and `deploy.yml` runs `what-if` in the runner
-  immediately before deploying, so both execute — nobody has diffed the output by eye. Phase 3 changed
+  immediately before deploying, so both run — nobody has compared the output by eye. Phase 3 changed
   zero lines of Bicep: everything it needed (the Redis connection string, the `Finnhub__ApiKey` secret
-  and its `empty()` guard, the explicit `httpGet` probes) was already in the tree.
+  and its empty-value check, the explicit `httpGet` probes) was already in the tree.
 - **The free tier is the real ceiling, and it does not scale.** With `FINNHUB_API_KEY` set, twenty
   positions is twenty of sixty calls per minute for **one** viewer at the 60-second default; three
   concurrent viewers exhaust the budget. That is a documented property of the free tier rather than a
   bug — over budget, tickers fall back to their last known price rather than failing.
 - **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
   `TODO`. They work and are exercised by tests; they have not been signed off.
+- **There is no ticker search, and adding a position is still a free-text box.** A search box that
+  suggests symbols as you type was specified in the Phase 2 plan and never built, so you must type a
+  symbol from memory, and a typo comes back as a validation error with no way to find the right one.
+  It is the first thing anyone does with the app, which is why it is worth stating here. Nothing is
+  broken: free text validates against `^[A-Z]{1,5}$` and the symbol-existence check rejects anything
+  that is not real. Tracked in [docs/deferred-work.md](docs/deferred-work.md) as **E2**.
 - **Holding visibility is a column, not a control.** The dashboard read already filters on
   `holdings.is_visible`, which is always `true` until Phase 5 adds the toggle. The filter is a no-op
   today and costs nothing.
 - **The portfolio table has no price or profit/loss columns.** Those live on the dashboard, which is
   the screen that fetches prices. This is a decision, not an omission: adding them to the holdings
   table would make a CRUD screen pay the provider fan-out on every render.
-- **The database still has an unused `alerts` schema and `alerts_svc` role.** `docker-compose.yml`,
-  `db/init/00-roles.sh`, `infra/*.bicep` and the workflows still carry `ALERTS_PW` and an Alerts
-  connection string, left over from when Alerts was its own module. Nothing connects as that role.
-  They were not removed with the module because `docker compose up` from a clean clone is the
-  acceptance gate and there was no Docker daemon available to re-verify it. Tracked in
-  [docs/deferred-work.md](docs/deferred-work.md) as **E1**, which was briefly closed on the grounds
-  that Alerts is a module again and has been **reopened**: reinstating Alerts as a *decision* does not
-  reinstate it on disk, and until the module is actually built every orphan the item tracks is still
-  an orphan.
+- **The database has an unused `alerts` schema and `alerts_svc` role.** `docker-compose.yml`,
+  `db/init/00-roles.sh`, `infra/*.bicep` and the workflows all carry `ALERTS_PW` and an Alerts
+  connection string, but no Alerts module exists yet and nothing connects as that role. They were not
+  removed because `docker compose up` from a clean clone is the acceptance gate and there was no
+  Docker daemon available to re-check it. They stop being leftovers when Phase 4 builds the module.
+  Tracked in [docs/deferred-work.md](docs/deferred-work.md) as **E1**.
 - **Npgsql logs `Cannot load library libgssapi_krb5.so.2`** in the container at startup. It is
   probing for Kerberos, falls back to password auth, and is harmless.
