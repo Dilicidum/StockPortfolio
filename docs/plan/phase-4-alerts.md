@@ -1,29 +1,23 @@
-# Phase 4 — Alerts · 0.9 days
+# Phase 4 — Alerts · 1.3 days
 
-> **Where this builds, changed in Phase 2.** Alerts was a fourth module with its own five projects. It is now
-> a **feature area inside Portfolio**: `Portfolio.Domain/Alerts/`, `Portfolio.Application/Alerts/`,
-> `Portfolio.Api/`. Every requirement below is unchanged — thresholds, windows, cooldowns, evaluation after
-> each poll, history, simulate, SSE, the ticket handshake, the `/api/alerts/*` URL space. What changed is
-> which assemblies the files land in, and that three seams stop being module boundaries.
+> **Alerts is a module again, and this phase grew.** Phase 2 merged Alerts into Portfolio; that was
+> reversed — see [module-boundaries.md](module-boundaries.md) §5. Build it as five projects under
+> `src/Modules/Alerts/`, owning the `alerts` schema and connecting as `alerts_svc`, exactly as
+> `Initial.md` had it.
 >
-> The reasoning is in [00-overview.md](00-overview.md) §"Three modules, not four": `Ticker` meant a symbol in
-> Portfolio, MarketData *and* Alerts, so the ubiquitous language never diverged and there was no second
-> bounded context. Portfolio-with-alerts is the **core** subdomain; Identity is generic; MarketData is
-> supporting.
+> **This phase absorbed the quote poller.** It used to be Phase 3, justified as dashboard infrastructure.
+> It is not: the dashboard asks the provider directly and needs no history. A poller and a price *window*
+> exist for exactly one reason — "did this move 5% in the last 15 minutes?" cannot be answered from a
+> single quote. So they arrive here, with the feature that needs them, and this phase went 0.9 → 1.3 days
+> while Phase 3 went 1.1 → 0.8. See §2.9.
 >
-> **Read this file with three substitutions:**
+> **`HoldingRemoved` does not exist**, and neither does any other domain event. Clearing a cooldown on
+> delete was the only thing one was ever raised for, and a cooldown key has a TTL — it expires by itself.
+> Not clearing it costs, at worst, one suppressed alert if the user re-buys the same ticker inside the
+> window.
 >
-> | Written as | Build it as |
-> |---|---|
-> | `Alerts.Domain` / `Alerts.Application` / `Alerts.Api` | `Portfolio.Domain/Alerts/` and the matching folders |
-> | `alerts.alert_settings`, `alerts.fired_alerts`, `alerts_svc` | `portfolio.alert_settings`, `portfolio.fired_alerts`, `portfolio_svc`, in `PortfolioDbContext` |
-> | *"ask Portfolio which users hold this ticker"* via `IUsersHoldingTicker` | an ordinary query inside Portfolio; the contract interface is still there but no boundary is crossed |
->
-> Two further consequences, called out where they occur: `HoldingRemoved` no longer exists (§2.3), and the
-> entity snippets' `UserId` is `Identity.Domain`'s type, which Portfolio may not reference — it is a plain
-> `Guid`, exactly as `phase-2-implementation.md` §2.1 settled for `Holding`.
->
-> Redis key prefixes stay `alerts:*`. They name the feature, not the module.
+> **`UserId` is a plain `Guid` in these snippets.** It is `Identity.Domain`'s type and no other module may
+> reference it, exactly as `phase-2-implementation.md` §2.1 settled for `Holding`.
 
 ## 1. Goal
 
@@ -220,6 +214,58 @@ POST  /api/alerts/simulate          202                              [Authorize]
 
 ---
 
+### 2.9 The poller — moved here from Phase 3
+
+Alert evaluation needs a *series*, so something must sample prices repeatedly and keep them.
+
+**It polls only tickers with an active alert.** Not every held ticker. If nobody has an alert enabled
+anywhere, the cycle finds an empty list and does nothing, which is the correct amount of work for an
+application nobody is watching. That list is Alerts' own — it comes from the alert subscriptions this
+module already owns, not from Portfolio.
+
+```
+marketdata:prices:{ticker}   sorted set, member "{epochMs}:{price}", score epochMs
+                             trimmed on write to the longest configurable window + margin (1h 1m)
+marketdata:claim:{window}    who polls this minute            EX 120
+marketdata:cycle-inflight    is any cycle running, anywhere   EX 110, deleted in a finally
+```
+
+Two locks, not one, and the second is the fix for a real bug in `Initial.md:66-68`. The claim key contains
+the window start, so it picks one winner *within* a minute and says nothing *across* minutes. A cycle that
+overruns — fifty tickers, provider latency, an honoured `Retry-After` — is still fetching when the next
+minute opens, which is a different key, so a second replica claims it and starts fetching too. The
+non-window-keyed in-flight guard closes that. Both TTLs are backstops for a process that dies mid-cycle.
+
+The sorted-set member is `"{epochMs}:{price}"`, never the bare price: members must be unique, so a ticker
+hitting the same value twice would update the existing entry's score instead of adding one, silently
+erasing the earlier reading.
+
+**Retention is validated at startup** — `retention > maxConfigurableWindow`, else throw. Without it someone
+raises the window in config, nobody updates retention, and alerts stop firing with no error anywhere.
+
+⚠️ **This sorted set is not the dashboard's fallback.** That is `marketdata:last:{ticker}` from Phase 3 —
+one value, never trimmed, written by any path that fetches. Two structures because their lifetimes differ:
+a last-known price is wanted for as long as someone might look, a window is trimmed to an hour and only
+exists while an alert does. Collapsing them would couple the dashboard's degradation to this retention
+setting, so shortening the window would silently shorten how far back the dashboard can degrade.
+
+The poller writes both — the window for evaluation, the last-known price for whoever needs it next.
+
+**Traps that came with it**, all real and all previously in Phase 3's §6:
+
+- An unhandled exception in a `BackgroundService` **kills the host** — the default is `StopHost`. The
+  in-loop `try/catch` is not defensive style; without it one bad provider response 502s the whole API.
+- `OperationCanceledException` on shutdown is not an error. Catch it separately and break, or every
+  graceful shutdown logs a stack trace.
+- `PeriodicTimer.WaitForNextTickAsync` does not queue missed ticks — an overrun means the next tick fires
+  immediately, which is exactly why the in-flight guard exists.
+- `BackgroundService` is a singleton; resolve `DbContext` through `IServiceScopeFactory` per cycle. Holding
+  one across cycles leaks tracked entities and eventually the connection.
+- `TimeProvider` into `PeriodicTimer` is what makes the cadence testable — `FakeTimeProvider.Advance(60s)`
+  runs exactly one cycle, deterministically, with no `Task.Delay` and no flakiness.
+
+---
+
 ## 3. Frontend
 
 ### The stream hook
@@ -269,6 +315,13 @@ The live badge in the app shell reads **"Live (SSE)"**, not "WS Live". The brief
 ---
 
 ## 4. Infrastructure delta
+
+**`minReplicas` goes to 1 in this phase, not Phase 3.** Scale-to-zero only breaks something once a
+background service exists, and until now nothing ran between requests. This is the change that makes it
+load-bearing: a sleeping replica evaluates no alerts.
+
+Also add `Alerts__PollIntervalSeconds` and `Alerts__RetentionMinutes` as env vars, in compose and Bicep.
+Phase 3 deliberately shipped neither, because there was nothing to configure.
 
 ```bicep
 scale: {

@@ -1,4 +1,4 @@
-# Phase 2 — My portfolio · 0.75 days
+# Phase 2 — My portfolio · 0.9 days
 
 ## 1. Goal
 
@@ -147,6 +147,33 @@ b.ComplexProperty(h => h.AveragePrice, m => {
 `ComplexProperty`, not `OwnsOne`. Owned entities carry identity and reference semantics, so assigning the same `Money` instance to two properties throws on save; complex types copy by value. Microsoft explicitly recommends migrating.
 
 Precision `(18,6)` on quantity and price, not `(18,2)` — fractional shares exist and an average of `$125.333333` must not silently round to `$125.33` before it reaches the P&L calculation in Phase 3.
+
+---
+
+### 2.6 Ticker search — added after the plan shipped
+
+A new user logs in to an empty dashboard and must add a position. Without search that is a free-text box:
+they type a symbol from memory, mistype it, and get a validation error with no way to discover the right
+one. It is the **first** interaction a reviewer has with the application, and nothing in the six phases
+covered it.
+
+```
+GET /api/tickers/search?q=appl   →   [ { symbol: "AAPL", description: "Apple Inc" }, … ]
+```
+
+Backed by Finnhub's symbol-search endpoint, in `MarketData` — it is the only module that talks to the
+provider. Portfolio consumes it through `MarketData.Contracts` exactly as the dashboard consumes quotes.
+
+Three things it settles at once: **discovery** (you can find a symbol you half-remember), **validation**
+(a symbol picked from the list exists, so `UnknownTicker` stops being the common case), and **the company
+name**, which the mockup's table wants and which nothing else was going to supply.
+
+The field is a combobox — type, debounce, list, pick. Free text stays allowed and still validates against
+`^[A-Z]{1,5}$`, so the endpoint being down degrades to what Phase 2 already had rather than blocking the
+form.
+
+⚠️ Search results are **not** cached in Redis. It is a user-typed query with no reuse across users, and
+caching it would be the same instinct that produced the read-through mess in Phase 3.
 
 ---
 

@@ -41,7 +41,7 @@ projects with its own schema. Calling one of them "the core module" collapsed th
 ```mermaid
 flowchart TB
     WEB["React SPA — GitHub Pages"]
-    HOST["Api host — composition root<br/>endpoints · DI · the ITickersHeldByAnyUser adapter"]
+    HOST["Api host — composition root<br/>endpoints · DI · the ITickersToPoll adapter"]
 
     ID["<b>Identity</b><br/>register · login · refresh · logout"]
     PF["<b>Portfolio</b><br/>holdings · weighted-average merge<br/>dashboard read model · P&amp;L"]
@@ -53,10 +53,10 @@ flowchart TB
     HOST --> PF
     HOST --> MD
     HOST --> AL
-    HOST -.->|"adapts Portfolio.Contracts<br/>to MarketData's ITickersHeldByAnyUser"| MD
+    HOST -.->|"adapts Alerts.Contracts<br/>to MarketData's ITickersToPoll"| MD
 
-    PF -->|"IQuoteReader — prices for the dashboard join"| MD
-    AL -->|"IUsersHoldingTicker — who holds this?"| PF
+    PF -->|"IQuoteReader — prices for the dashboard"| MD
+    AL -->|"IUserHoldsTicker — may this user alert on it?"| PF
     AL -->|"IPriceWindowReader — current / min / max"| MD
 
     style PF fill:#14532d,stroke:#4ade80,color:#dcfce7
@@ -70,8 +70,9 @@ Read the graph two ways and it says the same thing both times:
 - **Nothing depends on Alerts**, and **Alerts depends on two things**. It is a pure consumer — the leaf of
   the graph, and therefore the module whose internals nobody else can be broken by.
 - **MarketData depends on nothing.** It needs to know which tickers to poll, but declares that need as its
-  own interface, `ITickersHeldByAnyUser`, and the host supplies a ten-line adapter over `Portfolio.Contracts`.
-  Without that inversion Portfolio and MarketData would be mutually dependent and the graph would cycle.
+  own interface, `ITickersToPoll`, and the host supplies a ten-line adapter over `Alerts.Contracts`. Without
+  that inversion the graph would cycle. Note the two names differ on purpose: MarketData's question is
+  *"what should I poll"*, Alerts' answer is *"these have active alerts"*, and they happen to coincide today.
 - **Nothing calls Identity at runtime.** The JWT is self-contained, so `Identity.Contracts` is empty — the
   emptiness is the evidence.
 
@@ -107,8 +108,8 @@ Dockerfile, its own connection string, one swapped DI registration.
 | **Read model** | dashboard projection — market value, cost, profit in currency and percent, weight, freshness |
 | **Endpoints** | `/api/holdings` CRUD · `/api/dashboard` |
 | **Postgres** | `portfolio` — holdings, dashboard_settings |
-| **Depends on** | MarketData, for prices |
-| **Exposes** | `IUsersHoldingTicker`, `ITickersHeldByAnyUser` |
+| **Depends on** | MarketData, for prices on the dashboard |
+| **Exposes** | `IUserHoldsTicker` — one boolean, so Alerts can reject a subscription for a ticker you do not hold |
 
 `Merge` versus `Correct` is the one place the domain language does real work: "I bought more" and "I typed
 it wrong" touch the same two fields and mean different things, and folding them behind one flag is how a
@@ -120,8 +121,8 @@ correction silently becomes a purchase.
 |---|---|
 | **Value objects** | `Quote(Ticker, Price, ObservedAt)`, its own `Ticker` |
 | **Entities** | `UserApiKey` — BYOK, Data-Protection encrypted, never returned to the browser |
-| **Behaviour** | 60-second poller, read-through on cache miss, provider failover, client-side rate limiting, a fake provider that is the default when no API key is set |
-| **Redis** | `marketdata:prices:{ticker}` sorted sets, `marketdata:claim:{window}`, `marketdata:cycle-inflight` |
+| **Behaviour** | fetches quotes on demand for the dashboard; runs the alert poller; records the last price it saw for every ticker; degrades to that value with its age when the provider is unreachable; a fake provider that is the default when no API key is set |
+| **Redis** | `marketdata:last:{ticker}` (one value per ticker, never trimmed) · `marketdata:prices:{ticker}` sorted sets (the alert window, trimmed to ~1h) · `marketdata:claim:{window}` · `marketdata:cycle-inflight` |
 | **Postgres** | `marketdata` — user_api_keys |
 | **Depends on** | nothing |
 | **Exposes** | `IQuoteReader`, `IPriceWindowReader` |
@@ -140,9 +141,9 @@ capability with a cache in front, not a place where the product is differentiate
 | **Value objects** | `AlertDirection` (Drawdown \| RunUp), its own `Ticker` |
 | **Behaviour** | evaluation after each poll cycle, cooldown suppression, SSE stream with a single-use ticket handshake, a simulate endpoint |
 | **Redis** | `alerts:cooldown:{user}:{ticker}:{dir}`, `alerts:ticket:{ticket}`, `alerts:user:{id}` pub/sub |
-| **Postgres** | `alerts` — alert_settings, fired_alerts |
-| **Depends on** | Portfolio (`IUsersHoldingTicker`), MarketData (`IPriceWindowReader`) |
-| **Depended on by** | nothing |
+| **Postgres** | `alerts` — alert_settings (keyed on user + ticker), fired_alerts |
+| **Depends on** | Portfolio (`IUserHoldsTicker`, for validation only), MarketData (`IPriceWindowReader`) |
+| **Depended on by** | nothing — the host reads its ticker list to feed the poller, which is an adapter, not a dependency |
 
 The threshold is measured against **the extreme of your own window**, never against Finnhub's `dp`, which is
 change versus the previous session close — a different question in the same units.
@@ -182,6 +183,21 @@ the quote provider*, MarketData is the only module that can validate it (one liv
 time) and the only one that ever uses it. Putting it in Identity would mean Identity storing a secret it
 cannot check and never reads.
 
+### The two Redis price structures are not collapsed into one
+
+`marketdata:last:{ticker}` holds one value per ticker and `marketdata:prices:{ticker}` holds a trimmed
+series, and both are written from the same fetch. That looks like one fact in two places, and the tempting
+move is to delete the first and read the newest member of the second.
+
+Don't: their **lifetimes** differ. A last-known price is wanted for as long as someone might open the
+dashboard and is never trimmed. A window is trimmed to about an hour and only exists while an alert does —
+turn alerts off for a ticker and it has no window at all, which is precisely when the dashboard still needs
+a fallback. Collapsing them also couples the dashboard's degradation to the alert retention setting, so
+shortening the window to fifteen minutes would silently shorten how far back the dashboard can degrade.
+
+Duplication is the right call when two copies have different lifecycles. It is the wrong call when they
+have the same one, which is why there is no third tier under either.
+
 ### `alert_settings` lives in Alerts, not Identity
 
 Same reasoning, and it is worth stating because `docs/Initial.md` put it in Identity. Alerts is the only
@@ -211,7 +227,7 @@ clear a Redis cooldown key. That single event dragged in `IDomainEvent`, a publi
 Not clearing it costs, at worst, one suppressed alert if the user re-buys the same ticker inside the window.
 So the boundary comes back and **the domain-event infrastructure stays deleted**: `Shared.Kernel` has no
 `IDomainEvent`, nothing raises one, and Alerts learns about removed holdings by simply not finding them in
-`IUsersHoldingTicker` on the next cycle.
+`ITickersWithActiveAlerts` on the next cycle.
 
 Applied to the four tests, the Portfolio/Alerts seam passes all of them: no shared transaction (`FiredAlert`
 is never written atomically with `Holding`), bounded and batchable chattiness (one holders lookup per ticker
@@ -238,7 +254,7 @@ flowchart TB
 
     subgraph RD["Redis — derived, re-fetchable, expiring"]
         direction LR
-        R1["<b>marketdata:*</b><br/><br/>prices:{ticker} sorted set<br/>claim:{window}<br/>cycle-inflight"]
+        R1["<b>marketdata:*</b><br/><br/>last:{ticker} — one value, never trimmed<br/>prices:{ticker} — the alert window<br/>claim:{window} · cycle-inflight"]
         R2["<b>alerts:*</b><br/><br/>cooldown:{user}:{ticker}:{dir}<br/>ticket:{ticket}<br/>user:{id} pub/sub"]
     end
 
@@ -265,10 +281,15 @@ application. Wanting a real FK across a schema line means the design has drifted
 That isolation is asserted, not assumed: `PortfolioRole_CannotReadIdentitySchema` connects as
 `portfolio_svc`, selects from `identity.users`, and asserts SQLSTATE `42501`.
 
-**What is in Redis and why it is not in Postgres:** price windows are derived and re-fetchable — losing them
-costs alert history until the window refills, not money. Cooldowns *are* their expiry, so a store with native
-TTL is the right one; a table needs a cleanup job to do the same thing worse. The poll claim and the
-in-flight guard are locks, not data.
+**What is in Redis and why it is not in Postgres:** prices are derived and re-fetchable — losing them costs
+alert history until the window refills, and costs the dashboard its fallback until the next successful
+fetch, not money. Cooldowns *are* their expiry, so a store with native TTL is the right one; a table needs a
+cleanup job to do the same thing worse. The poll claim and the in-flight guard are locks, not data.
+
+**Two price structures, one fetch.** `marketdata:last:{ticker}` answers *what is it worth* and
+`marketdata:prices:{ticker}` answers *how has it moved*; see §4 for why they are not one structure. Both are
+written by whatever path paid for the API call, so they cannot disagree about a fact — at worst one is
+slightly staler — and neither failing breaks the other.
 
 **Money never crosses the wire as a number.** `System.Text.Json` writes `decimal` as a JSON number and
 `JSON.parse` turns it into a double, destroying the precision computed server-side. Amounts are strings;

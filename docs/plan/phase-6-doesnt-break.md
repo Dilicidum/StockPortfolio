@@ -2,7 +2,9 @@
 
 ## 1. Goal
 
-Kill the quote provider → the app keeps working, shows stale data honestly, and the health panel goes amber. Kill Redis → prices still render from a last-known-good cache. Kill Postgres → a clear error, not a white screen.
+Kill the quote provider → the app keeps working, shows the last price it saw with an honest age, and the health panel goes amber. Kill Redis → fresh prices still render, because Redis is only the fallback; alerts are suppressed and say so. Kill Postgres → a clear error, not a white screen.
+
+> **Corrected.** This line used to read *"kill Redis → prices still render from a last-known-good cache"*, which was circular — the last-known-good cache **was** Redis. With the dashboard asking the provider directly (Phase 3 §2.5), losing Redis costs the fallback and nothing else.
 
 Covers P1 req 10 end to end, and the brief's grading criterion 3 — *«коректна обробка помилок і edge-кейсів»*.
 
@@ -53,11 +55,11 @@ The critical property: **a provider outage degrades the dashboard's numbers, it 
 
 ### 2.4 Redis failure
 
-`Initial.md:96` specifies a last-known-good in-memory cache per replica. Build it, but be honest about it in the README: at two replicas, two users can see different prices for the same ticker during a Redis outage, and every restart empties it. It is an availability feature whose failure mode is silent inconsistency.
+`Initial.md:96` specifies a last-known-good in-memory cache per replica. **Do not build it.** Its failure mode is silent inconsistency — at two replicas two users see different prices for the same ticker, and every restart empties it. The `marketdata:last:{ticker}` key from Phase 3 §2.4 does the same job, shared across replicas and surviving restarts, and it is already written by the path that fetches. A third tier under it would be a cache for a cache.
 
 Scope it accordingly — **latest price per ticker only**, not the window. The window is what alerts need, and serving a fabricated window would fire fabricated alerts. So:
 
-- Redis down → dashboard renders from the in-memory cache with an explicit stale marker
+- Redis down, provider up → dashboard renders **fresh** prices; only the degradation fallback is lost, and nothing visible changes
 - Redis down → **alerts are suppressed entirely**, feed → `Degraded`, and the alerts panel says so rather than sitting silently empty
 
 That asymmetry is the correct one and worth a README sentence: a stale price is a degraded read; a fabricated window is a wrong alert.

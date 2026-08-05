@@ -38,14 +38,20 @@ With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a
 
 ## Architecture
 
-Three modules — `Identity`, `Portfolio`, `MarketData` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
-**Alerts was a fourth module and is now part of Portfolio.** Reversed in Phase 2, and worth stating rather than showing silently, because the earlier plan files argue at length for the four-way split.
+**Boundaries are argued from extraction cost, not from subdomain labels.** The test for every seam: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the chattiness bounded, can one side fail while the other degrades, is there exactly one writer per table. Full reasoning in [docs/plan/module-boundaries.md](docs/plan/module-boundaries.md).
 
-- A bounded context is delimited by **ubiquitous language** — the same word meaning genuinely different things in two places. `Ticker` means a symbol in Portfolio, a symbol in MarketData and a symbol in Alerts. No divergence, so there was no second context: it was one context split three ways. `phase-2-implementation.md` §2.2 defended declaring `Ticker` three times as "not duplication, it is what lets three modules be pulled apart". By DDD's own test it was duplication.
-- What genuinely applies is **subdomain classification**: Portfolio (holdings *and* alerts) is CORE, the thing being built; Identity is GENERIC, the part you would buy in production; MarketData is SUPPORTING — necessary, not differentiating, and with its own lifecycle: timer-driven, external API, its own failure mode.
-- The corroborating evidence was in the code. `HoldingRemoved` was the **only** domain event in a six-phase project, and it existed solely because Alerts had been split out of Portfolio. Inside one module the same job is a plain method call.
-- Alerts functionality is unchanged. Thresholds, cooldowns, evaluation, SSE and the `/api/alerts/*` routes all still ship — they live in `Portfolio.Domain` / `.Application` / `.Api` under an `Alerts/` feature area rather than in five projects of their own.
+- **Alerts was merged into Portfolio in Phase 2 and that was reversed.** The merge argued that `Ticker` means the same thing on both sides, therefore one bounded context. That inverts the heuristic: language divergence is *sufficient* to conclude two contexts exist, not *necessary*. Two contexts can share a vocabulary entirely and still be two.
+- `AlertSettings` and `FiredAlert` never share a transaction with `Holding`, no invariant spans any two of the three aggregates, they are written on a different trigger, and alerts can be down while the dashboard renders.
+- **Core / supporting / generic subdomain classification is not used.** It is real DDD, it changed no code here, and it conflated three things: a subdomain is problem space, a bounded context is a model boundary, and a module in Evans' sense is a namespace *inside* a context.
+- **There are still no domain events.** `HoldingRemoved` was the only one ever planned and existed solely to clear a Redis cooldown across the Portfolio/Alerts line. A cooldown has a TTL and expires by itself, so the fix was deleting the event, not the boundary.
+
+**Prices: two questions, two paths.** The dashboard asks *what is this worth now* and gets it by calling the provider directly on load — there is **no read-through, no fetch coalescer and no in-memory tier**. Alert evaluation asks *how has it moved over N minutes*, which needs history, which is the only reason a poller and a Redis window exist. The poller polls only tickers with an active alert; with none configured, nothing polls and the dashboard is unaffected.
+
+- Two Redis price structures, deliberately not collapsed: `marketdata:last:{ticker}` is one value per ticker, never trimmed, written by any path that fetches, and is the dashboard's only fallback when the provider is down. `marketdata:prices:{ticker}` is the trimmed alert window. Different lifetimes — merging them would couple the dashboard's degradation to the alert retention setting.
+- The poller and the window are **Phase 4**, not Phase 3. `minReplicas` goes to 1 there, for the same reason.
+- The live deployment needs a real `FINNHUB_API_KEY` secret. `FakeQuoteProvider` is for the clean-clone path and the tests; leaving it on in Azure serves invented prices for real tickers.
 
 **Accessibility follows the onion, not a blanket `internal`.** `internal` is per-assembly and a module is five assemblies, so "everything internal outside `.Contracts`" cannot compile — `Identity.Infrastructure` could not see `User` in `Identity.Domain`.
 
@@ -63,9 +69,9 @@ Two reference rules are compiler-enforced and asserted by `Architecture.Tests`: 
 - `Shared.Kernel` must stay framework-free — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and **no domain-event infrastructure**: `IDomainEvent`, `IDomainEventHandler` and `IDomainEventPublisher` are deleted. Phase 1 wrote `IDomainEvent`, found nothing raised it, and removed it; Phase 2 planned to bring it back for `HoldingRemoved`, which existed only because Alerts was a separate module. With Alerts inside Portfolio there is again no raiser, so reintroducing it would have repeated Phase 1's mistake. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler no longer enforces this now that Domain is public, so `Architecture.Tests` is the enforcement and is load-bearing — do not weaken or skip it.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would make the kernel the shared domain, which is what modules exist to prevent.
-- Dependency direction is **Portfolio → MarketData**, one edge. Identity sits off to the side with zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
-- MarketData depends on nothing. It declares `ITickersHeldByAnyUser` and the host supplies an adapter over `Portfolio.Contracts`. Do not make MarketData read Portfolio directly.
-- One `DbContext` and one Postgres schema per module, each connecting as its own role. `alert_settings` and `fired_alerts` therefore belong to the `portfolio` schema and `PortfolioDbContext`.
+- Dependency edges: **Portfolio → MarketData** (dashboard prices), **Alerts → MarketData** (price windows), **Alerts → Portfolio** (`IUserHoldsTicker`, validation only). Nothing depends on Alerts. Identity sits off to the side with zero inbound runtime coupling; the JWT is self-contained. Keep it that way — it's the extraction-order argument.
+- MarketData depends on nothing. It declares `ITickersToPoll` and the host supplies an adapter over `Alerts.Contracts`. Do not make MarketData read another module directly.
+- One `DbContext` and one Postgres schema per module, each connecting as its own role. `alert_settings` and `fired_alerts` belong to the `alerts` schema and `AlertsDbContext`; `alert_settings` is keyed on user **and ticker**, so a threshold belongs to a position rather than to an account.
 
 ## Conventions
 
@@ -218,7 +224,7 @@ These were considered and cut. Don't reintroduce them without asking.
 
 - **Alert replay** — no cursor, no `Last-Event-ID`, no 24h backfill. Req 9 asks for an event on breach, a background check, and a simulate button. History is a plain `GET`; the stream hook invalidates the query on reconnect.
 - **Watchlist** — «перелік акцій» in req 8 sits inside *dashboard settings*, so it means which of your holdings show on the dashboard. That's `is_visible` on `holdings`.
-- **A cached ticker table in MarketData** — the held-ticker list is read live from Portfolio each cycle. Removing it also removed two event handlers, a reconciliation pass and a divergence failure mode.
+- **A cached ticker table in MarketData** — the poll list is read live each cycle, from Alerts. Removing it also removed two event handlers, a reconciliation pass and a divergence failure mode.
 - **Raw SQL** — see Conventions.
-- **Trading-hours gating** — ships as a config flag defaulting to off. Read-through covers the weekend demo case.
+- **Trading-hours gating** — dropped entirely. It existed to stop pointless polling outside market hours; the poller now only runs for tickers with an active alert, and the dashboard fetches on demand, so there is nothing to gate.
 - **WebSockets and SignalR** — SSE is the transport. The README carries the decision matrix; the UI badge says "Live (SSE)", never "WS Live".

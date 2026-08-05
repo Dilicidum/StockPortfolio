@@ -167,7 +167,10 @@ shell-based probe.
 
 **Trigger:** before the first deploy or any demo where someone else runs `docker compose up`.
 
-### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables outlive the module
+### E1 — ~~the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables outlive the module~~ RESOLVED
+
+**Resolved by reinstating Alerts as a module.** `db/init/01-roles.sql`, `docker-compose.yml`, `infra/*.bicep` and both workflows were never stripped of `ALERTS_PW`, the `alerts` schema or the `alerts_svc` role — deliberately, because touching them meant re-verifying the P0 gate without Docker. With Alerts a module again they are correct as they stand, and the cleanup this item tracked is not needed. Original text below for the record.
+
 
 Phase 2 merged the Alerts module into Portfolio (three modules, not four — see
 [plan/00-overview.md](plan/00-overview.md) §"Three modules, not four"). The five `.csproj` files, the

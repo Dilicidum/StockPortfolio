@@ -41,7 +41,7 @@ is **generic**, MarketData is **supporting**.
 | §2.7 dispatch after the save commits | **Moot.** There is nothing to dispatch |
 | §2.8's `HoldingRemoved` half, and `Portfolio.Contracts → Shared.Kernel` for `IDomainEvent` | **Withdrawn.** The two read interfaces survive; see §2.8 |
 | Task 1 — domain-event types in `Shared.Kernel` | **WITHDRAWN** |
-| Task 5 — the `HoldingRemoved` record | **PARTLY WITHDRAWN.** `ITickersHeldByAnyUser` and `IUsersHoldingTicker` still ship |
+| Task 5 — the `HoldingRemoved` record | **REPLACED.** `HoldingRemoved` stays withdrawn. The two set-based reads are gone too — the poller's list comes from Alerts now and alert evaluation owns its own subscriptions. `Portfolio.Contracts` ships **one** interface, `IUserHoldsTicker`, so Alerts can reject a subscription for a ticker you do not hold |
 | Task 10 — dispatch interceptor, publisher, 6 tests | **WITHDRAWN** |
 | §7's "`Ticker` is declared three times" and "the sync `SavingChanges` throws" risks | **Withdrawn with the tasks that created them** |
 
@@ -156,7 +156,7 @@ types that belong to **no** module"*; *"`.Contracts` holds records of primitives
 Two declarations across a real subdomain boundary is the modular-monolith answer. Three declarations across a
 boundary that no language difference justified was the error §0.0 corrects.
 
-**Knock-on:** `phase-3-live-prices.md` §2.5 declares `ITickersHeldByAnyUser { Task<IReadOnlySet<Ticker>> … }` inside
+**Knock-on (now moot — §2.8 is superseded, and the interface moved to `MarketData.Contracts` as `ITickersToPoll`):** `phase-3-live-prices.md` §2.5 declared it inside
 `MarketData.Contracts`. That is a strongly-typed value object in a Contracts project and violates the rule.
 Phase 3 must move it to `MarketData.Domain` or change it to `string`. Flagged, not fixed here.
 
@@ -309,7 +309,13 @@ therefore **collected** in `SavingChangesAsync` and **published** in `SavedChang
 This reverses spec §2.2 and one row of root `CLAUDE.md`'s "Where Identity is not a safe template" table.
 Both edits are Task 22. (That row has since been rewritten again — §0.0 removed its driver entirely.)
 
-### 2.8 DECISION — `Portfolio.Contracts` ships two interfaces now
+### 2.8 DECISION — ~~`Portfolio.Contracts` ships two interfaces now~~ SUPERSEDED
+
+> **Superseded.** `Portfolio.Contracts` ships **one** interface, `IUserHoldsTicker`. The poller's ticker
+> list comes from Alerts, not Portfolio, because polling exists to build alert history and a ticker nobody
+> has an alert on needs none; and alert evaluation owns its own subscriptions, so it already knows whom to
+> notify. Both set-based reads argued for below are therefore gone. The *conclusion* that `Portfolio.Contracts`
+> must carry a type still holds — rule 2 goes live either way. Original argument kept below for the record.
 
 `phase-2-my-portfolio.md` never mentions `.Contracts`. `phase-3` needs a held-ticker read; `phase-4` needs a
 holders-of-ticker read; `module-interactions.md` names the latter `IUsersHoldingTicker`. Meanwhile
@@ -992,7 +998,23 @@ git commit -m "Portfolio's first two types: an id and a ticker that owns its can
 
 ---
 
-### Task 5: `Portfolio.Contracts` — the two reads (⛔ the event is WITHDRAWN)
+### Task 5: `Portfolio.Contracts` — one boolean (⛔ the event and both set-based reads are WITHDRAWN)
+
+> **Superseded.** This task originally shipped `ITickersHeldByAnyUser` and `IUsersHoldingTicker`. Neither is
+> needed: the poller polls tickers with an *active alert*, which Alerts owns, and alert evaluation therefore
+> already knows whom to notify. What survives is a single validation seam:
+>
+> ```csharp
+> // Portfolio.Contracts/IUserHoldsTicker.cs
+> public interface IUserHoldsTicker
+> {
+>     /// <summary>Whether this user has a position in this ticker. Used to reject an alert on something you do not own.</summary>
+>     Task<bool> HoldsAsync(Guid userId, string ticker, CancellationToken ct);
+> }
+> ```
+>
+> Everything below about the `.csproj` references and rule 2 going live still applies — `Portfolio.Contracts`
+> carries a type either way. The `Shared.Kernel` reference is **not** needed, since there is no `IDomainEvent`.
 
 > **Partly withdrawn by §0.0.** `HoldingRemoved.cs` is **not** created, `Portfolio.Contracts` gains **no**
 > `ProjectReference` to `Shared.Kernel`, and `Portfolio.Domain` gains **no** reference to
