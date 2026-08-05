@@ -55,8 +55,8 @@ review:
   red on the mistake it is named after.
 
 ⚠️ **What is *not* verified.** `az` is not installed on the development machine, so `az bicep build` and
-`az deployment group what-if` have never run **locally** and §4's "zero Bicep lines" is expected rather than
-confirmed. Note this does not block deploying: `deploy.yml` installs Bicep and runs `what-if` in the runner,
+`az deployment group what-if` have never run **locally**. The Bicep half is answered anyway: `ci.yml` has a
+**Bicep build** job and it passes, so the templates compile. `what-if` is the part still unread by a human. Note this does not block deploying: `deploy.yml` installs Bicep and runs `what-if` in the runner,
 and fires on push to `main` — see
 [the deployment record](../superpowers/specs/2026-08-02-azure-deployment-design.md), which also documents
 the live deployment that has been running since 2026-08-02.

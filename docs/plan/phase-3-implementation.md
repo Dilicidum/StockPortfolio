@@ -1300,13 +1300,16 @@ Picking 15s quadruples that figure. `<select>` options: 15s / 30s / 60s / 5m.
 >
 > So what is actually outstanding is a **merge to `main`** and the **`FINNHUB_API_KEY` secret** — not a tool
 > install. The local rehearsal stays genuinely blocked, and with it the one cheap thing §2.9 wanted: whether
-> the `@secure()` module output trips the `outputs-should-not-contain-secrets` linter class. `bicep build`
-> has never run locally in any phase, though the deployed stack proves the template compiles and applies.
-> `infra/` was not touched this phase, so "what-if reports no changes" is a good prediction — still a
-> prediction.
+> the `@secure()` module output trips the `outputs-should-not-contain-secrets` linter class — **and that
+> turned out to be answered too**: `ci.yml` has a **Bicep build** job, it ran on PR #2, and it passed. The
+> rehearsal existed in CI the whole time. `infra/` was not touched this phase, so "what-if reports no
+> changes" is a good prediction — still a prediction, and the workflow runs it just before deploying.
 
-- [ ] `az bicep build --file infra/main.bicep` (§2.9) — **not run locally, and genuinely blocked**: no `az`
-      here. This is the rehearsal, and it is the only part of Task 22 the missing CLI actually stops.
+- [x] `az bicep build --file infra/main.bicep` (§2.9) — **not run locally (no `az` here), but `ci.yml`'s
+      "Bicep build" job compiled the templates on PR #2 and passed in 20s.** That answers the one thing §2.9
+      wanted cheaply: a `@secure()` **module output** does *not* trip the `outputs-should-not-contain-secrets`
+      linter class here. The claim "`bicep build` has never run in any phase" was true when written and is
+      now false — CI was the cheaper rehearsal all along, and nobody had looked.
 - [ ] `az deployment group what-if` → expect **no changes**. **Not run locally.** Note the workflow runs it
       too, so merging to `main` executes this check even if the local rehearsal never happens — it just
       executes it a moment before the deploy rather than a day before.
@@ -1548,10 +1551,9 @@ exposes `Map<M>Endpoints`" — reusing `SkipIfEmptyShell`. Written naively it go
 - [x] `npm test` green — **26 passing across 6 files**, including "a provider error keeps the last good table
       on screen" and the two Phase 1 session tests that mount `/dashboard` under MSW's
       `onUnhandledRequest: 'error'`
-- [ ] ❌ **NOT RUN LOCALLY — no `az` CLI here, and this is the only part of Task 22 that blocks on it.**
-      `az bicep build` clean, and `az deployment group what-if` reports **no changes**. Zero lines under
-      `infra/` were touched, so no changes is the expectation. `deploy.yml` runs `what-if` in the runner, so
-      merging to `main` executes it regardless. See Task 22
+- [x] `az bicep build` clean — **via `ci.yml`'s Bicep build job on PR #2**, not locally. `az deployment group
+      what-if` reporting **no changes** is still unconfirmed; zero lines under `infra/` were touched, and
+      `deploy.yml` runs `what-if` in the runner immediately before deploying. See Task 22
 - [ ] ❌ **NOT DONE — needs a merge to `main` and the secret, not a tool install.** Deployed **with a real
       `FINNHUB_API_KEY`**; the public dashboard shows genuine prices and the health panel names Finnhub rather
       than Fake. A live deployment exists and is healthy, but serves pre-Phase-3 code. See Task 22

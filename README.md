@@ -430,12 +430,12 @@ Stated plainly rather than left for you to find.
   on push to `main` and this work is on a branch. The design, cost model and the six failed first
   attempts are in
   [docs/superpowers/specs/2026-08-02-azure-deployment-design.md](docs/superpowers/specs/2026-08-02-azure-deployment-design.md).
-- **The local Bicep rehearsal is unverified.** `az` is not installed on the development machine, so
-  `az bicep build` and `az deployment group what-if` have never run *here* — though the workflow runs
-  `what-if` in the runner, so a merge exercises it. Phase 3 was expected to change zero lines of Bicep
-  and changed zero lines — everything it needed (the Redis connection string, the `Finnhub__ApiKey`
-  secret and its `empty()` guard, the explicit `httpGet` probes) was already in the tree — but
-  *expected* is not *verified*.
+- **`what-if` is unconfirmed; the Bicep itself compiles.** `az` is not installed on the development
+  machine, but `ci.yml` has a **Bicep build** job and it passes, so the templates are known good.
+  `az deployment group what-if` has still never been read by a human — `deploy.yml` runs it in the
+  runner immediately before deploying. Phase 3 was expected to change zero lines of Bicep and changed
+  zero lines: everything it needed (the Redis connection string, the `Finnhub__ApiKey` secret and its
+  `empty()` guard, the explicit `httpGet` probes) was already in the tree.
 - **The deployed app would serve fake prices.** `FINNHUB_API_KEY` is not set as a repository secret,
   and until it is, the public URL prices real tickers from the generated walk. Related and also
   unverified: adding a genuinely non-existent symbol should return `UnknownTicker`, which needs a real
