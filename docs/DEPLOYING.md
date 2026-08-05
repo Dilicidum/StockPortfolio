@@ -72,12 +72,12 @@ fix that, because the shell expands before `exec`.
 
 ### `FINNHUB_API_KEY` — the optional eleventh
 
-Not set as of 2026-08-05, which is why the deployed dashboard prices real tickers from
-`FakeQuoteProvider`'s generated walk. Empty is a *supported* path, not a broken one — it is what
-makes `docker compose up` work from a clean clone with no registration — but on a public URL it
-reads as broken rather than as a thoughtful fallback.
+**Set as of 2026-08-05**, so the deployed dashboard serves genuine prices and
+`GET /api/marketdata/health` returns `{"provider":"Finnhub"}`. Empty is a *supported* path, not a
+broken one — it is what makes `docker compose up` work from a clean clone with no registration — but
+on a public URL it reads as broken rather than as a thoughtful fallback.
 
-Get a free key at `finnhub.io` (free tier: 60 calls/minute, 30/second burst), then:
+To rotate or re-set it, get a key at `finnhub.io` (free tier: 60 calls/minute, 30/second burst), then:
 
 ```bash
 gh secret set FINNHUB_API_KEY --repo Dilicidum/StockPortfolio
@@ -87,9 +87,11 @@ It prompts for the value on stdin, so the key never lands in shell history or in
 list. Setting a secret does **not** redeploy — the value is read at deploy time, so trigger a run
 afterwards.
 
-Two things only a real key can demonstrate: `GET /api/marketdata/health` naming `Finnhub` instead of
-`Fake`, and a genuinely non-existent symbol returning `UnknownTicker`. `FakeQuoteProvider` accepts
-any well-shaped ticker by design, so it can never produce the second.
+Two things only a real key can demonstrate, **both confirmed on 2026-08-05**: `GET
+/api/marketdata/health` naming `Finnhub` instead of `Fake`, and a genuinely non-existent symbol
+returning `UnknownTicker` — `POST /api/holdings` with `ZQXW` gave 400 and *"'ZQXW' is not a ticker
+this application recognises."* `FakeQuoteProvider` accepts any well-shaped ticker by design, so it
+can never produce the second, which is why this stayed unverified through the whole of Phase 3.
 
 ## Traps that each cost a deploy cycle
 

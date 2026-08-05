@@ -9,11 +9,13 @@
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
 | Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-16` |
 
-**Still live on 2026-08-05.** `/health/ready` → 200 `Healthy`, SPA → 200. The running revision is
-**pre-Phase-3**: `/api/dashboard` and `/api/marketdata/health` both return 404, because `deploy.yml`
-fires on push to `main` and Phase 3 has not reached it. Getting Phase 3 live needs the merge plus a
-`FINNHUB_API_KEY` secret — **not** a local Azure CLI, which only buys the `bicep build` and `what-if`
-rehearsal; the workflow installs Bicep and runs `what-if` in the runner.
+**Phase 3 shipped on 2026-08-05** (PR #2, run 31043996353), and the deploy needed no local Azure CLI
+— the workflow installs Bicep and runs `what-if` itself. Every step green including migrations and
+the readiness smoke test; `deleteAfter` re-stamped to **2026-08-19**. Verified afterwards:
+`/health/ready` → 200, `/api/marketdata/health` → `{"provider":"Finnhub"}`, `/api/dev/nudge` → **404**
+in Production (gated on environment *and* `IQuoteNudge`, so it is absent rather than merely
+protected), a real register → add → dashboard round trip returning live market prices, and a
+non-existent symbol returning `UnknownTicker`.
 
 ⚠️ **The Prerequisites table below is historical.** Items 0 and 1 — no remote, only a `master`
 branch — were resolved before the deploy that this file records as succeeding. Item 6, no Azure CLI
