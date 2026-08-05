@@ -28,7 +28,7 @@ directly.**
 
 | # | `phase-3-live-prices.md` says | Reality | Where fixed |
 |---|---|---|---|
-| 1 | §2.1 `IQuoteProvider` and `Quote` live in `MarketData.Domain` | Root `CLAUDE.md`'s layer table assigns **abstractions to `.Application`**, and says `.Infrastructure` and `.Api` "meet only through `.Application/Abstractions`". The only built precedent is `Portfolio.Application/Abstractions/IHoldingRepository.cs:9`. A provider port in `.Domain` also makes `.Domain` the thing `.Infrastructure` implements, which reverses the onion | §2.2 |
+| 1 | §2.1 `IQuoteProvider` and `Quote` live in `MarketData.Domain` | Root `CLAUDE.md`'s layer table assigns **abstractions to `.Application`**, and says `.Infrastructure` and `.Api` "meet only through `.Application/Abstractions`". Every built precedent agrees: `Identity.Application/Abstractions/` has held `IPasswordHasher`, `IRefreshTokenRepository`, `ITokenIssuer` and `IUserRepository` since Phase 1, and `Portfolio.Application/Abstractions/IHoldingRepository.cs:6` followed in Phase 2. A provider port in `.Domain` also makes `.Domain` the thing `.Infrastructure` implements, which reverses the onion | §2.2 |
 | 2 | §2.7 prices come "via `IMarketDataQueries` (MarketData's contract)" | `IMarketDataQueries` appears **nowhere else** in docs or code. [module-boundaries.md](module-boundaries.md):128 and [module-interactions.md](module-interactions.md):38 both name **`IQuoteReader`**. A module-named interface is a grab bag with the same failure mode as the `Errors.cs` the conventions already ban | §2.4 |
 | 3 | §7 `internal sealed class LastKnownPrice` in `MarketData.Application/LastKnownPrice.cs` | `.Application` is **`public`** per the layer table — `internal` is `.Infrastructure`-only, so `.Infrastructure` could not see it. The path also carries no `<FeatureArea>/` folder | §2.2, Task 6 |
 | 4 | §2.1 and §2.5 use a bare `Ticker` | MarketData has zero `.cs` files, so no `Ticker` exists there, and `Portfolio.Domain.Ticker` is off-limits — `ModuleBoundaryTests.Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts` makes reaching it a test failure the moment MarketData gains its first type. `Portfolio.Domain/Ticker.cs:7` already says "Portfolio's own; other modules declare theirs" | §2.3 |
@@ -40,7 +40,7 @@ directly.**
 | 10 | §2.7's query snippet `.Select(h => new HoldingRow(h.Ticker.Value, h.Quantity, h.AveragePrice))` | `AveragePrice` is a **`ComplexProperty`** (`HoldingConfiguration.cs:52-62`). Projecting the complex type will not translate; project `h.AveragePrice.Amount` and `.Currency` and rebuild `Money` after materialisation. Also `GetVisibleHoldingsAsync` **does not exist** — `HoldingQueries.cs` has exactly one method, `HoldsAsync` | Task 12 |
 | 11 | §5 puts `Position_*` / `Totals_*` / `Weight_*` in `Portfolio.UnitTests` | That project has **no fakes and no handler tests** — deferred item B4/B6 was never actioned, and no handler in any module is unit-tested. Either Phase 3 builds the repo's first fake repository, or those tests target a pure calculator. Build the calculator | §2.8, Task 13 |
 | 12 | §3 "Route `src/routes/_authenticated/dashboard.tsx`" | The file **already exists** — 43 lines of Phase 1 placeholder, already in `routeTree.gen.ts`, with four hardcoded `—` tiles captioned "Phase 2". This is a rewrite, not a new file, and the stale caption is itself a correction Phase 3 owes | Task 20 |
-| 13 | §3 "Parse with `Intl.NumberFormat`" | Pass the **string straight to `format()`**. `Number(money.amount)` reintroduces exactly the IEEE-754 loss the string serialisation exists to prevent — and `portfolio.tsx:86-91` does precisely that today, so it must be rewritten rather than copied. Separately `format('')` and `format(null)` both render `$0.00`, so a null price must be branched on **before** the formatter or §5's "renders as pending, not `$0.00`" fails in production while passing on a fixture | §2.10, Task 19 |
+| 13 | §3 "Parse with `Intl.NumberFormat`" | Pass the **string straight to `format()`**. `Number(money.amount)` reintroduces exactly the IEEE-754 loss the string serialisation exists to prevent — and `portfolio.tsx:86-91` does precisely that today, so it must be rewritten rather than copied. Separately `format('')` and `format(null)` both render `$0.00`, so a null price must be branched on **before** the formatter or §5's "renders as pending, not `$0.00`" fails in production while passing on a fixture | §2.10, Task 20 |
 | 14 | §5 `Fetch_RedisUnreachable_StillReturnsThePrice` | `CommandFlags.FireAndForget` does **not** satisfy it. It only means the caller gets the default return value immediately; connection and backlog-timeout exceptions still surface at the call site. `await` the write inside `try/catch (RedisException)` — which also keeps `redis-cli GET marketdata:last:AAPL` (§8) non-racy | §2.7 |
 | 15 | §2.2 "Resilience via `Microsoft.Extensions.Http.Resilience`… retry, circuit breaker, timeout" | The **defaults are decorative and the validator is startup-fatal**. `CircuitBreaker.MinimumThroughput` is 100, so the breaker can never open for a twenty-ticker dashboard; and `HttpStandardResilienceOptionsCustomValidator` registers with `AddOptionsWithValidateOnStart`, so `AttemptTimeout > TotalRequestTimeout` or `SamplingDuration < 2 × AttemptTimeout` **takes `docker compose up` down** — the P0 gate | §2.6 |
 
@@ -67,15 +67,18 @@ These are documents Phase 3 disproves. Task 23 fixes them.
   `db/init/01-roles.sql:57-59,84,138-145`, `docker-compose.yml:43,127`, `.env.example:39`,
   `containerapp-api.bicep:126`, `ci.yml:129`, `deploy.yml:202,222,314`. `module-boundaries.md:237-239` makes
   the same false claim. **Reopen it.** Phase 3 does not clean it up — see §7.
-- **`README.md:277-278` says "Portfolio and MarketData are empty shells."** Portfolio has 36 `.cs` files.
+- **`README.md:277-278` says "Portfolio and MarketData are empty shells."** Portfolio has 35 `.cs` files.
 - **Nine dangling links to `00-overview.md` §"Three modules, not four"**, a section that is now
   `## Four modules`: `phase-1-implementation.md:11,523`, `phase-2-implementation.md:31,4916`,
   `phase-1-sign-in.md:17`, `phase-2-my-portfolio.md:74`, `phase-5-make-it-mine.md:17`,
   `phase-6-doesnt-break.md:288`, `phase-4-alerts.md:137`, `deferred-work.md:176`.
 - **The connection-budget arithmetic disagrees four ways.** `CLAUDE.md:190` "3 roles × 2 replicas requests
   600"; `00-overview.md:149` "× 4 roles × 2 = 800"; `README.md:263` "2 × 3 × 2 = 12"; `er-diagram.md:153`
-  "2 × 4 × 2 = 16". With MarketData connecting to nothing (§2.1) the live number is **three service roles
-  plus `migrator`**, and the pools that actually exist are Identity's and Portfolio's.
+  "2 × 4 × 2 = 16". Count what actually opens a pool rather than what is defined: `db/init/01-roles.sql`
+  creates **four** service roles plus `migrator`, and `DatabaseInitialisedWaitStrategy.cs:14-21` pins that at
+  five — but `Program.cs:57,60` registers **two** contexts, so exactly **two Npgsql pools exist per replica**.
+  At `Maximum Pool Size=2` and `maxReplicas: 2` that is 2 × 2 × 2 = **8**, and `migrator` runs as a separate
+  job, not concurrently with the API. All four published figures are wrong, in both directions.
 - **`er-diagram.md:121` still says "Catch `23505` and route to the merge path."** `phase-2-implementation.md`
   §2.6 removed that catch and explains that the retry as written never terminates. `er-diagram.md:175` also
   cross-references `phase-3-live-prices.md` §2.4 for the window-claim keys; §2.4 is now "Recording what was
@@ -107,9 +110,10 @@ Eleven decisions the spec left open, got wrong, or never knew it had to make.
 ### 2.1 DECISION — MarketData has no `DbContext`, no schema and no migration
 
 Phase 3 persists exactly one thing and it is not in Postgres: `marketdata:last:{ticker}`. The spec says so
-outright — "That is the whole mechanism" (`phase-3-live-prices.md:73`) — and `er-diagram.md` carries **no
-`marketdata_*` entity block at all**. The only MarketData table named anywhere is `user_api_keys`
-(`module-boundaries.md:126`), which is BYOK and belongs to Phase 5.
+outright — "That is the whole mechanism" (`phase-3-live-prices.md:73`). The only `marketdata_*` block in
+`er-diagram.md` is `marketdata_user_api_keys` (`:71-77`, related at `:106`, counted in its "Seven tables" at
+`:111`) — that is BYOK, it is the only MarketData table named anywhere, and it belongs to **Phase 5**
+(`module-boundaries.md:126`). Nothing this phase persists goes to Postgres.
 
 Building an empty `MarketDataDbContext` to satisfy the shape rule costs a migration with zero tables, a
 `marketdata.__EFMigrationsHistory` row, an `AddMarketDataModule` line in `Migrator/MigratedModules.cs:20-21`,
@@ -159,13 +163,18 @@ private static bool IsAspNetCore(string? name) =>
     name is not null && name.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal);
 ```
 
-and the closure of `Microsoft.Extensions.Http.Resilience 10.8.0` contains no such id — it reaches
-`Microsoft.Extensions.{Http, Http.Diagnostics, Resilience, Telemetry, ObjectPool}` plus `Polly.*`, and
-nothing else. The nearest miss is `Microsoft.Extensions.ObjectPool`, built in the aspnetcore repo but **not
-named for it**, which is what the rule tests.
+and no such name appears among `MarketData.Infrastructure`'s **own emitted references**. The package closure
+is clean too — `Microsoft.Extensions.{Http, Http.Diagnostics, Resilience, Telemetry, ObjectPool}` plus
+`Polly.*`, whose nearest miss is `Microsoft.Extensions.ObjectPool`, built in the aspnetcore repo but **not
+named for it**.
 
-⚠️ Verify this by reading the reported path if rule 4 ever goes red, and **do not weaken the predicate to make
-it pass** — a prefix match that starts excluding real ASP.NET Core references is the rule quietly dying.
+⚠️ **The rule could not have caught it anyway, and that is worth knowing before you lean on it.**
+`FindForbiddenReferencePath` only enqueues a reference for further walking when it passes `IsFirstParty`
+(`SolutionAssemblies.cs:128`, requiring the `StockPortfolio.` prefix), so no third-party graph is ever
+inspected. Rule 4 constrains **our** project graph, not the package graph — a NuGet package that itself
+dragged in ASP.NET Core would sail past it. The package closure being genuinely clean is the load-bearing
+fact; the rule is the guard on our own edges. If rule 4 ever does go red, read the reported path and fix the
+reference — **never** weaken the predicate to make it pass.
 
 ### 2.3 DECISION — MarketData declares its own `Ticker`, and the two meet as `string`
 
@@ -359,6 +368,11 @@ Three arithmetic rules the spec does not state and that a reviewer will check:
   weekend dashboard amber with "3 days ago" while the provider is perfectly healthy — the degradation signal
   firing on the happy path, which is the most visible way to fail §8. `isLastKnown` is the amber trigger;
   `observedAt` is only the age shown beside it.
+- **`stalestObservedAt` needs a definition, because the spec names the field and never says what it is.**
+  It is `min(observedAt)` over **priced** positions, or `null` when no position is priced. And §3's "a
+  per-row timestamp where a position is **materially staler** than the rest" needs a threshold or it cannot
+  be implemented: a row renders its own timestamp when `observedAt < asOf − 60s`. Neither rule drives colour
+  — `isLastKnown` alone does that.
 
 ### 2.9 DECISION — the infrastructure delta is zero Bicep lines and one operational action
 
@@ -441,8 +455,11 @@ test.
 
 **Three new packages, pinned. No floating ranges.**
 
+Anchor the hunk on the **last** line of the `Infrastructure` group (`Directory.Packages.props:25`) — the
+group opens at `:20` and holds four other entries first, so a patch anchored on the `<ItemGroup>` line will
+not apply:
+
 ```diff
-   <ItemGroup Label="Infrastructure">
      <PackageVersion Include="StackExchange.Redis" Version="3.1.0" />
 +    <!-- Phase 3. Verified against nuget.org on 2026-08-05. 10.8.0 is the dotnet/extensions train
 +         (same as TimeProvider.Testing below), NOT the 10.0.10 runtime train — two release lines,
@@ -475,7 +492,25 @@ source-generated; precedent at `src/Api/Middleware/ApiExceptionHandler.cs:12-16`
 
 **Bounded concurrency:** `Parallel.ForEachAsync` with `MaxDegreeOfParallelism = 4`, plus a
 `TokenBucketRateLimiter` (`TokenLimit = 25`, `TokensPerPeriod = 1`, `ReplenishmentPeriod = 1s`,
-`AutoReplenishment = true`). The arithmetic for 20 positions: 5 waves at ~250 ms ≈ **1.25 s wall time**, peak
+`AutoReplenishment = true`).
+
+⚠️ **The bucket must be a singleton, and it must not ride on the typed client.**
+`AddHttpClient<TClient, TImpl>` registers the client **transient**, so a limiter held as a field on
+`FinnhubQuoteProvider` is a *fresh bucket per resolution* — the 30/sec cap would then be enforced only
+within one dashboard request and never across concurrent ones, and every abandoned bucket leaves a live
+replenishment timer nothing disposes. Register it separately and inject it:
+
+```csharp
+services.AddSingleton(new TokenBucketRateLimiter(new TokenBucketRateLimiterOptions
+{
+    TokenLimit = 25, TokensPerPeriod = 1,
+    ReplenishmentPeriod = TimeSpan.FromSeconds(1), AutoReplenishment = true,
+    QueueLimit = 256, QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
+}));
+```
+
+The arithmetic below assumes exactly one shared bucket; without it none of it holds. The arithmetic for
+20 positions: 5 waves at ~250 ms ≈ **1.25 s wall time**, peak
 **16 calls/sec** — under the 30/sec cap, and the bucket cannot release more than 25 at once so the burst cap
 is structurally satisfied regardless of `MaxDop`. The binding constraint is the other one: **20 of the free
 tier's 60 calls/minute for one user's one dashboard**. At a 60 s refresh that is a third of the budget for a
@@ -492,15 +527,20 @@ takes no `TimeProvider`, so `FakeTimeProvider` cannot advance it.
 
 ## 4. File map
 
-**New — `MarketData.Domain` (5 files)**
+**New — `MarketData.Domain` (4 files)**
 
 ```
-Ticker.cs                     public readonly partial record struct; Create → OneOf<Ticker, InvalidInput>
+Ticker.cs                     public readonly partial record struct; public static Create → OneOf<…>
 Quote.cs                      public readonly record struct Quote(Ticker, decimal, DateTimeOffset)
 LastPrice.cs                  public readonly record struct LastPrice(decimal, DateTimeOffset)
 LastKnownPrice.cs             public static class; IsWorthShowing(LastPrice?, DateTimeOffset)
-AssemblyInfo.cs               CA1716 suppression, its own file (see the trap)
 ```
+
+⚠️ **No `AssemblyInfo.cs` here.** The two that exist (`Shared.Kernel`, `Shared.Api`) carry a `CA1716`
+suppression *because the assembly name contains the segment `Shared`, a VB keyword* — neither
+`Identity.Domain` nor `Portfolio.Domain` has one, and the tree builds at 0 warnings.
+`MarketData.Domain` has nothing to suppress. The `AssemblyInfo.cs` Phase 3 **does** need is
+`MarketData.Infrastructure`'s, for a different reason — see below.
 
 **New — `MarketData.Application` (5 files)**
 
@@ -525,44 +565,68 @@ Quotes/FinnhubOptions.cs              FromConfiguration; HasApiKey; never throws
 Quotes/FakeQuoteProvider.cs           FNV-1a seeded walk; implements IQuoteNudge
 Quotes/FakeQuoteOptions.cs            volatility / drift
 Prices/RedisLastKnownPriceStore.cs    MGET read, SET write, both inside try/catch (RedisException)
-AssemblyInfo.cs
+AssemblyInfo.cs                       [assembly: InternalsVisibleTo("…MarketData.UnitTests")], own file
 ```
 
-**New — `MarketData.Api` (1 file)** — `MarketDataEndpoints.cs`: `AddMarketDataApi`, `MapMarketDataEndpoints`,
-the provider log line, and `/api/dev/nudge`.
+⚠️ `InternalsVisibleTo`, **not** `CA1716`. Tasks 7–9 unit-test `FinnhubQuoteResponse`, `FakeQuoteProvider`
+and `RedisLastKnownPriceStore`, all of which §2.2 declares `internal sealed`. The precedent is
+`Portfolio.Infrastructure/AssemblyInfo.cs:4`, whose own comment says why it is in its own file: *"riding on
+another type's file means deleting that type silently deletes this."*
 
-**New — `Portfolio` (6 files)**
+**New — `MarketData.Api` (3 files)**
+
+```
+MarketDataEndpoints.cs                AddMarketDataApi, MapMarketDataEndpoints, the provider log line,
+                                      GET /api/marketdata/health, POST /api/dev/nudge
+Requests/NudgeRequest.cs              string Ticker, decimal Percent, int TtlSeconds
+Validators/NudgeRequestValidator.cs   shape only, no I/O
+```
+
+**New — `Portfolio` (5 new files, 3 edited)**
 
 ```
 Application/Abstractions/IDashboardHoldingReader.cs
 Application/Dashboard/DashboardCalculator.cs
 Application/Dashboard/Queries/GetDashboard/GetDashboardQuery.cs
 Application/Dashboard/Queries/GetDashboard/GetDashboardQueryHandler.cs
-Application/Dashboard/Queries/GetDashboard/DashboardPosition.cs   (+ DashboardTotals, DashboardDto)
-Infrastructure/Persistence/HoldingQueries.cs                       — EDITED, gains the visible-holdings read
+Application/Dashboard/Queries/GetDashboard/GetDashboardResult.cs  (+ DashboardPosition, DashboardTotals)
+Infrastructure/Persistence/HoldingQueries.cs        — EDITED, gains the visible-holdings read
+Infrastructure/PortfolioModule.cs                   — EDITED, binds IDashboardHoldingReader
+Infrastructure/DependencyInjection.cs               — EDITED, registers the dashboard handler
 ```
+
+⚠️ **The success payload is `GetDashboardResult`, not `DashboardDto`.** `CLAUDE.md`'s CQRS naming section is
+explicit — *"`<UseCase>Result` is the **success payload record**… the suffix is not optional"* — and
+`grep -rn "Dto" src/ --include=*.cs` returns **zero hits** today. The shipped precedent is
+`GetCurrentUserResult.cs`. `DashboardPosition` and `DashboardTotals` are supporting records in the same
+use-case folder.
 
 **New — `src/Api` (1 file)** — `Extensions/RedisExtensions.cs` (deferred item C4).
 
 **New — tests** — `tests/StockPortfolio.Modules.MarketData.UnitTests/` (project + ~8 files);
 `tests/StockPortfolio.Api.IntegrationTests/DashboardTests.cs`.
 
-**New — SPA (5 files)** — `src/marketdata/dashboardApi.ts`, `src/lib/format.ts`,
-`src/components/StatTile.tsx`, `src/components/Freshness.tsx`, `tests/dashboard.test.tsx`.
+**New — SPA (6 files)** — `src/marketdata/dashboardApi.ts` · `src/lib/format.ts` ·
+`src/components/StatTile.tsx` · `src/components/Freshness.tsx` · `src/components/ApiHealth.tsx` ·
+`tests/dashboard.test.tsx`.
 
 **Edited** — `Directory.Packages.props` · `StockPortfolio.slnx` ·
 `Portfolio.Application.csproj` (+`MarketData.Contracts`) · `MarketData.Infrastructure.csproj` (−EF, −Npgsql,
 +Redis, +Http, +Http.Resilience) · `src/Api/Program.cs` · `src/Api/Extensions/HealthCheckExtensions.cs` ·
 `src/Api/appsettings.json` · `AddHoldingCommandHandler.cs` · `PortfolioEndpoints.cs` ·
 `ModuleBoundaryTests.cs` · `ApiFixture.cs` · `Wire.cs` · `EndpointMetadataTests.cs` ·
-`src/Web/src/routes/_authenticated/dashboard.tsx` · `src/Web/src/index.css` (a `--warn` token) ·
-`CLAUDE.md` · `README.md` · four `docs/plan/` files · `docs/deferred-work.md`.
+`Portfolio.Infrastructure/PortfolioModule.cs` · `Portfolio.Infrastructure/DependencyInjection.cs` ·
+`src/Web/src/routes/_authenticated/dashboard.tsx` · `src/Web/src/routes/_authenticated/portfolio.tsx` ·
+`src/Web/src/index.css` (a `--warn` token) · `src/Web/tests/msw/server.ts` ·
+`src/Web/tests/auth.test.tsx` · `src/Web/tests/sessionPersistence.test.tsx` · `docker-compose.yml`
+(one comment, and optionally D10) · `CLAUDE.md` · `README.md` · four `docs/plan/` files ·
+`docs/deferred-work.md`.
 
 **Not edited, deliberately** — `infra/**` (zero lines, §2.9) · both `Dockerfile`s (all five MarketData `COPY`
-lines already exist, then both `COPY src/Modules/ src/Modules/` wholesale) · `docker-compose.yml`
-(`Finnhub__ApiKey: ${FINNHUB_API_KEY:-}` already at `:139`) · `.env.example` (`FINNHUB_API_KEY=` at `:55`) ·
-both workflows (`ci.yml:131` already pins `FINNHUB_API_KEY: ''`; `deploy.yml:204,224` already pass it) ·
-`tests/Directory.Build.props` · `Migrator/**`.
+lines already exist, then both `COPY src/Modules/ src/Modules/` wholesale) · `docker-compose.yml`'s **env
+block** (`Finnhub__ApiKey: ${FINNHUB_API_KEY:-}` already at `:139`; only a stale comment at `:65` changes) ·
+`.env.example` (`FINNHUB_API_KEY=` at `:55`) · both workflows (`ci.yml:131` already pins
+`FINNHUB_API_KEY: ''`; `deploy.yml:204,224` already pass it) · `tests/Directory.Build.props` · `Migrator/**`.
 
 ---
 
@@ -580,23 +644,28 @@ both workflows (`ci.yml:131` already pins `FINNHUB_API_KEY: ''`; `deploy.yml:204
 
 ### Task 2: `MarketData.Domain` — `Ticker`, `Quote`, `LastPrice`
 
-- [ ] `Ticker`: `public readonly partial record struct Ticker(string Value)` with a private-ish factory
-      `Create(string?) → OneOf<Ticker, InvalidInput>`, canonicalising to upper case. Copy the shape from
-      `Portfolio.Domain/Ticker.cs` — **copy, do not reference** (§2.3).
+- [ ] `Ticker`: `public readonly partial record struct Ticker(string Value)` with a **`public static`** factory
+      `Create(string?) → OneOf<Ticker, InvalidInput>`, canonicalising to upper case. The positional constructor
+      stays public and guard-free — copy `Portfolio.Domain/Ticker.cs:8,14` exactly, **copy, do not reference**
+      (§2.3). The factory cannot be private: `QuoteReader` in `.Application` and `FinnhubQuoteProvider` in
+      `.Infrastructure` both construct tickers from outside `.Domain`, exactly as `HoldingQueries.cs:16` and
+      `AddHoldingCommandHandler.cs:20` already do for Portfolio's.
 - [ ] `Quote`, `LastPrice` as above. All guard-free constructors.
-- [ ] `AssemblyInfo.cs` with the `CA1716` suppression **in its own file** — twice now, deleting an unrelated
-      type has taken that attribute with it and broken the build.
-- [ ] ⚠️ **The architecture suite goes red here.** `EmptyShells_AreExactlyThePhasesNotYetBuilt` fails on the
-      first `.cs` file in any MarketData project. Task 3 is next for that reason.
+- [ ] **No `AssemblyInfo.cs`** — see §4. There is nothing here to suppress.
+- [ ] ⚠️ **The architecture suite goes red here — on the first *type in a `StockPortfolio.*` namespace*, not
+      the first file.** `IsEmptyShell` is
+      `!assembly.GetTypes().Any(type => type.Namespace?.StartsWith("StockPortfolio", …) == true)`
+      (`SolutionAssemblies.cs:92-94`), so a file carrying only assembly-level attributes leaves the assembly a
+      shell. `Ticker.cs` is what flips `MarketData.Domain`. Task 3 is next for that reason.
 - [ ] Tests: `Ticker_LowerCase_CanonicalisesToUpper`, `Ticker_TooLong_ReturnsInvalidInput`,
       `Ticker_Empty_ReturnsInvalidInput`.
 
-### Task 3: The architecture lists, moved by hand
+### Task 3: The architecture lists — **staged, one assembly at a time**
 
 The skip arithmetic, derived from source rather than copied from `CLAUDE.md`. The only `Assert.Skip` in the
 suite is `ModuleBoundaryTests.cs:174`, reached from five call sites:
 
-| Rule | Method | Runs over | Skips now | After Phase 3 |
+| Rule | Method | Runs over | Skips now | End of Phase 3 |
 |---|---|---|---|---|
 | 1 | `Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts` | `ScannedNames` (17) | 6 | **1** |
 | 2 | `ContractsAssembly_ReferencesNoPersistence` | 3 | 2 | **1** |
@@ -605,23 +674,49 @@ suite is `ModuleBoundaryTests.cs:174`, reached from five call sites:
 | 5 | `ApiAssembly_ReferencesNeitherPersistenceNorItsOwnInfrastructure` | 3 | 1 | 0 |
 | | | | **11** | **2** |
 
-- [ ] `ModuleBoundaryTests.cs:69-77` — prune `expected` to the single survivor
-      `"StockPortfolio.Modules.Identity.Contracts"`. Rewrite the failure message at `:87-89`, which afterwards
-      says something false ("Rule 2 runs over `Portfolio.Contracts` alone and skips the other two").
-- [ ] `ModuleBoundaryTests.cs:36-51` — add all five `SolutionAssemblies.NameOf("MarketData", …)` entries to
-      `populated`. **Without this, `PopulatedAssemblies_AreNotEmptyShells_…` stops guarding exactly the
-      assemblies that just went live**, and a Phase 4 refactor that empties one reports green.
-- [ ] Break one newly-live rule on purpose — add a `using StockPortfolio.Modules.Portfolio.Domain;` and a
-      `Ticker` field to a MarketData type — watch rule 1 go red, then restore it. A rule that has never been
-      seen red is not enforcement.
-- [ ] `Architecture.Tests` moves 37 passed / 11 skipped → **46 passed / 2 skipped of 48 discovered**, before
-      any Phase 3 test is written. `ModuleBoundaryTests.cs:17`'s `ShouldBe(17, …)` does **not** change — that
-      becomes 22 in Phase 4 when Alerts lands.
+⛔ **Do not make both list edits here.** The five MarketData assemblies gain their first type at five
+different tasks — `.Domain` at Task 2, `.Contracts` at Task 4, `.Application` at Task 6b, `.Infrastructure`
+at Task 7, `.Api` at Task 17. Pruning `expected` to one entry now makes
+`EmptyShells_AreExactlyThePhasesNotYetBuilt` red (four assemblies are still shells and `actual` will list
+them), **and** adding all five to `populated` makes `PopulatedAssemblies_AreNotEmptyShells_…` red for the
+same reason. That is two red tests from Task 3 to Task 17 — precisely the "build red for the whole phase"
+this task exists to prevent.
+
+**Each edit lands beside the task that populates its assembly**, one line at a time. The suite is green after
+every task:
+
+| Task | Assembly it populates | Edit | Skips after |
+|---|---|---|---|
+| 3 | `MarketData.Domain` (Task 2) | remove from `expected`, add to `populated` | 11 → **9** |
+| 4 | `MarketData.Contracts` | same, one line | 9 → **7** |
+| 6b | `MarketData.Application` | same, one line | 7 → **6** |
+| 7 | `MarketData.Infrastructure` | same, one line | 6 → **4** |
+| 17 | `MarketData.Api` | same, one line | 4 → **2** |
+
+Task 3's own work:
+
+- [ ] `ModuleBoundaryTests.cs:69-77` — remove **only** `"StockPortfolio.Modules.MarketData.Domain"` from
+      `expected`. `ModuleBoundaryTests.cs:36-51` — add **only** `SolutionAssemblies.NameOf("MarketData",
+      "Domain")` to `populated`. Skips 11 → 9 (rule 1 loses one, rule 3 loses its only one). Suite green.
+- [ ] Rewrite the failure message at `:87-89`, which is already false today and stays false ("Rule 2 runs
+      over `Portfolio.Contracts` alone and skips the other two").
+- [ ] **Break rule 1 on purpose, and get the recipe right.** Rule 1 reads
+      `assembly.GetReferencedAssemblies()` — emitted metadata — so a `using` alone is a compile error, not a
+      red test, and a bare `Ticker` binds to MarketData's own type ahead of any using-directive, emits no
+      reference, and reports **green** while proving nothing. Add the `<ProjectReference>` to
+      `Portfolio.Domain` in `MarketData.Domain.csproj` **and** a fully-qualified field —
+      `private static readonly StockPortfolio.Modules.Portfolio.Domain.Ticker Probe = default;` — watch
+      `Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts(…MarketData.Domain)` report
+      `-> StockPortfolio.Modules.Portfolio.Domain`, then revert both.
+- [ ] By the end of the phase `Architecture.Tests` moves 37 passed / 11 skipped → **46 passed / 2 skipped of
+      48 discovered**, before any Phase 3 test is written. `ModuleBoundaryTests.cs:17`'s `ShouldBe(17, …)`
+      does **not** change — that becomes 22 in Phase 4 when Alerts lands.
 
 ### Task 4: `MarketData.Contracts`
 
 - [ ] `IQuoteReader.cs` and `ISymbolValidator.cs` exactly as §2.4. `QuotedPrice` beside `IQuoteReader`.
 - [ ] Leave the csproj with no ItemGroup.
+- [ ] The two list edits for `MarketData.Contracts` (Task 3's table). Skips 9 → 7.
 - [ ] Rule 2 now runs over `Portfolio.Contracts` **and** `MarketData.Contracts` and passes for both.
 
 ### Task 5: `Portfolio.Application` gains the MarketData reference
@@ -657,6 +752,21 @@ public static class LastKnownPrice
       shape Finnhub's all-zero responses would leave behind); a price stamped an hour in the future is not
       (a skewed replica). Use `FakeTimeProvider`.
 
+### Task 6b: `MarketData.Application/Abstractions` — the three ports
+
+Everything from Task 7 onward implements or injects one of these, so they must exist first. Nothing here has
+an implementation yet and the build stays green.
+
+- [ ] `IQuoteProvider` — `Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker>, CancellationToken)`,
+      `Task<bool> SymbolExistsAsync(Ticker, CancellationToken)`, and **`string Name { get; }`**. `Name` is
+      needed twice over: by the health endpoint and panel (Task 17, Task 20) and by the integration fixture
+      (Task 18), which cannot assert on a type that is `internal` in `.Infrastructure`.
+- [ ] `ILastKnownPriceStore` — `ReadAsync(IReadOnlyCollection<Ticker>, CancellationToken)`,
+      `WriteAsync(IReadOnlyCollection<Quote>, CancellationToken)`. Note the **collection** on the write: the
+      caller is `QuoteReader`, not the provider (Task 10).
+- [ ] `IQuoteNudge` — `void Nudge(string ticker, decimal percent, TimeSpan duration)`.
+- [ ] All `public` (§2.2). The two list edits for `MarketData.Application`. Skips 7 → 6.
+
 ### Task 7: `FinnhubQuoteProvider` and its response mapping
 
 - [ ] `FinnhubQuoteResponse` — `decimal? C, H, L, O, Pc, D, Dp` plus `long? T` (§2.6).
@@ -672,10 +782,9 @@ await Parallel.ForEachAsync(symbols,
     {
         try
         {
-            using var lease = await _budget.AcquireAsync(1, token);
+            using var lease = await _budget.AcquireAsync(1, token);   // the SINGLETON bucket, §3
             if (!lease.IsAcquired) { LogBudgetExhausted(symbol); return; }
-            var quote = await FetchOneAsync(symbol, token);
-            if (quote is { } q) { quotes.Add(q); await _store.WriteAsync(q, token); }
+            if (await FetchOneAsync(symbol, token) is { } q) { quotes.Add(q); }
         }
         catch (HttpRequestException ex)       { LogQuoteFailed(ex, symbol); }
         catch (TimeoutRejectedException ex)   { LogQuoteFailed(ex, symbol); }
@@ -686,6 +795,13 @@ await Parallel.ForEachAsync(symbols,
   Catch the three concrete types, **not `Exception`** — a `NullReferenceException` in the mapper must still
   fail loudly. Without the catch, `Parallel.ForEachAsync` cancels the remaining work and faults the task on
   the first failure, turning one dead ticker into a blank dashboard: the exact inverse of §2.5.
+- [ ] ⚠️ **The provider does not write to Redis.** The store write moved to `QuoteReader` (Task 10) so that
+      the fake and Finnhub paths record identically — see the note there. The provider fetches and returns,
+      nothing else.
+- [ ] `AssemblyInfo.cs` with `[assembly: InternalsVisibleTo("StockPortfolio.Modules.MarketData.UnitTests")]`
+      **in its own file** (§4). Tasks 7–9 unit-test three `internal sealed` types; without this they cannot
+      see them, and riding the attribute on another type's file means deleting that type silently deletes it.
+- [ ] The two list edits for `MarketData.Infrastructure`. Skips 6 → 4.
 - [ ] Tests: `FinnhubResponse_NullDp_Deserialises`, `FinnhubResponse_MissingC_IsNotAPrice`,
       `FinnhubResponse_AllZero_IsNoPriceNotUnknownTicker` (renamed from the spec's
       `…_MapsToUnknownTicker`), `FinnhubTimestamp_ParsedAsSeconds`, `FinnhubTimestamp_MillisecondMagnitude_IsRejected`,
@@ -721,7 +837,15 @@ await Parallel.ForEachAsync(symbols,
 
 ### Task 10: `QuoteReader`, `SymbolValidator` and `MarketDataModule`
 
-- [ ] `QuoteReader` owns the set difference (§2.5) and stamps `IsLastKnown`.
+- [ ] `QuoteReader` owns the set difference (§2.5), stamps `IsLastKnown`, **and writes every quote the
+      provider returned to `ILastKnownPriceStore` before computing that difference.**
+      ⚠️ This is the one place the spec's wording actively misleads: §2.4 says *"Every quote this app pays an
+      API call for gets written down, **from whichever path fetched it**"*, and putting the write inside
+      `FinnhubQuoteProvider` satisfies the sentence while breaking the requirement — with no API key the
+      **fake** is the only provider, so nothing would ever populate `marketdata:last:*` on the P0 compose
+      path. That silently breaks three exit items: the `redis-cli GET` check, the kill-the-provider drill,
+      and Task 19's ordering, which populates the key by hitting `/api/dashboard` on a host pinned to the
+      fake. One writer in `QuoteReader` makes both paths record identically.
 - [ ] `SymbolValidator` fails **open** (§2.11).
 - [ ] `MarketDataModule`:
 
@@ -737,10 +861,14 @@ if (options.HasApiKey)
 }
 else
 {
-    services.AddSingleton<IQuoteProvider, FakeQuoteProvider>();
-    services.AddSingleton<IQuoteNudge>(sp => (FakeQuoteProvider)sp.GetRequiredService<IQuoteProvider>());
+    // One owner, no cast. Registering IQuoteNudge as a cast off IQuoteProvider breaks the moment a test
+    // swaps the provider out: RemoveAll<IQuoteProvider>() leaves this lambda casting the replacement.
+    services.AddSingleton<FakeQuoteProvider>();
+    services.AddSingleton<IQuoteProvider>(sp => sp.GetRequiredService<FakeQuoteProvider>());
+    services.AddSingleton<IQuoteNudge>(sp => sp.GetRequiredService<FakeQuoteProvider>());
 }
 
+services.AddSingleton(BuildTokenBucket());                  // §3 — one bucket for the process
 services.AddSingleton<ILastKnownPriceStore, RedisLastKnownPriceStore>();
 services.AddScoped<IQuoteReader, QuoteReader>();
 services.AddScoped<ISymbolValidator, SymbolValidator>();
@@ -789,7 +917,7 @@ that is where the placeholder stops being one line.
 
 ```csharp
 public Task<List<HoldingRow>> GetVisibleHoldingsAsync(Guid userId, CancellationToken ct) =>
-    db.Holdings.AsNoTracking()
+    context.Holdings.AsNoTracking()          // `context`, not `db` — HoldingQueries.cs:9,23
       .Where(h => h.UserId == userId && h.IsVisible)
       .Select(h => new HoldingRow(
           h.Id, h.Ticker.Value, h.Quantity,
@@ -802,16 +930,22 @@ public Task<List<HoldingRow>> GetVisibleHoldingsAsync(Guid userId, CancellationT
       adds the toggle, so the filter is currently a no-op that costs nothing and stops being one in Phase 5.
 - [ ] ⚠️ `.Select()` after `.Include()` silently ignores the `Include`. There is no `Include` here — keep it
       that way.
+- [ ] **Register it.** `PortfolioModule.cs:48` gains `services.AddScoped<IDashboardHoldingReader,
+      HoldingQueries>();` beside the existing `IUserHoldsTicker` line — one class, two contracts, two
+      registrations. DI here is hand-written, not convention-scanned; miss the line and `/api/dashboard`
+      throws on first request, not at boot.
 
 ### Task 13: `DashboardCalculator` and the DTOs
 
-- [ ] `DashboardPosition` / `DashboardTotals` / `DashboardDto` per §2.10, with `[property: JsonIgnore(Condition
+- [ ] `DashboardPosition` / `DashboardTotals` / `GetDashboardResult` per §2.10, with `[property: JsonIgnore(Condition
       = JsonIgnoreCondition.Never)]` on **every** nullable member.
 - [ ] `DashboardCalculator` — pure, no repository, no `IQuoteReader`, takes rows + prices + `now`.
-- [ ] The seven §5 tests plus `Totals_CostExcludesUnpricedPositions` (§2.8) and
-      `Weight_WithNullPricePosition_ExcludesFromDenominator`.
-- [ ] `Money_SerialisedAsString_NotNumber` is already satisfied for `Money`; the test that matters is the one
-      over **`weight` and `profitPercent`**.
+- [ ] The **six** arithmetic tests from §5 (`phase-3-live-prices.md:239-244`, which already includes
+      `Weight_WithNullPricePosition_ExcludesFromDenominator`) plus `Totals_CostExcludesUnpricedPositions`
+      (§2.8) — **seven calculator tests**, and add `StalestObservedAt_IsMinOverPricedPositions`.
+- [ ] §5's seventh entry, `Money_SerialisedAsString_NotNumber` (`:245`), is a serialisation test, not a
+      calculator test. It is already satisfied for `Money` by `MoneyJsonConverter`; the assertion that matters
+      is the one over **`weight` and `profitPercent`**, and it belongs with the integration tests.
 
 The wire shape a client sees:
 
@@ -838,13 +972,17 @@ The wire shape a client sees:
     "profit": { "amount": "500.0000", "currency": "USD" },
     "profitPercent": "20.00", "positionCount": 2, "pricedPositionCount": 1
   },
-  "asOf": "2026-08-05T12:00:05+00:00", "stalestObservedAt": null
+  "asOf": "2026-08-05T12:00:05+00:00", "stalestObservedAt": "2026-08-05T12:00:04+00:00"
 }
 ```
 
+`stalestObservedAt` is `min(observedAt)` over **priced** positions (§2.8), so with one priced row it equals
+that row's `observedAt` — it is `null` only when nothing is priced. TSLA is unpriced, so it contributes
+nothing here and its own `observedAt` is `null` rather than a zero timestamp.
+
 ### Task 14: `GetDashboardQueryHandler` and the endpoint
 
-- [ ] Handler returns `DashboardDto` **bare — no `OneOf`**. An empty portfolio is a valid dashboard and there
+- [ ] Handler returns `GetDashboardResult` **bare — no `OneOf`**. An empty portfolio is a valid dashboard and there
       is no failure case. Do not invent a union to satisfy the `.Match` convention; the rule is that a union's
       cases are exhaustive, not that every handler has one. The precedent is already in the tree and settles
       it both ways: `GetHoldingsQueryHandler` is `IQueryHandler<GetHoldingsQuery, IReadOnlyList<HoldingSummary>>`
@@ -857,11 +995,23 @@ The wire shape a client sees:
       `CLAUDE.md` fixes the edge as Portfolio → MarketData. Putting it in `MarketData.Api` inverts that edge
       and makes MarketData read holdings, which the boundary rules forbid.
 - [ ] Add a `DashboardPath` const; do **not** nest under `/api/holdings`. Reuse `TryReadUserId`,
-      `.RequireAuthorization()`, `.Produces<DashboardDto>(200)`, `.ProducesProblem(401)`, `.ProducesProblem(500)`.
+      `.RequireAuthorization()`, `.Produces<GetDashboardResult>(200)`, `.ProducesProblem(401)`, `.ProducesProblem(500)`.
       `WithName("GetDashboard")`.
-- [ ] ⚠️ `EndpointMetadataTests.cs:21-22,38` asserts the data source exposes **exactly** the four holdings
-      route names. Add `"GetDashboard"`, an `[InlineData]` row at `:59-68`, and a `CallAsync` case — or the
-      suite is red.
+- [ ] **Register the handler.** `Portfolio.Infrastructure/DependencyInjection.cs` gains
+      `services.AddScoped<IQueryHandler<GetDashboardQuery, GetDashboardResult>, GetDashboardQueryHandler>();`
+      after the `GetHoldingsQuery` entry, closed generic spelled out like every other line there.
+      `DecorateHandlers()` only wraps descriptors that already exist, so a missing line costs the logging
+      decorator as well as the resolve.
+- [ ] ⚠️ **`EndpointMetadataTests` will *not* go red, and that is the hazard.** `ShouldExposeExactly` compares
+      against `EndpointsByName(routeNames)`, which filters the data source down to *the names it was handed*
+      (`:157-165`, `routeNames.Contains(pair.Name, …)`). A new route called `GetDashboard` is filtered out
+      before the comparison, so `EndpointDataSource_ExposesTheFourHoldingsRoutes` stays **green** and the
+      dashboard route ships with **zero** metadata coverage. Nothing enumerates endpoints unfiltered.
+      The edit is mandatory to *gain* coverage, not to restore green:
+      add `"GetDashboard"` to `PortfolioRouteNames` (`:21-22`) — which makes
+      `PortfolioRoute_ProblemStatuses_DeclareProblemJson` run over it and demand `problem+json` on the
+      declared 401 and 500 — then add an `[InlineData("GetDashboard", …)]` row at `:59-68` **and** the
+      matching `CallAsync` case, or `DeclaredResponses` throws `ArgumentOutOfRangeException`.
 
 ### Task 15: `AddHoldingCommandHandler` gets its lookup
 
@@ -916,7 +1066,14 @@ app.MapMarketDataEndpoints();                 // NEW, before MapStockPortfolioHe
 - [ ] `Warning` for the fake ("No `Finnhub__ApiKey` configured; serving generated prices from
       FakeQuoteProvider"), `Information` for Finnhub. `[LoggerMessage]` source-generated — `CA1848` is a build
       error. Phase 6's health panel reads the same singleton, so the log string and the page string cannot drift.
-- [ ] `/api/dev/nudge` maps **only** when `env.IsDevelopment()` **and** `IQuoteNudge` is registered.
+- [ ] **`GET /api/marketdata/health`** — anonymous, returns `{ "provider": "<IQuoteProvider.Name>" }`,
+      `.Produces<…>(200)`. It is the single source both the log line and Phase 6's panel read, so the string a
+      reviewer sees in the log and the one on the page cannot drift. Add `"GetMarketDataHealth"` to the
+      `EndpointMetadataTests` route-name list alongside Task 14's edit.
+      This is also what makes Task 17's judgement call cheap: `MarketData.Api` now carries a type that ships
+      in **every** environment, so rule 5 runs over it for real rather than only when someone runs Development
+      locally.
+- [ ] `POST /api/dev/nudge` maps **only** when `env.IsDevelopment()` **and** `IQuoteNudge` is registered.
       Gate on the provider, not just the environment: in Azure `ASPNETCORE_ENVIRONMENT=Production` so the
       route does not exist (404, not 401), and with a real key there is no `IQuoteNudge` to map even if
       someone deletes the environment check. `RequireAuthorization()` is explicitly **not** the gate — a
@@ -924,10 +1081,14 @@ app.MapMarketDataEndpoints();                 // NEW, before MapStockPortfolioHe
       price-manipulation endpoint.
 - [ ] Nudges are `ConcurrentDictionary<string, (decimal Percent, DateTimeOffset ExpiresAt)>` with a TTL,
       applied multiplicatively on top of the walk, so a Phase 4 demo nudge does not persist for the session.
-- [ ] `MarketData.Api` shipping this is what makes rule 5 run over it — the rule most likely to be violated
-      when Phase 4 bolts SSE onto this module. A rule that has never once executed against `MarketData.Api`
-      is not enforcement. Cost: ~30 lines. **If you skip it, `MarketData.Api` stays a shell and the skip
-      count is 4, not 2** — update Task 3's arithmetic accordingly rather than leaving it wrong.
+- [ ] The nudge binds a body, so it obeys the request convention like any other route:
+      `Requests/NudgeRequest.cs` (`string Ticker, decimal Percent, int TtlSeconds`) and
+      `Validators/NudgeRequestValidator.cs` beside it, wired with
+      `.AddEndpointFilter<ValidationFilter<NudgeRequest>>()`, declaring `.Produces(204)`,
+      `.ProducesValidationProblem()` and `.ProducesProblem(500)`. `MarketData.Api.csproj:8` already carries
+      `FluentValidation` for exactly this. An `.Application` type never binds off the wire.
+- [ ] The two list edits for `MarketData.Api`. Skips 4 → **2**, and the phase's architecture arithmetic is
+      complete.
 
 ### Task 18: Integration-test infrastructure
 
@@ -946,9 +1107,19 @@ public ApiFactory CreateHostWithQuoteProvider(IQuoteProvider provider)
     ArgumentNullException.ThrowIfNull(provider);
     return new ApiFactory(
         SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
-        services => { services.RemoveAll<IQuoteProvider>(); services.AddSingleton(provider); });
+        services =>
+        {
+            services.RemoveAll<IQuoteProvider>();
+            services.RemoveAll<IQuoteNudge>();     // else the seam still points at the fake
+            services.AddSingleton(provider);
+        });
 }
 ```
+
+⚠️ `RemoveAll<IQuoteProvider>()` alone leaves `IQuoteNudge` registered against the fake. Today that is
+masked — `ApiFactory.cs:17` runs the host as `EnvironmentName = "Testing"`, so Task 17's `IsDevelopment()`
+gate never maps the route — which means the safety is accidental and the first Development-environment test
+trips over it.
 
 - [ ] Redis-down host — `CreateHostWithUnreachableDependencies()` is `static` and breaks **both** Postgres and
       Redis, so it cannot express "kill Redis with the provider up". Add an **instance** sibling:
@@ -986,7 +1157,7 @@ public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(
 
 ### Task 20: The SPA dashboard
 
-- [ ] `src/marketdata/dashboardApi.ts` — `DashboardDto` types, `dashboardKeys.view()`, `fetchDashboard` using
+- [ ] `src/marketdata/dashboardApi.ts` — `GetDashboardResult` types, `dashboardKeys.view()`, `fetchDashboard` using
       `apiFetch` with the `signal`.
 - [ ] `src/lib/format.ts` — `formatMoney(money)` passing the **string** straight to
       `Intl.NumberFormat(undefined, { style: 'currency', currency }).format(money.amount)`, and
@@ -998,6 +1169,8 @@ public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(
       global defaults, which are `staleTime: 30_000` and `refetchOnWindowFocus: false`:
 
 ```ts
+const [intervalMs, setIntervalMs] = useState(60_000)   // 60s default, per spec §3
+
 useQuery({
   queryKey: dashboardKeys.view(),
   queryFn: ({ signal }) => fetchDashboard(signal),
@@ -1006,6 +1179,10 @@ useQuery({
   staleTime: 0,
 })
 ```
+
+⚠️ **The 60s default is not arbitrary and is not free to change.** §3's free-tier arithmetic — twenty of
+sixty calls per minute for one viewer — assumes it, and so does the README paragraph Task 23 schedules.
+Picking 15s quadruples that figure. `<select>` options: 15s / 30s / 60s / 5m.
 
 - [ ] Extract the four hardcoded tiles at `dashboard.tsx:21-32` into `StatTile`. Reuse `Table` and
       `Column<T>` as-is for the eight columns (`numeric: true` gives right-align + `font-mono`). Reuse `Card`'s
@@ -1019,6 +1196,22 @@ useQuery({
       only** — the runner locale is en-GB and renders USD as `US$120.00`. Five tests: totals render without
       client-side arithmetic · a null price renders pending, not `$0.00` · a stale timestamp shows amber ·
       changing the interval control changes `refetchInterval` · a provider error keeps the last good table.
+- [ ] **`src/components/ApiHealth.tsx`** — the stub panel the spec asks for ("stubbed here, filled in Phase
+      6"). Reads `GET /api/marketdata/health` and renders the provider name, with a Phase 6 placeholder for
+      latency and quota. Without it, the exit item "the health panel names Finnhub rather than Fake" is
+      unreachable.
+- [ ] ⚠️ **Two existing Phase 1 tests will go red, and neither is a dashboard test.**
+      `tests/setup.ts:13` runs MSW with `onUnhandledRequest: 'error'` and `tests/msw/server.ts:8` registers no
+      default handlers — while `auth.test.tsx:131` (`renderAt('/dashboard')`) and
+      `sessionPersistence.test.tsx:55` (`initialEntries: ['/dashboard']`) both mount this route. The moment
+      the route fetches, both fail on an unhandled request. Add a shared `dashboardHandler` to `tests/msw/`
+      and `server.use(...)` it in both files.
+- [ ] **`portfolio.tsx` is edited too, and this is a `CLAUDE.md` breach being carried, not a new one.**
+      `:86-91`'s `Number(money.amount).toLocaleString(...)` is deleted in favour of `formatMoney` from
+      `src/lib/format.ts`. `:102-109`'s `totalInvested` is a `Number()` **reduce over money in the browser** —
+      *"Never compute money in the browser"* — and Phase 3 is the phase that makes a server-computed total
+      available. Either replace it or defer it **with the reason recorded here**; leaving it unmentioned reads
+      as an oversight and the next reader fixes it at random.
 - [ ] `npm install` first — `node_modules` is absent.
 
 ### Task 21: Compose, and the degradation drills
@@ -1058,6 +1251,12 @@ useQuery({
 - [ ] `README.md`: the "empty shells" line (`:277-278`) · the subdomain-classification line (`:74`) · the
       connection-budget arithmetic · the new sections (below).
 - [ ] `src/Api/Extensions/HealthCheckExtensions.cs:35-37`'s comment moves with the code in Task 11.
+- [ ] Two more comments this phase makes false. `docker-compose.yml:65` —
+      `# Redis - price windows, alert cooldowns, SSE tickets (phases 3-4).` — is the same claim §2.6 of the
+      spec moved to Phase 4; reword it to match the text `RedisExtensions` ends up carrying.
+      `portfolio.tsx:295` — `{/* No price and no P&L columns — those need MarketData, which is Phase 3. */}`
+      — points at a phase that has now shipped: either the portfolio table gains those columns, or the
+      comment says the dashboard owns them. Decide and record which.
 
 ### Task 24: The phase is done when it runs, not when tests pass
 
@@ -1071,34 +1270,36 @@ Work the §8 checklist in a browser, on compose and then on the deployed URL.
 |---|---|---|
 | 1 | Packages, `MarketData.UnitTests` | builds, discovered, 0 tests; project count 25 |
 | 2 | `MarketData.Domain` | 3 tests; **architecture suite goes red here** |
-| 3 | The two architecture lists | skips **11 → 2**; one rule broken on purpose and restored |
-| 4 | `MarketData.Contracts` | rule 2 runs over two modules instead of one |
+| 3 | Architecture lists — `.Domain` only | skips 11 → **9**; suite green; one rule broken on purpose |
+| 4 | `MarketData.Contracts` (+ its list edit) | rule 2 runs over two modules; skips 9 → **7** |
 | 5 | `Portfolio.Application` → `MarketData.Contracts` | rule 1 still green |
 | 6 | `LastKnownPrice` | 3 tests, each able to go red |
-| 7 | `FinnhubQuoteProvider` | 6 mapping tests; no ASP.NET Core in the reference graph |
+| 6b | `Application/Abstractions` — the three ports (+ list edit) | builds; skips 7 → **6** |
+| 7 | `FinnhubQuoteProvider`, `InternalsVisibleTo` (+ list edit) | 6 mapping tests; rule 4 runs; skips 6 → **4** |
 | 8 | `FakeQuoteProvider` | determinism **across two instances** |
 | 9 | `RedisLastKnownPriceStore` | 4 tests incl. the unreachable-Redis one |
-| 10 | `QuoteReader`, `SymbolValidator`, `MarketDataModule` | rule 4 runs and passes |
+| 10 | `QuoteReader` (owns the Redis write), `SymbolValidator`, `MarketDataModule` | one shared token bucket, one writer |
 | — | *half day* | |
 | 11 | C4 — `AddStockPortfolioRedis` | `/health/ready` still 503 with Redis down |
-| 12 | The dashboard read | generated SQL read by eye: no `Include`, members projected |
-| 13 | `DashboardCalculator` + DTOs | 9 tests; `weight` and `profitPercent` are JSON **strings** |
-| 14 | Handler + endpoint | `/openapi/v1.json` names `DashboardDto`; metadata test updated |
+| 12 | The dashboard read **+ its DI line** | generated SQL read by eye: no `Include`, members projected |
+| 13 | `DashboardCalculator` + `GetDashboardResult` | **7 calculator tests**; `weight`/`profitPercent` are strings |
+| 14 | Handler + endpoint **+ its DI line** | `/openapi/v1.json` names `GetDashboardResult`; metadata coverage **gained**, not restored |
 | 15 | `AddHoldingCommandHandler` lookup | `HoldingsTests` still green |
 | 16 | Host wiring, `appsettings.json` | manual run: dashboard returns 200 with prices |
-| 17 | Log line + nudge | compose logs the warning on a keyless boot; rule 5 runs |
+| 17 | Log line, health route, nudge (+ last list edit) | keyless boot logs the warning; rule 5 runs; skips 4 → **2** |
 | 18 | Fixture: three host shapes | `dotnet test` green |
 | 19 | Integration tests | 9 tests incl. the partial-failure one |
 | — | *one day* | |
-| 20 | SPA dashboard | **works in a browser**; cards at 375px |
+| 20 | SPA dashboard, health panel, the two MSW fixes | **works in a browser**; cards at 375px |
 | 21 | Compose + the four drills | all four by hand |
 | 22 | Bicep build, what-if, deploy | what-if reports **no changes** |
 | 23 | Document corrections | — |
 | 24 | The §8 walkthrough | on the public URL |
 | — | *0.8 days total* | |
 
-Tasks 2 and 3 come first together because task 2 is the moment the architecture rules switch on, and leaving
-task 3 undone means the build is red for the whole phase and the signal is lost.
+Task 2 is the moment the architecture rules switch on. **The list edits are then spread across tasks 3, 4,
+6b, 7 and 17 — one assembly each — because making both edits at task 3 trades one red test for two, held
+red for fourteen tasks.** Skips fall 11 → 9 → 7 → 6 → 4 → 2, and the suite is green after every task.
 
 ---
 
@@ -1149,11 +1350,13 @@ the fix is moving normalisation into the factories, which edits a Phase 1 file w
 first; if a twenty-row dashboard shows nothing, leave it and delete this paragraph rather than carrying it to
 Phase 4.
 
-**`MarketData.Api` shipping only a dev endpoint is a judgement call** (Task 17). The alternative is an empty
-shell and a skip count of 4 instead of 2. The argument for shipping it is that rule 5 has never once run
-against that assembly and Phase 4 will bolt SSE onto it. The argument against is that a state-mutating route
-excluded from Production is a security surface bought a phase early. It is gated twice (§2.11) and it is still
-the weakest thing in this plan.
+**`MarketData.Api` was nearly a dev-only assembly, and that would have been the weakest thing in this plan.**
+An endpoint that exists only in Development means rule 5 runs over `MarketData.Api` only when someone happens
+to run Development locally — enforcement in name. The health route (Task 17) fixes it by accident of being
+useful: it ships in every environment, so the assembly carries a real type and rule 5 genuinely runs. The
+nudge is still a state-mutating route excluded from Production and is still gated twice (§2.11) — but it is
+no longer load-bearing for the architecture argument, which is why it is safe to drop if it looks wrong on
+the day.
 
 ⚠️ **If anyone writes deferred item C11's test during this phase**, it must read "every **non-shell** `.Api`
 exposes `Map<M>Endpoints`" — reusing `SkipIfEmptyShell`. Written naively it goes red on a deliberately empty
@@ -1179,12 +1382,16 @@ exposes `Map<M>Endpoints`" — reusing `SkipIfEmptyShell`. Written naively it go
       with the provider **down** still succeeds
 - [ ] No `BackgroundService`, `PeriodicTimer` or `IHostedService` anywhere in `src/`
 - [ ] `dotnet test` green — passing **and** skipped both quoted, and the skip count is **2** against a freshly
-      measured baseline (the 11 this plan quotes is derived, not measured)
+      measured baseline (the 11 this plan quotes is derived, not measured). It was green after **every** task
+      along the way, not only at the end
+- [ ] `GET /api/marketdata/health` names the active provider, and the SPA panel shows the same string
+- [ ] `stalestObservedAt` is populated on a dashboard with a last-known row, and `null` when nothing is priced
 - [ ] One architecture rule broken on purpose and seen red, then restored
-- [ ] `/openapi/v1.json` names `DashboardDto`; no `.Application` request type appears in it
+- [ ] `/openapi/v1.json` names `GetDashboardResult`; no `.Application` request type appears in it
 - [ ] `weight` and `profitPercent` are JSON **strings** in a real response, and a null price is `null` rather
       than absent
-- [ ] `npm test` green including "a provider error keeps the last good table on screen"
+- [ ] `npm test` green including "a provider error keeps the last good table on screen" — **and** the two
+      Phase 1 session tests that mount `/dashboard` still pass under MSW's `onUnhandledRequest: 'error'`
 - [ ] `az bicep build` clean, and `az deployment group what-if` reports **no changes**
 - [ ] Deployed **with a real `FINNHUB_API_KEY`**; the public dashboard shows genuine prices and the health
       panel names Finnhub rather than Fake
