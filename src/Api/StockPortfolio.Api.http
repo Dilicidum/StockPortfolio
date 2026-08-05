@@ -1,0 +1,50 @@
+@host = http://localhost:8080
+
+### Register — expect 201, and copy accessToken into @accessToken below
+POST {{host}}/api/auth/register
+Content-Type: application/json
+
+{ "email": "demo@example.com", "password": "correct horse battery staple" }
+
+### Log in — expect 200
+POST {{host}}/api/auth/login
+Content-Type: application/json
+
+{ "email": "demo@example.com", "password": "correct horse battery staple" }
+
+### Paste the accessToken from either response above, and the id from the first POST below
+@accessToken = paste-the-access-token-here
+@holdingId = paste-the-holding-id-here
+
+### Who am I — expect 200
+GET {{host}}/api/auth/me
+Authorization: Bearer {{accessToken}}
+
+### List holdings
+GET {{host}}/api/holdings
+Authorization: Bearer {{accessToken}}
+
+### Add AAPL 10 @ $100 — expect 201
+POST {{host}}/api/holdings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "ticker": "AAPL", "quantity": 10, "price": 100 }
+
+### Add AAPL 10 @ $150 — expect 200, quantity 20, average 125
+POST {{host}}/api/holdings
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "ticker": "aapl", "quantity": 10, "price": 150 }
+
+### Correct it to 15 @ $120 — expect 200
+PATCH {{host}}/api/holdings/{{holdingId}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{ "quantity": 15, "price": 120 }
+
+### Close it — expect 204
+DELETE {{host}}/api/holdings/{{holdingId}}
+Authorization: Bearer {{accessToken}}

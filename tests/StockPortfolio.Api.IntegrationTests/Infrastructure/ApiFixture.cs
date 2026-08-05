@@ -4,8 +4,11 @@ using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Configurations;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+
+using StockPortfolio.Migrator;
 
 using Testcontainers.PostgreSql;
 using Testcontainers.Redis;
@@ -97,6 +100,22 @@ public sealed class ApiFixture : IAsyncLifetime
     /// <summary>Gets the connection string for the Portfolio role, which must not see identity.</summary>
     public string PortfolioConnectionString => ConnectionStringFor(PortfolioRole, RolePassword);
 
+    /// <summary>Gets the configuration the module list is registered against, shaped like the Migrator's own.</summary>
+    public IConfiguration MigratorConfiguration => new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            // Every module on the migrator role: it owns every schema, and no _svc role has DDL rights.
+            ["ConnectionStrings:Identity"] = MigratorConnectionString,
+            ["ConnectionStrings:Portfolio"] = MigratorConnectionString,
+
+            // AddIdentityModule validates the Jwt section eagerly; the migrator never signs anything.
+            ["Jwt:SigningKey"] = SigningKey,
+        })
+        .Build();
+
+    /// <summary>Gets the module DbContext types the API host registered, read off the host as it was built.</summary>
+    public IReadOnlyList<Type> HostDbContextTypes { get; private set; } = [];
+
     private ApiFactory Api => _api ?? throw new InvalidOperationException("The fixture has not been initialised.");
 
     /// <summary>Creates a client against the shared host.</summary>
@@ -108,7 +127,7 @@ public sealed class ApiFixture : IAsyncLifetime
         ArgumentNullException.ThrowIfNull(clock);
 
         return new ApiFactory(
-            SettingsFor(IdentityConnectionString, _redis.GetConnectionString()),
+            SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
             services =>
             {
                 services.RemoveAll<TimeProvider>();
@@ -117,11 +136,16 @@ public sealed class ApiFixture : IAsyncLifetime
     }
 
     /// <summary>Builds a host pointed at dependencies that cannot possibly answer.</summary>
-    public static ApiFactory CreateHostWithUnreachableDependencies() =>
-        new(SettingsFor(
-            "Host=127.0.0.1;Port=1;Database=nowhere;Username=nobody;Password=nothing;Timeout=2;"
-            + "Command Timeout=2;Maximum Pool Size=2",
+    public static ApiFactory CreateHostWithUnreachableDependencies()
+    {
+        const string Nowhere = "Host=127.0.0.1;Port=1;Database=nowhere;Username=nobody;Password=nothing;"
+            + "Timeout=2;Command Timeout=2;Maximum Pool Size=2";
+
+        return new ApiFactory(SettingsFor(
+            Nowhere,
+            Nowhere,
             "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1"));
+    }
 
     /// <inheritdoc/>
     public async ValueTask InitializeAsync()
@@ -131,8 +155,17 @@ public sealed class ApiFixture : IAsyncLifetime
         await ApplyMigrationsAsync();
 
         _api = new ApiFactory(
-            SettingsFor(IdentityConnectionString, _redis.GetConnectionString()),
-            services => ModuleDbContextInterceptors.AddToIdentity(services, RecordedCommands));
+            SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
+            services =>
+            {
+                // Both, or ParameterisationTests' assembly-wide proof silently stops covering holdings.
+                ModuleDbContextInterceptors.AddToIdentity(services, RecordedCommands);
+                ModuleDbContextInterceptors.AddToPortfolio(services, RecordedCommands);
+
+                // ConfigureTestServices runs after the app's own registrations, so this is the whole
+                // collection - which is what makes it comparable with the Migrator's.
+                HostDbContextTypes = MigratedModules.DbContextTypesIn(services);
+            });
 
         // Force the host to build here rather than inside the first test: a configuration mistake then fails.
         _ = _api.Services;
@@ -150,10 +183,11 @@ public sealed class ApiFixture : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    private static Dictionary<string, string?> SettingsFor(string identity, string redis) =>
+    private static Dictionary<string, string?> SettingsFor(string identity, string portfolio, string redis) =>
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["ConnectionStrings:Identity"] = identity,
+            ["ConnectionStrings:Portfolio"] = portfolio,
             ["ConnectionStrings:Redis"] = redis,
             ["Jwt:SigningKey"] = SigningKey,
             ["Jwt:Issuer"] = "StockPortfolio",
@@ -174,18 +208,24 @@ public sealed class ApiFixture : IAsyncLifetime
             $"Host={host};Port={port};Database={DatabaseName};Username={role};Password={password};"
             + $"Maximum Pool Size=10;Include Error Detail=true");
 
-    /// <summary>Applies the Identity migration as migrator.</summary>
+    /// <summary>Applies every module's migrations through the Migrator's own module list, not a copy of it.</summary>
     private async Task ApplyMigrationsAsync()
     {
-        await using var migratorHost = new ApiFactory(
-            SettingsFor(MigratorConnectionString, _redis.GetConnectionString()));
+        // A bare ServiceCollection, exactly as Migrator/Program.cs builds one: no host, no ASP.NET Core,
+        // so a module whose Add<M>Module leans on the host silently stops migrating here too.
+        var services = new ServiceCollection();
 
-        using var scope = migratorHost.Services.CreateScope();
+        services.AddEveryMigratedModule(MigratorConfiguration);
 
-        var context = (DbContext)scope.ServiceProvider.GetRequiredService(
-            ModuleDbContextInterceptors.IdentityDbContextType());
+        await using var provider = services.BuildServiceProvider();
+        await using var scope = provider.CreateAsyncScope();
 
-        await context.Database.MigrateAsync();
+        foreach (var contextType in MigratedModules.DbContextTypesIn(services))
+        {
+            var context = (DbContext)scope.ServiceProvider.GetRequiredService(contextType);
+
+            await context.Database.MigrateAsync();
+        }
     }
 
     /// <summary>Fails fast when the mounted shell script has CRLF line endings.</summary>

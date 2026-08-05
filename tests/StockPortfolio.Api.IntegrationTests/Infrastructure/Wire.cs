@@ -15,6 +15,22 @@ public sealed record AuthPayload(string AccessToken, string RefreshToken, DateTi
 /// <summary>The body of GET /api/auth/me.</summary>
 public sealed record UserPayload(Guid Id, string Email);
 
+/// <summary>An amount as the API serialises it. Amount is a string on purpose — see MoneyJsonConverter.</summary>
+public sealed record MoneyPayload(string Amount, string Currency);
+
+/// <summary>The errors map of an RFC 9457 validation problem, keyed by field name.</summary>
+public sealed record ValidationProblemPayload(Dictionary<string, string[]>? Errors);
+
+/// <summary>One position as the API returns it.</summary>
+public sealed record HoldingPayload(
+    Guid Id,
+    string Ticker,
+    decimal Quantity,
+    MoneyPayload AveragePrice,
+    MoneyPayload Invested,
+    bool IsVisible,
+    DateTimeOffset UpdatedAt);
+
 /// <summary>Thin helpers over the five /api/auth routes, so the tests read as assertions rather than as.</summary>
 internal static class Wire
 {
@@ -72,6 +88,47 @@ internal static class Wire
         payload.RefreshToken.ShouldNotBeNullOrWhiteSpace();
 
         return payload;
+    }
+
+    /// <summary>Posts a purchase to /api/holdings.</summary>
+    public static Task<HttpResponseMessage> AddHoldingAsync(
+        HttpClient client,
+        string accessToken,
+        string ticker,
+        decimal quantity,
+        decimal price) =>
+        SendAsync(client, HttpMethod.Post, "/api/holdings", accessToken, new { ticker, quantity, price });
+
+    /// <summary>Reads /api/holdings, asserting the 200 on the way.</summary>
+    public static async Task<IReadOnlyList<HoldingPayload>> ListHoldingsAsync(
+        HttpClient client,
+        string accessToken)
+    {
+        using var response = await SendAsync(client, HttpMethod.Get, "/api/holdings", accessToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        var payload = await response.Content.ReadFromJsonAsync<List<HoldingPayload>>(JsonSerializerOptions.Web);
+
+        payload.ShouldNotBeNull();
+
+        return payload;
+    }
+
+    /// <summary>Reads the field names a 400 blames, compared case-insensitively so casing is not the assertion.</summary>
+    public static async Task<HashSet<string>> FailingFieldsAsync(HttpResponseMessage response)
+    {
+        ArgumentNullException.ThrowIfNull(response);
+
+        var problem = await response.Content.ReadFromJsonAsync<ValidationProblemPayload>(
+            JsonSerializerOptions.Web);
+
+        problem.ShouldNotBeNull(await Describe(response));
+        problem.Errors.ShouldNotBeNull(
+            "The 400 carries no 'errors' member, so it is a plain problem document rather than the "
+            + "validation problem this assertion reads: " + await Describe(response));
+
+        return new HashSet<string>(problem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>Signs an access token with the host's own key, carrying exactly the claims asked for and no others.</summary>

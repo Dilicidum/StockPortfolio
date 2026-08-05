@@ -4,6 +4,9 @@ using StockPortfolio.Api.Extensions;
 using StockPortfolio.Api.Middleware;
 using StockPortfolio.Modules.Identity.Infrastructure;
 using StockPortfolio.Modules.Identity.Api;
+using StockPortfolio.Modules.Portfolio.Infrastructure;
+using StockPortfolio.Modules.Portfolio.Api;
+using StockPortfolio.Shared.Kernel;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +21,9 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // camelCase: the SPA reads accessToken / refreshToken / accessExpiresAt.
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+
+    // Money is decimal server-side and a string on the wire; a converter bypasses NumberHandling.Strict.
+    options.SerializerOptions.Converters.Add(new MoneyJsonConverter());
     options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 
     // Strict is safe because nothing consumes this API yet.
@@ -51,6 +57,9 @@ builder.Services.AddCors(options => options.AddPolicy("spa", policy => policy
 builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddIdentityApi();
 
+builder.Services.AddPortfolioModule(builder.Configuration);
+builder.Services.AddPortfolioApi();
+
 // Must come AFTER the modules: a decorator only applies to descriptors that already exist.
 builder.Services.DecorateHandlers();
 
@@ -70,6 +79,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapIdentityEndpoints();
+app.MapPortfolioEndpoints();
 app.MapStockPortfolioHealthChecks();
 
 await app.RunAsync();

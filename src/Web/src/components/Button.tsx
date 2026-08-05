@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { Spinner } from './Spinner'
 
 /*
@@ -33,19 +33,20 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   children?: ReactNode
 }
 
-export function Button({
-  variant = 'primary',
-  size = 'md',
-  loading = false,
-  disabled,
-  className = '',
-  children,
-  ...rest
-}: ButtonProps) {
+/**
+ * `forwardRef` for the same reason `TextField` has it: a caller needs the DOM node.
+ * `ConfirmDialog` moves focus to Cancel on open, and without the ref that focus call
+ * lands on nothing — the dialog opens with focus still behind it, silently.
+ */
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { variant = 'primary', size = 'md', loading = false, disabled, className = '', children, ...rest },
+  ref,
+) {
   return (
     <button
       type="button"
       {...rest}
+      ref={ref}
       disabled={disabled === true || loading}
       // aria-busy rather than swapping the label for a spinner: screen-reader
       // users keep the accessible name while the request is in flight.
@@ -56,4 +57,4 @@ export function Button({
       {children}
     </button>
   )
-}
+})

@@ -10,7 +10,7 @@ public sealed class MigrationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The four module schemas exist, identity holds both tables, and — the part that is easy to get wrong.</summary>
+    /// <summary>The four module schemas exist, both built modules hold their tables, and — the part that is easy to get wrong.</summary>
     [Fact]
     public async Task Migrations_ApplyCleanly_OnEmptyDatabase()
     {
@@ -39,6 +39,17 @@ public sealed class MigrationTests(ApiFixture fixture)
         identityTables.ShouldContain("refresh_tokens");
         identityTables.ShouldContain("__EFMigrationsHistory");
 
+        var portfolioTables = await ReadStringsAsync(
+            connection,
+            """
+            SELECT table_name FROM information_schema.tables
+             WHERE table_schema = 'portfolio'
+             ORDER BY table_name
+            """);
+
+        portfolioTables.ShouldContain("holdings");
+        portfolioTables.ShouldContain("__EFMigrationsHistory");
+
         var historySchemas = await ReadStringsAsync(
             connection,
             """
@@ -47,7 +58,10 @@ public sealed class MigrationTests(ApiFixture fixture)
              ORDER BY table_schema
             """);
 
-        historySchemas.ShouldBe(["identity"]);
+        // The load-bearing line, and with a second context it finally has something to say: HasDefaultSchema
+        // does not move __EFMigrationsHistory, so without MigrationsHistoryTable per context both land in
+        // public, each context reads the other's ids as applied, and it looks exactly like corruption.
+        historySchemas.ShouldBe(["identity", "portfolio"]);
         historySchemas.ShouldNotContain("public");
 
         // The migration is recorded, not merely the tables created: an empty history table with the right.
@@ -57,6 +71,13 @@ public sealed class MigrationTests(ApiFixture fixture)
 
         applied.ShouldNotBeEmpty();
         applied.ShouldContain(id => id.EndsWith("InitialIdentity", StringComparison.Ordinal));
+
+        var portfolioApplied = await ReadStringsAsync(
+            connection,
+            """SELECT "MigrationId" FROM portfolio."__EFMigrationsHistory" ORDER BY "MigrationId" """);
+
+        portfolioApplied.ShouldNotBeEmpty();
+        portfolioApplied.ShouldContain(id => id.EndsWith("InitialPortfolio", StringComparison.Ordinal));
     }
 
     private static async Task<IReadOnlyList<string>> ReadStringsAsync(NpgsqlConnection connection, string sql)

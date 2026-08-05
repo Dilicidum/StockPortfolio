@@ -10,11 +10,19 @@ interface NavItem {
 }
 
 /**
- * Phase 1 has exactly one destination. Portfolio (phase 2) and Alerts (phase 4)
- * join this list when their routes exist — a nav entry pointing at a route the
- * router does not know about is a type error, which is the point.
+ * Alerts joins this list in phase 4.
+ *
+ * An earlier comment here claimed a nav entry pointing at an unknown route is a
+ * type error. It is not, and relying on that would be a silent 404: `NavItem.to`
+ * is declared `string`, and TanStack Router's `ToPathOption` short-circuits on
+ * `string extends TTo ? string : …`, which switches the literal check off
+ * entirely. Only an inline literal `to="/somewhere"` on a `<Link>` is checked.
+ * Every entry below must be verified against `routeTree.gen.ts` by hand.
  */
-const NAV: NavItem[] = [{ to: '/dashboard', label: 'Dashboard' }]
+const NAV: NavItem[] = [
+  { to: '/dashboard', label: 'Dashboard' },
+  { to: '/portfolio', label: 'Portfolio' },
+]
 
 function initialsOf(email: string): string {
   const local = email.split('@')[0] ?? ''

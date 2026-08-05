@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="xunit.v3" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Shouldly" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Domain\StockPortfolio.Modules.Portfolio.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Application\StockPortfolio.Modules.Portfolio.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Infrastructure\StockPortfolio.Modules.Portfolio.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Portfolio\StockPortfolio.Modules.Portfolio.Api\StockPortfolio.Modules.Portfolio.Api.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -17,24 +17,25 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     private static readonly string[] AuthRouteNames =
         ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"];
 
+    /// <summary>The four names WithName gives the /api/holdings routes.</summary>
+    private static readonly string[] PortfolioRouteNames =
+        ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding"];
+
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
     /// <summary>The five routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
+    /// <summary>The four holdings routes, as theory data.</summary>
+    public static TheoryData<string> PortfolioRoutes => [.. PortfolioRouteNames];
+
     /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheFiveAuthRoutes()
-    {
-        var found = AuthEndpointsByName().Keys.Order(StringComparer.Ordinal).ToList();
+    public void EndpointDataSource_ExposesTheFiveAuthRoutes() => ShouldExposeExactly(AuthRouteNames);
 
-        found.ShouldBe(
-            AuthRouteNames.Order(StringComparer.Ordinal),
-            ignoreOrder: false,
-            "The metadata rules below select endpoints by their WithName. If that selection finds "
-                + "nothing — a renamed route, a route dropped from the group, a data source that is "
-                + "not the one the host built — both rules pass over an empty set and enforce nothing.");
-    }
+    /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
+    [Fact]
+    public void EndpointDataSource_ExposesTheFourHoldingsRoutes() => ShouldExposeExactly(PortfolioRouteNames);
 
     /// <summary>The check the typed Results union used to make: a status the route emits must be a status it.</summary>
     [Theory]
@@ -51,29 +52,41 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("GetCurrentUser", "anonymous", 401)]
     public async Task AuthRoute_DeclaresTheStatusItReturned(string routeName, string scenario, int expectedStatus)
     {
-        using var client = _fixture.CreateClient();
+        await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
+    }
 
-        var returned = (int)await CallAsync(client, routeName, scenario);
-
-        returned.ShouldBe(
-            expectedStatus,
-            $"The '{scenario}' case of {routeName} no longer produces the status this theory was "
-                + "written around, so the metadata assertion below would be checking the wrong one.");
-
-        DeclaredResponses(routeName)
-            .Select(metadata => metadata.StatusCode)
-            .ShouldContain(
-                returned,
-                $"{routeName} returned {returned} but does not declare it. Endpoint handlers return "
-                    + "Task<IResult>, so .Produces metadata is the only description of what a route "
-                    + "emits — and it is what /openapi/v1.json, and therefore the SPA's contract, is "
-                    + "generated from. Add the missing .Produces/.ProducesProblem to the route or its group.");
+    /// <summary>The Portfolio half of the same matrix. POST declares both 201 and 200, which is where drift hides.</summary>
+    [Theory]
+    [InlineData("GetHoldings", "bearer", 200)]
+    [InlineData("GetHoldings", "anonymous", 401)]
+    [InlineData("AddHolding", "fresh", 201)]
+    [InlineData("AddHolding", "duplicate-ticker", 200)]
+    [InlineData("AddHolding", "bad-ticker", 400)]
+    [InlineData("UpdateHolding", "own", 200)]
+    [InlineData("UpdateHolding", "stranger", 404)]
+    [InlineData("RemoveHolding", "own", 204)]
+    [InlineData("RemoveHolding", "missing", 404)]
+    public async Task PortfolioRoute_DeclaresTheStatusItReturned(
+        string routeName,
+        string scenario,
+        int expectedStatus)
+    {
+        await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
     /// <summary>A declared failure that claims no problem+json is a lie about what the client will parse.</summary>
     [Theory]
     [MemberData(nameof(AuthRoutes))]
-    public void AuthRoute_ProblemStatuses_DeclareProblemJson(string routeName)
+    public void AuthRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
+        ShouldDeclareProblemJsonForEveryFailure(routeName);
+
+    /// <summary>The same rule over the holdings routes, whose 401 and 500 come from the group rather than the route.</summary>
+    [Theory]
+    [MemberData(nameof(PortfolioRoutes))]
+    public void PortfolioRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
+        ShouldDeclareProblemJsonForEveryFailure(routeName);
+
+    private void ShouldDeclareProblemJsonForEveryFailure(string routeName)
     {
         var declared = DeclaredResponses(routeName);
 
@@ -97,10 +110,43 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 + string.Join(Environment.NewLine, offenders.Select(line => "  - " + line)));
     }
 
+    private async Task ShouldDeclareWhatItReturnedAsync(string routeName, string scenario, int expectedStatus)
+    {
+        using var client = _fixture.CreateClient();
+
+        var returned = (int)await CallAsync(client, routeName, scenario);
+
+        returned.ShouldBe(
+            expectedStatus,
+            $"The '{scenario}' case of {routeName} no longer produces the status this theory was "
+                + "written around, so the metadata assertion below would be checking the wrong one.");
+
+        DeclaredResponses(routeName)
+            .Select(metadata => metadata.StatusCode)
+            .ShouldContain(
+                returned,
+                $"{routeName} returned {returned} but does not declare it. Endpoint handlers return "
+                    + "Task<IResult>, so .Produces metadata is the only description of what a route "
+                    + "emits — and it is what /openapi/v1.json, and therefore the SPA's contract, is "
+                    + "generated from. Add the missing .Produces/.ProducesProblem to the route or its group.");
+    }
+
+    private void ShouldExposeExactly(string[] routeNames)
+    {
+        var found = EndpointsByName(routeNames).Keys.Order(StringComparer.Ordinal).ToList();
+
+        found.ShouldBe(
+            routeNames.Order(StringComparer.Ordinal),
+            ignoreOrder: false,
+            "The metadata rules below select endpoints by their WithName. If that selection finds "
+                + "nothing — a renamed route, a route dropped from the group, a data source that is "
+                + "not the one the host built — both rules pass over an empty set and enforce nothing.");
+    }
+
     /// <summary>Reads the response metadata off the endpoint the host actually built.</summary>
     private IReadOnlyList<IProducesResponseTypeMetadata> DeclaredResponses(string routeName)
     {
-        var endpoints = AuthEndpointsByName();
+        var endpoints = EndpointsByName([.. AuthRouteNames, .. PortfolioRouteNames]);
 
         endpoints.ShouldContainKey(routeName);
 
@@ -108,14 +154,14 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         return endpoints[routeName].Metadata.GetOrderedMetadata<IProducesResponseTypeMetadata>();
     }
 
-    private Dictionary<string, Endpoint> AuthEndpointsByName() =>
+    private Dictionary<string, Endpoint> EndpointsByName(string[] routeNames) =>
         _fixture.Services.GetRequiredService<EndpointDataSource>()
             .Endpoints
             .Select(endpoint => (
                 Name: endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName,
                 Endpoint: endpoint))
             .Where(pair => pair.Name is not null
-                && AuthRouteNames.Contains(pair.Name, StringComparer.Ordinal))
+                && routeNames.Contains(pair.Name, StringComparer.Ordinal))
             .ToDictionary(pair => pair.Name!, pair => pair.Endpoint, StringComparer.Ordinal);
 
     /// <summary>Drives one named scenario over real HTTP and reports the status it came back with.</summary>
@@ -225,11 +271,130 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 return response.StatusCode;
             }
 
+            case ("GetHoldings", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-holdings");
+
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/holdings", token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetHoldings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/holdings");
+
+                return response.StatusCode;
+            }
+
+            case ("AddHolding", "fresh"):
+            {
+                var token = await SignedInAsync(client, "metadata-add-fresh");
+
+                using var response = await Wire.AddHoldingAsync(client, token, "AAPL", 10m, 100m);
+
+                return response.StatusCode;
+            }
+
+            case ("AddHolding", "duplicate-ticker"):
+            {
+                var token = await SignedInAsync(client, "metadata-add-duplicate");
+
+                using var first = await Wire.AddHoldingAsync(client, token, "AAPL", 10m, 100m);
+                first.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(first));
+
+                using var response = await Wire.AddHoldingAsync(client, token, "AAPL", 10m, 150m);
+
+                return response.StatusCode;
+            }
+
+            case ("AddHolding", "bad-ticker"):
+            {
+                var token = await SignedInAsync(client, "metadata-add-bad");
+
+                using var response = await Wire.AddHoldingAsync(client, token, "BRK.B", 10m, 100m);
+
+                return response.StatusCode;
+            }
+
+            case ("UpdateHolding", "own"):
+            {
+                var token = await SignedInAsync(client, "metadata-update-own");
+                var id = await OpenPositionAsync(client, token, "MSFT");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Patch,
+                    $"/api/holdings/{id}",
+                    token,
+                    new { quantity = 15m, price = 120m });
+
+                return response.StatusCode;
+            }
+
+            case ("UpdateHolding", "stranger"):
+            {
+                var ownerToken = await SignedInAsync(client, "metadata-update-owner");
+                var id = await OpenPositionAsync(client, ownerToken, "TSLA");
+
+                var strangerToken = await SignedInAsync(client, "metadata-update-stranger");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Patch,
+                    $"/api/holdings/{id}",
+                    strangerToken,
+                    new { quantity = 1m, price = 1m });
+
+                return response.StatusCode;
+            }
+
+            case ("RemoveHolding", "own"):
+            {
+                var token = await SignedInAsync(client, "metadata-remove-own");
+                var id = await OpenPositionAsync(client, token, "NVDA");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Delete,
+                    $"/api/holdings/{id}",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("RemoveHolding", "missing"):
+            {
+                var token = await SignedInAsync(client, "metadata-remove-missing");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Delete,
+                    $"/api/holdings/{Guid.NewGuid()}",
+                    token);
+
+                return response.StatusCode;
+            }
+
             default:
                 throw new ArgumentOutOfRangeException(
                     nameof(scenario),
                     scenario,
                     $"No scenario '{scenario}' is defined for the {routeName} route.");
         }
+    }
+
+    /// <summary>Registers a throwaway account and returns its access token.</summary>
+    private static async Task<string> SignedInAsync(HttpClient client, string prefix) =>
+        (await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail(prefix))).AccessToken;
+
+    /// <summary>Opens one position and returns its id, so the update and delete scenarios have something to aim at.</summary>
+    private static async Task<Guid> OpenPositionAsync(HttpClient client, string accessToken, string ticker)
+    {
+        using var response = await Wire.AddHoldingAsync(client, accessToken, ticker, 10m, 100m);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(response));
+
+        return (await Wire.ListHoldingsAsync(client, accessToken)).ShouldHaveSingleItem().Id;
     }
 }

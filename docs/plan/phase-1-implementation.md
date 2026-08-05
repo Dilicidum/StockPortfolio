@@ -138,6 +138,8 @@ Four corrections over the obvious version of this file:
 
 ### `Directory.Packages.props`
 
+⚠️ **The versions below are a snapshot taken 2026-08-02 and are not maintained. `Directory.Packages.props` is the source of truth — never copy a version out of a plan file.** Fifteen have moved since (EF Core and its Design package to `10.0.10`, FluentValidation and its DI extensions to `12.1.1`, `Microsoft.Extensions.Logging.Abstractions` to `10.0.10`, `Microsoft.IdentityModel.JsonWebTokens` to `8.22.0`, `Microsoft.AspNetCore.OpenApi` / `JwtBearer` / `Mvc.Testing` to `10.0.10`, `xunit.v3` to `3.2.2`, `xunit.runner.visualstudio` to `3.1.5`, `Microsoft.NET.Test.Sdk` to `18.8.1`, both Testcontainers to `4.13.0`, `TimeProvider.Testing` to `10.8.0`); three were added (`Microsoft.OpenApi` pinned to 2.x, `Scrutor`, `Microsoft.Extensions.Hosting`); and two are gone — the health-checks EF package, and the `GlobalPackageReference` for `OneOf.SourceGenerator`, which did nothing once no code used `[GenerateOneOf]`.
+
 ```xml
 <Project>
   <PropertyGroup>

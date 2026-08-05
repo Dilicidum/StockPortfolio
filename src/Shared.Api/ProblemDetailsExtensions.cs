@@ -23,4 +23,7 @@ public static class ProblemDetailsExtensions
     public static ProblemHttpResult UnauthorizedProblem(string detail) =>
         TypedResults.Problem(detail, statusCode: StatusCodes.Status401Unauthorized, title: "Unauthorized");
 
+    /// <summary>Builds a 404 problem response.</summary>
+    public static ProblemHttpResult NotFoundProblem(string detail) =>
+        TypedResults.Problem(detail, statusCode: StatusCodes.Status404NotFound, title: "Not Found");
 }

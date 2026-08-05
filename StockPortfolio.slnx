@@ -38,6 +38,7 @@
     <Project Path="tests/StockPortfolio.Api.IntegrationTests/StockPortfolio.Api.IntegrationTests.csproj" />
     <Project Path="tests/StockPortfolio.Architecture.Tests/StockPortfolio.Architecture.Tests.csproj" />
     <Project Path="tests/StockPortfolio.Modules.Identity.UnitTests/StockPortfolio.Modules.Identity.UnitTests.csproj" />
+    <Project Path="tests/StockPortfolio.Modules.Portfolio.UnitTests/StockPortfolio.Modules.Portfolio.UnitTests.csproj" />
     <Project Path="tests/StockPortfolio.Shared.Kernel.UnitTests/StockPortfolio.Shared.Kernel.UnitTests.csproj" />
   </Folder>
 </Solution>
