@@ -21,7 +21,7 @@ public sealed record MoneyPayload(string Amount, string Currency);
 /// <summary>The errors map of an RFC 9457 validation problem, keyed by field name.</summary>
 public sealed record ValidationProblemPayload(Dictionary<string, string[]>? Errors);
 
-/// <summary>One position as the API returns it.</summary>
+/// <summary>One position as the API returns it. Name is null when no company name is cached.</summary>
 public sealed record HoldingPayload(
     Guid Id,
     string Ticker,
@@ -29,7 +29,11 @@ public sealed record HoldingPayload(
     MoneyPayload AveragePrice,
     MoneyPayload Invested,
     bool IsVisible,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? Name);
+
+/// <summary>One ticker suggestion.</summary>
+public sealed record TickerMatchPayload(string Symbol, string Description);
 
 /// <summary>One dashboard row. Every nullable member is nullable on the wire too — null means unknown.</summary>
 public sealed record DashboardPositionPayload(
@@ -38,6 +42,7 @@ public sealed record DashboardPositionPayload(
     decimal Quantity,
     MoneyPayload AveragePrice,
     MoneyPayload Cost,
+    string? Name,
     MoneyPayload? CurrentPrice,
     MoneyPayload? MarketValue,
     MoneyPayload? Profit,
@@ -69,6 +74,9 @@ internal static class Wire
 {
     /// <summary>The dashboard route, which is Portfolio's even though the prices are MarketData's.</summary>
     public const string DashboardPath = "/api/dashboard";
+
+    /// <summary>Ticker search, under /api/marketdata/ with the health route rather than under /api/tickers/.</summary>
+    public const string SearchPath = "/api/marketdata/search";
 
     /// <summary>Media type the API must use for RFC 7807 errors.</summary>
     public const string ProblemJson = "application/problem+json";
@@ -165,6 +173,41 @@ internal static class Wire
         payload.ShouldNotBeNull();
 
         return payload;
+    }
+
+    /// <summary>Calls /api/marketdata/search. The query is sent raw so an empty one can be exercised.</summary>
+    public static Task<HttpResponseMessage> SearchTickersAsync(
+        HttpClient client,
+        string? accessToken,
+        string query) =>
+        SendAsync(client, HttpMethod.Get, $"{SearchPath}?q={Uri.EscapeDataString(query)}", accessToken);
+
+    /// <summary>Reads /api/marketdata/search, asserting the 200 on the way.</summary>
+    public static async Task<IReadOnlyList<TickerMatchPayload>> SearchSucceedsAsync(
+        HttpClient client,
+        string accessToken,
+        string query)
+    {
+        using var response = await SearchTickersAsync(client, accessToken, query);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        var payload = await response.Content.ReadFromJsonAsync<List<TickerMatchPayload>>(
+            JsonSerializerOptions.Web);
+
+        payload.ShouldNotBeNull();
+
+        return payload;
+    }
+
+    /// <summary>Reads /api/holdings as text, for the assertions a deserialiser cannot make.</summary>
+    public static async Task<string> ListHoldingsJsonAsync(HttpClient client, string accessToken)
+    {
+        using var response = await SendAsync(client, HttpMethod.Get, "/api/holdings", accessToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        return await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
     }
 
     /// <summary>Reads /api/dashboard, asserting the 200 on the way.</summary>

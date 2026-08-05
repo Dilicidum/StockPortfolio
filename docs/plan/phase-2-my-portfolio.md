@@ -214,18 +214,39 @@ it has not are silently incompatible, and the question outlives whichever answer
 
 ---
 
-## Ticker search: specified, never built
+## Ticker search
 
-A ticker search — type a few letters, see matching companies, pick one — was specified for this phase. It was
-never built, and no build order ever contained a task for it. Nothing failed when it was skipped, because
-nothing depended on it.
+Type a few letters, see matching companies, pick one. Specified for this phase and delivered after Phase 3,
+because the symbols come from the price provider and the provider did not exist until then.
 
-**It is tracked in [../deferred-work.md](../deferred-work.md) as E2.** That is the only place it is tracked,
-and it is not in scope here.
+It is not the same thing as the symbol-existence check. That check answers *does this symbol exist?* after
+the user submits, and is invisible until something is rejected. Search answers *what is Apple's symbol?*
+while the user is typing. It is also the only thing in the system that produces a company name.
 
-It is not the same thing as the symbol-existence check Phase 3 shipped. That check answers *does this symbol
-exist?* after the user submits, and is invisible until something is rejected. Search answers *what is Apple's
-symbol?* while the user is typing, and would also supply the company name that nothing else supplies.
+**The field is a text box first.** Someone who knows the symbol types it and submits, and never opens the
+list. A provider outage returns no matches rather than an error, so the field simply behaves as it did
+before this feature existed — which is the only behaviour that lets someone record a purchase they really
+made while search is down. Picking from the list is a convenience and never a requirement.
+
+**Only symbols this form would accept are offered.** The provider's search is fuzzy and also returns foreign
+listings and longer symbols. Suggesting one would fill the field with a value the form then rejects, which
+is worse than suggesting nothing. Fuzziness itself is wanted and kept — typing part of a symbol still finds
+the whole one.
+
+**Company names are cached; prices are not, and the two rules do not conflict.** A price is meant to change
+every second, so a stored one is almost certainly wrong. A name is meant never to change, so a stored one is
+almost certainly right. Names therefore live in the cache with a weekly expiry: not in the database, where
+a company that renames itself would be wrong forever, and not fetched per page load, which would make the
+holdings page depend on the provider being up. That page has no price column precisely so that it never
+gains such a dependency, and a cosmetic field must not give it one.
+
+**A missing name is the ordinary case, not a failure.** The row shows its ticker alone. Every position added
+before this feature existed has no name, the cache expires weekly, and the cache being down costs names and
+nothing else.
+
+**Search results themselves are not cached.** A search term is whatever someone typed — arbitrary, different
+for everyone, rarely repeated. Only the ticker-to-name mapping is worth keeping, and that is a small set,
+identical for every user, read on every page.
 
 ---
 

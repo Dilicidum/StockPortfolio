@@ -77,15 +77,17 @@ Dashed edges above are designed, not built, and every one of them terminates in 
 |---|---|---|
 | Portfolio → MarketData | what is each of these tickers worth right now | built |
 | Portfolio → MarketData | does this ticker actually exist | built |
+| Portfolio → MarketData | what are these companies called | built |
 | Alerts → Portfolio | does this user hold this ticker | built and offered; no caller until Alerts exists |
 | Host → MarketData | which tickers have an active alert | designed |
 | Alerts → MarketData | current, lowest and highest price over the user's window | designed |
 | Anything → Identity | **nothing** — the token already carries what anyone needs | built; Identity publishes zero types |
 
-**Portfolio asks MarketData two questions, not one, and they are deliberately kept apart** — see
+**Portfolio asks MarketData three questions, not one, and they are deliberately kept apart** — see
 [module-boundaries.md](module-boundaries.md) §4. When the provider is unreachable, a price request falls
-back to the last price seen, while an existence check answers *yes*. Opposite failure directions cannot
-share one policy.
+back to the last price seen, an existence check answers *yes*, and a name request answers *nothing known*.
+Three opposite failure directions cannot share one policy — and the name request never reaches the provider
+at all, so it cannot make a page wait on one.
 
 **The poll list comes from Alerts, not Portfolio.** It once came from Portfolio — every ticker anyone held.
 Polling exists to build the price history alerts are evaluated against, and a ticker nobody has an alert on

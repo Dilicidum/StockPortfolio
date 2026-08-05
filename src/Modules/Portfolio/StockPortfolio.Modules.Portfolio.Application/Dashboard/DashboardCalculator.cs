@@ -13,14 +13,16 @@ public static class DashboardCalculator
     /// <summary>Percent crosses the wire as a string; a bare decimal would be a JSON number.</summary>
     private const string PercentFormat = "0.00";
 
-    /// <summary>Joins positions to prices and computes every figure the dashboard shows.</summary>
+    /// <summary>Joins positions to prices and names, and computes every figure the dashboard shows.</summary>
     public static GetDashboardResult Calculate(
         IReadOnlyList<HoldingRow> rows,
         IReadOnlyDictionary<string, QuotedPrice> prices,
+        IReadOnlyDictionary<string, string> names,
         DateTimeOffset asOf)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(prices);
+        ArgumentNullException.ThrowIfNull(names);
 
         var currency = rows.Count > 0 ? rows[0].AveragePrice.Currency : Money.UsdCurrencyCode;
 
@@ -75,7 +77,11 @@ public static class DashboardCalculator
 
         foreach (var line in lines)
         {
-            positions.Add(ToPosition(line, currency, totalValue));
+            positions.Add(ToPosition(
+                line,
+                currency,
+                totalValue,
+                names.TryGetValue(line.Row.Ticker, out var name) ? name : null));
         }
 
         return new GetDashboardResult(
@@ -93,7 +99,11 @@ public static class DashboardCalculator
             stalest);
     }
 
-    private static DashboardPosition ToPosition(Line line, string currency, decimal totalValue)
+    private static DashboardPosition ToPosition(
+        Line line,
+        string currency,
+        decimal totalValue,
+        string? name)
     {
         var cost = new Money(line.Cost, currency);
 
@@ -107,6 +117,7 @@ public static class DashboardCalculator
                 line.Row.Quantity,
                 line.Row.AveragePrice,
                 cost,
+                name,
                 CurrentPrice: null,
                 MarketValue: null,
                 Profit: null,
@@ -122,6 +133,7 @@ public static class DashboardCalculator
             line.Row.Quantity,
             line.Row.AveragePrice,
             cost,
+            name,
             new Money(quote.Price, currency),
             new Money(line.Value, currency),
             new Money(line.Value - line.Cost, currency),

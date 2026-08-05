@@ -5,10 +5,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
+using StockPortfolio.Modules.MarketData.Application.Names;
 using StockPortfolio.Modules.MarketData.Application.Prices;
+using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
 using StockPortfolio.Modules.MarketData.Contracts;
+using StockPortfolio.Modules.MarketData.Infrastructure.Names;
 using StockPortfolio.Modules.MarketData.Infrastructure.Prices;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
+using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure;
 
@@ -18,7 +22,7 @@ public static class MarketDataModule
     // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>Registers MarketData: a provider, the token budget, the fallback store and the two contracts.</summary>
+    /// <summary>Registers MarketData: a provider, the token budget, the two Redis stores and the three contracts.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -57,8 +61,16 @@ public static class MarketDataModule
         services.AddSingleton<RateLimiter>(_ => BuildTokenBucket());
 
         services.AddSingleton<ILastKnownPriceStore, RedisLastKnownPriceStore>();
+        services.AddSingleton<ICompanyNameStore, RedisCompanyNameStore>();
         services.AddScoped<IQuoteReader, QuoteReader>();
         services.AddScoped<ISymbolValidator, SymbolValidator>();
+        services.AddScoped<ICompanyNameReader, CompanyNameReader>();
+
+        // The module's first CQRS handler. Program.cs calls DecorateHandlers() after this, so it is
+        // wrapped in the logging decorator like every other one.
+        services.AddScoped<
+            IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>>,
+            SearchTickersQueryHandler>();
 
         return services;
     }

@@ -122,6 +122,9 @@ public sealed class QuoteReaderTests
             Task.FromResult<IReadOnlyList<Quote>>([.. quotes.Where(quote => tickers.Contains(quote.Ticker))]);
 
         public Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct) => Task.FromResult(true);
+
+        public Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<SymbolMatch>>([]);
     }
 
     private sealed class RecordingStore : ILastKnownPriceStore

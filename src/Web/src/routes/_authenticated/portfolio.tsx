@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { createFileRoute, useRouter, type ErrorComponentProps } from '@tanstack/react-router'
 import { useSuspenseQuery } from '@tanstack/react-query'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Alert } from '../../components/Alert'
@@ -11,6 +11,8 @@ import { Card } from '../../components/Card'
 import { ConfirmDialog } from '../../components/ConfirmDialog'
 import { Table, type Column } from '../../components/Table'
 import { TextField } from '../../components/TextField'
+import { TickerCell } from '../../components/TickerCell'
+import { TickerCombobox } from '../../marketdata/TickerCombobox'
 import { formatMoney } from '../../lib/format'
 import { applyServerErrors } from '../../lib/formErrors'
 import { EditHoldingForm, type EditHoldingValues } from '../../portfolio/EditHoldingForm'
@@ -127,6 +129,7 @@ export function PortfolioPage() {
 
   const {
     register,
+    control,
     handleSubmit,
     setError,
     reset,
@@ -176,7 +179,7 @@ export function PortfolioPage() {
   }
 
   const columns: Array<Column<Holding>> = [
-    { header: 'Asset', cell: (holding) => holding.ticker },
+    { header: 'Asset', cell: (holding) => <TickerCell ticker={holding.ticker} name={holding.name} /> },
     { header: 'Qty', cell: (holding) => holding.quantity, numeric: true },
     { header: 'Buy', cell: (holding) => formatMoney(holding.averagePrice), numeric: true },
     {
@@ -230,13 +233,26 @@ export function PortfolioPage() {
       <Card title="Add a position">
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <TextField
-              label="Ticker"
-              autoComplete="off"
-              autoCapitalize="characters"
-              placeholder="AAPL"
-              error={errors.ticker?.message}
-              {...register('ticker')}
+            {/*
+             * `Controller` rather than `register`, because the combobox has to be able to
+             * WRITE the field — picking "Apple Inc" has to put AAPL in the box — and a
+             * registered uncontrolled input can only be read. It also keeps a keystroke
+             * from re-rendering the positions table, which `watch('ticker')` would.
+             */}
+            <Controller
+              control={control}
+              name="ticker"
+              render={({ field, fieldState }) => (
+                <TickerCombobox
+                  label="Ticker"
+                  placeholder="AAPL"
+                  value={field.value ?? ''}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  inputRef={field.ref}
+                  error={fieldState.error?.message}
+                />
+              )}
             />
             <TextField
               label="Quantity"

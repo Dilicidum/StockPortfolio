@@ -8,6 +8,7 @@ import { Card } from '../../components/Card'
 import { Freshness } from '../../components/Freshness'
 import { StatTile } from '../../components/StatTile'
 import { Table, type Column } from '../../components/Table'
+import { TickerCell } from '../../components/TickerCell'
 import { useAuth } from '../../auth/useAuth'
 import { formatAge, formatMoney, formatPercent, isNegative, NO_VALUE, type Money } from '../../lib/format'
 import { dashboardKeys, fetchDashboard, type DashboardPosition } from '../../marketdata/dashboardApi'
@@ -75,7 +76,7 @@ function DashboardPage() {
   const unpriced = totals ? totals.positionCount - totals.pricedPositionCount : 0
 
   const columns: Array<Column<DashboardPosition>> = [
-    { header: 'Asset', cell: (position) => position.ticker },
+    { header: 'Asset', cell: (position) => <TickerCell ticker={position.ticker} name={position.name} /> },
     { header: 'Qty', cell: (position) => position.quantity, numeric: true },
     { header: 'Buy', cell: (position) => formatMoney(position.averagePrice), numeric: true },
     {
