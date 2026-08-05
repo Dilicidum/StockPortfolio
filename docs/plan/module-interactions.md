@@ -197,7 +197,7 @@ flowchart TB
     subgraph AZ["Azure — one resource group"]
         ACR["Container Registry — Basic"]
         subgraph ENV["Container Apps Environment — Consumption"]
-            API["API container app<br/>minReplicas 1 · maxReplicas 2<br/>concurrentRequests 100"]
+            API["API container app<br/>minReplicas 0 until Phase 4 · maxReplicas 2<br/>concurrentRequests 100"]
             JOB["Migrations Job<br/>Manual · parallelism 1"]
         end
         PG[("Postgres Flexible B1ms<br/>35 user connections")]
@@ -211,7 +211,7 @@ flowchart TB
     ACR -.->|"managed identity pull"| API
     ACR -.-> JOB
     JOB -->|"as migrator role"| PG
-    API -->|"3 roles × pool size 2"| PG
+    API -->|"2 DbContexts × pool size 2"| PG
     API -->|"windows · claims · cooldowns · tickets · pub-sub"| RD
 
     style Pages fill:#2d4a3e,stroke:#4ade80,color:#e8f5e9
@@ -222,6 +222,8 @@ Three consequences that shape the code, all designed for from Phase 1.
 
 Cross-origin is permanent, so `ingress.corsPolicy` lists the Pages origin explicitly. The SSE ticket handshake is mandatory — `EventSource` cannot set headers, and cross-origin cookies are unreliable now that third-party cookies are being phased out, so `POST /api/alerts/stream-ticket` returns a single-use 30-second token consumed as a query param. And a 20-second heartbeat is not optional: ACA's `requestIdleTimeout` is 4 minutes, and 4 is both the default *and* the floor on Consumption, since raising it needs a Dedicated D4+ profile with two nodes that costs more than the rest of the stack.
 
-`minReplicas: 1` is load-bearing — scale to zero and ingestion stops. `maxReplicas: 2` is what the Postgres connection budget allows.
+> ⚠️ **Corrected (Phase 3).** This paragraph and the diagram above both said `minReplicas: 1`, and the deployed template has always passed **0**. The claim was not wrong so much as premature: `minReplicas: 1` becomes load-bearing when something runs in the background, and the quote poller moved from Phase 3 to Phase 4 when the dashboard was unpicked from the alert infrastructure. Until then there is no `BackgroundService`, `IHostedService` or `PeriodicTimer` anywhere in `src/`, scale-to-zero costs nothing but a cold start on the first request, and 0 is the correct value on a pay-as-you-go subscription.
+
+**Phase 4 raises `minReplicas` to 1**, alongside the poller — scale to zero and ingestion stops. `maxReplicas: 2` is what the Postgres connection budget allows: two `DbContext`s per replica at `Maximum Pool Size=2` is 8 connections of B1ms's 35. It is the *contexts* that open pools, not the four roles the database defines — MarketData has no `DbContext` and `alerts_svc` has no consumer until Alerts is built.
 
 Locally, `docker compose up` runs the same API plus an nginx frontend container, Postgres and Redis. The brief requires the whole stack in one command, so the frontend container stays even though production serves it from Pages.

@@ -8,6 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\StockPortfolio.Modules.Portfolio.Domain\StockPortfolio.Modules.Portfolio.Domain.csproj" />
     <ProjectReference Include="..\StockPortfolio.Modules.Portfolio.Contracts\StockPortfolio.Modules.Portfolio.Contracts.csproj" />
+    <ProjectReference Include="..\..\MarketData\StockPortfolio.Modules.MarketData.Contracts\StockPortfolio.Modules.MarketData.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

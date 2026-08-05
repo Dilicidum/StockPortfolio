@@ -14,7 +14,11 @@ Near-greenfield: `Initial.md` gives settings three words in a build-order line (
 
 ## 2. Backend
 
-Settings are split across the modules that own them. A single `user_settings` table would be a module nobody designed. There are three modules, not four — Alerts merged into Portfolio in Phase 2 ([00-overview.md](00-overview.md) §"Three modules, not four") — so refresh interval, holding visibility *and* the alert threshold all land in the `portfolio` schema. That is one fewer `PATCH` target crossing a boundary; the endpoint list below is unchanged.
+Settings are split across the modules that own them. A single `user_settings` table would be a module nobody designed.
+
+> ⚠️ **Corrected (Phase 3 documentation pass).** This paragraph read "There are three modules, not four — Alerts merged into Portfolio in Phase 2 — so refresh interval, holding visibility *and* the alert threshold all land in the `portfolio` schema. That is one fewer `PATCH` target crossing a boundary." **The merge was reversed** ([00-overview.md](00-overview.md) §"Four modules"), so the alert threshold belongs to `alert_settings` in the `alerts` schema and is a separate `PATCH` target again. Refresh interval and holding visibility are still Portfolio's. Note the ordering hazard for whoever executes this phase: Alerts is a module in the documents and **not on disk** — Phase 4 builds it — so if Phase 4 has slipped when Phase 5 starts, the threshold has nowhere to live and that is the thing to resolve first, not to work around by putting it back in `portfolio`.
+
+Refresh interval and holding visibility land in the `portfolio` schema; the alert threshold lands in `alerts`. The endpoint list below is unchanged.
 
 | Setting | Owner |
 |---|---|

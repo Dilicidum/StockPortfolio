@@ -118,7 +118,9 @@ Seven tables plus the Data Protection key ring. Two tables from an earlier draft
 
 ## Indexes that carry weight
 
-`portfolio.holdings` needs `UNIQUE (user_id, ticker)` — that is the merge rule's only real guarantee, because a `SELECT` then `INSERT` in the handler is a race. Catch `23505` and route to the merge path.
+`portfolio.holdings` needs `UNIQUE (user_id, ticker)` — that is the merge rule's only real guarantee, because a `SELECT` then `INSERT` in the handler is a race.
+
+> ⚠️ **Corrected (Phase 2 §2.6, recorded here at Phase 3).** This line used to finish "Catch `23505` and route to the merge path." **There is no such catch and there must not be.** A failed `SaveChangesAsync` skips `AcceptAllChanges`, so the entity is still `Added` and the retry re-sends the identical `INSERT` — the loop never terminates unless it also detaches the failed entries and re-runs from the query. `ON CONFLICT DO UPDATE` would express the whole merge atomically but EF Core 10 cannot emit it without raw SQL, which is banned repo-wide. The index stays because it is what keeps the data correct; the losing request surfaces as a **500 rather than a 409**, the window is a millisecond wide, and what is tested is that exactly one row survives two parallel posts. Same decision as registration's duplicate-email race.
 
 `identity.users` needs `UNIQUE (email)` for registration conflict detection, and `identity.refresh_tokens` needs `UNIQUE (token_hash)` plus a partial index on `superseded_at IS NULL` so rotation lookups only touch active tokens.
 
@@ -150,7 +152,11 @@ alerts_svc        DML on alerts.*        only
 
 `REVOKE ALL ON SCHEMA <other> FROM <role>` for every pair. A cross-schema query then fails at runtime, in CI, on the first test run — which is what `Api.IntegrationTests.PortfolioRole_CannotReadIdentitySchema` asserts.
 
-⚠️ **Connection budget.** Azure Postgres B1ms allows **35 user connections**, and a different `Username` is a different Npgsql pool. Every connection string carries `Maximum Pool Size=2`: 2 replicas × 4 roles × 2 = 16, leaving 19 headroom. Npgsql's default of 100 would request 800. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
+⚠️ **Connection budget.** Azure Postgres B1ms allows **35 user connections**, and a different `Username` is a different Npgsql pool. Every connection string carries `Maximum Pool Size=2`.
+
+> ⚠️ **Corrected (Phase 3).** This said "2 replicas × 4 roles × 2 = 16, leaving 19 headroom. Npgsql's default of 100 would request 800." It counted **roles defined** rather than **pools opened**, and a pool exists only for a registered `DbContext`. `Program.cs` registers two — Identity's and Portfolio's — so 2 replicas × 2 contexts × 2 = **8**, leaving 27, and the default of 100 would request 400. MarketData opens nothing (no `DbContext`, by design) and nothing connects as `alerts_svc` until Alerts is built. Four files carried four different figures for this; all four were wrong.
+
+PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
 
 ---
 
@@ -172,4 +178,6 @@ The sorted-set member is `timestamp:price`, not `price`. Members must be unique 
 
 **The two price structures are separate on purpose, and it is not redundancy.** `last:` answers *what is it worth*, `prices:` answers *how has it moved*, and their lifetimes differ — one is kept for as long as someone might look, the other is trimmed to an hour and only exists while an alert does. Turn alerts off for a ticker and it has no window at all, which is exactly when the dashboard still needs a fallback. Collapsing them would also couple the dashboard's degradation to the alert retention setting.
 
-The two claim keys are separate on purpose. The window claim guarantees one winner *within* a window and says nothing *across* windows, so a cycle that overruns is still fetching when the next window opens and a different replica claims it. The in-flight guard closes that. See [phase-3-live-prices.md](phase-3-live-prices.md) §2.4.
+The two claim keys are separate on purpose. The window claim guarantees one winner *within* a window and says nothing *across* windows, so a cycle that overruns is still fetching when the next window opens and a different replica claims it. The in-flight guard closes that.
+
+> ⚠️ **Cross-reference corrected (Phase 3).** This pointed at `phase-3-live-prices.md` §2.4 for the claim-key reasoning. That section is now "Recording what was fetched" and covers `marketdata:last:{ticker}` only — **the claim keys, the sorted-set window and the poller that needs them all moved to Phase 4**, so the argument above lives in [phase-4-alerts.md](phase-4-alerts.md). Of the seven Redis keys in the table above, exactly one — `marketdata:last:{ticker}` — exists after Phase 3.

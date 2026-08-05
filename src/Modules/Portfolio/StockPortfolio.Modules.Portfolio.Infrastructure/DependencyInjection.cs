@@ -4,6 +4,7 @@ using OneOf;
 using OneOf.Types;
 
 using StockPortfolio.Modules.Portfolio.Application;
+using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboard;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
@@ -33,6 +34,10 @@ internal static class DependencyInjection
         services.AddScoped<
             IQueryHandler<GetHoldingsQuery, IReadOnlyList<HoldingSummary>>,
             GetHoldingsQueryHandler>();
+
+        services.AddScoped<
+            IQueryHandler<GetDashboardQuery, GetDashboardResult>,
+            GetDashboardQueryHandler>();
 
         return services;
     }

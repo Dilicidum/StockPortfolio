@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using StockPortfolio.Migrator;
+using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
 using Testcontainers.PostgreSql;
 using Testcontainers.Redis;
@@ -40,6 +41,9 @@ public sealed class ApiFixture : IAsyncLifetime
 
     /// <summary>A 46-byte key.</summary>
     private const string SigningKey = "integration-test-signing-key-not-a-secret-0123";
+
+    /// <summary>What IQuoteProvider.Name must read on every host these tests build.</summary>
+    public const string FakeProviderName = "Fake";
 
     private const string CorsOrigin = "http://localhost:5173";
 
@@ -135,6 +139,38 @@ public sealed class ApiFixture : IAsyncLifetime
             });
     }
 
+    /// <summary>Builds a second host against the same containers, serving prices from the caller's provider.</summary>
+    public ApiFactory CreateHostWithQuoteProvider(IQuoteProvider provider)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+
+        return new ApiFactory(
+            SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
+            services =>
+            {
+                services.RemoveAll<IQuoteProvider>();
+
+                // RemoveAll<T> removes descriptors whose ServiceType is T and nothing else, so without
+                // this line IQuoteNudge still resolves the fake and the two seams disagree about which
+                // provider is live. The nudge route is unmapped under EnvironmentName "Testing", so
+                // Dashboard_HostWithQuoteProvider_ResolvesNoQuoteNudge is what makes deleting this fail.
+                services.RemoveAll<IQuoteNudge>();
+
+                services.AddSingleton(provider);
+            });
+    }
+
+    /// <summary>Builds a host whose Redis cannot answer while its quote provider still can.</summary>
+    public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(
+        IdentityConnectionString,
+        PortfolioConnectionString,
+
+        // A port nothing listens on, per host and reversible. Stopping the _redis container instead would
+        // mutate shared fixture state with no guarantee this class runs last. abortConnect=false stops
+        // Connect throwing at first resolve; the bounded timeout is because the default 5000 ms would
+        // otherwise be paid on every call.
+        "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1"));
+
     /// <summary>Builds a host pointed at dependencies that cannot possibly answer.</summary>
     public static ApiFactory CreateHostWithUnreachableDependencies()
     {
@@ -169,6 +205,8 @@ public sealed class ApiFixture : IAsyncLifetime
 
         // Force the host to build here rather than inside the first test: a configuration mistake then fails.
         _ = _api.Services;
+
+        GuardAgainstTheLiveQuoteProvider(_api.Services);
     }
 
     /// <inheritdoc/>
@@ -193,6 +231,11 @@ public sealed class ApiFixture : IAsyncLifetime
             ["Jwt:Issuer"] = "StockPortfolio",
             ["Jwt:Audience"] = "StockPortfolio",
             ["Cors:Origins:0"] = CorsOrigin,
+
+            // Explicitly empty, never merely omitted. ApiFactory appends this collection AFTER the
+            // default sources, so it beats an exported Finnhub__ApiKey - which would otherwise boot the
+            // test host onto the live API and make rate-limited network calls while the suite stayed green.
+            ["Finnhub:ApiKey"] = string.Empty,
         };
 
     private string ConnectionStringFor(string role, string password) => ConnectionStringFor(
@@ -225,6 +268,23 @@ public sealed class ApiFixture : IAsyncLifetime
             var context = (DbContext)scope.ServiceProvider.GetRequiredService(contextType);
 
             await context.Database.MigrateAsync();
+        }
+    }
+
+    /// <summary>Fails the whole run if the host booted onto anything but the generated provider.</summary>
+    private static void GuardAgainstTheLiveQuoteProvider(IServiceProvider services)
+    {
+        // The name rather than the type: FakeQuoteProvider is internal to MarketData.Infrastructure, and
+        // IQuoteProvider.Name is the same string the startup log and the health route already publish.
+        var provider = services.GetRequiredService<IQuoteProvider>().Name;
+
+        if (!string.Equals(provider, FakeProviderName, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"The test host is serving prices from '{provider}', not '{FakeProviderName}'. "
+                + "SettingsFor pins Finnhub:ApiKey to empty precisely so an exported Finnhub__ApiKey "
+                + "cannot do this; the whole suite would otherwise make rate-limited calls to the live "
+                + "API and still report green.");
         }
     }
 

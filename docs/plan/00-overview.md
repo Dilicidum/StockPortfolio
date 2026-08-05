@@ -125,8 +125,9 @@ src/
   Shared.Api/           ValidationFilter<T>, ProblemDetails helpers
   Modules/
     Identity/    .Contracts · .Domain · .Application · .Infrastructure · .Api
-    Portfolio/   same five — holdings and alerts
-    MarketData/  same five
+    Portfolio/   same five — holdings
+    MarketData/  same five — no DbContext and no schema; Redis is all it persists
+    Alerts/      same five — PHASE 4. Nothing on disk yet
   Api/                           host: DI, endpoint registration, middleware
   Migrator/                      console; applies every DbContext as the `migrator` role
   Web/                           React SPA
@@ -146,7 +147,9 @@ Assumed by every phase file.
 
 **Architecture** — accessibility follows the onion, **not** a blanket `internal`: `.Domain`, `.Application` and `.Api` are `public`, `.Infrastructure` is `internal` except one `<Module>Module` seam. (`internal` is per-assembly and a module is five assemblies, so blanket-`internal` cannot compile.) A module references only other modules' `.Contracts`, enforced by `Architecture.Tests` rather than the compiler. `.Contracts` holds records of primitives only — no EF reference, no aggregates, no strongly-typed IDs, raw `Guid`. See `phase-1-implementation.md` §4.2.
 
-**Four Postgres schemas + four roles, `Maximum Pool Size=2`.** Azure Postgres B1ms allows **35 user connections** (50 total, 15 reserved), and a different `Username` is a different Npgsql pool. Npgsql's default pool size of 100 × 4 roles × 2 replicas would request 800. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
+**Four Postgres schemas + four roles, `Maximum Pool Size=2`.** Azure Postgres B1ms allows **35 user connections** (50 total, 15 reserved), and a different `Username` is a different Npgsql pool.
+
+> ⚠️ **Correction (Phase 3).** This line used to finish "Npgsql's default pool size of 100 × 4 roles × 2 replicas would request 800", and that multiplied the wrong thing. **A pool is opened per `DbContext`, not per role defined.** Four schemas and four service roles exist in `db/init/01-roles.sql`, but `Program.cs` registers two contexts — Identity's and Portfolio's — so there are **two pools per replica**. At `Maximum Pool Size=2` and `maxReplicas: 2` the real figure is 2 × 2 × 2 = **8**, and the default of 100 would ask for 400, not 800. MarketData has no `DbContext` at all and `alerts_svc` has no consumer until Phase 4. Three other files published three other numbers (12, 16, 600); all four were wrong, in both directions, because each counted something different. PgBouncer is unavailable on Burstable, so there is no escape hatch below this.
 
 **CQRS** — `ICommandHandler<,>` / `IQueryHandler<,>` injected directly into Minimal API endpoints. **No dispatcher**: one caller per handler, in the same module, so there is nothing to decouple — and the concrete type gives better OpenAPI metadata. Cross-cutting concerns are DI decorators, which work without a mediator. Add a dispatcher only if a second caller appears.
 

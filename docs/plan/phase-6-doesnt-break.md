@@ -285,6 +285,6 @@ internal static class FeedHealthPolicy
   - [ ] The Azure deployment, cost, and `az group delete` teardown
   - [ ] A trimmed "what we rejected, and why" table from `Initial.md:156-172` — the single best evidence for the brief's grading criterion 4
   - [ ] Known limits: the recomputed ticker ceiling, the per-replica last-known-good cache's inconsistency, HTTP/1.1's 6-connection cap
-- [ ] `docs/Initial.md` corrections applied — alert-settings ownership, the window-claim overlap guard, the alert example's arithmetic. Its four-module description is **not** corrected: the file is historical, and `00-overview.md` §"Three modules, not four" is where the current shape and its reasoning live
+- [ ] `docs/Initial.md` corrections applied — alert-settings ownership, the window-claim overlap guard, the alert example's arithmetic. Its four-module description is **not** corrected: the file is historical, and `00-overview.md` §"Four modules" is where the current shape and its reasoning live
 - [ ] The `alerts` schema, the `alerts_svc` role and the `ALERTS_PW` / Alerts-connection-string variables are gone from `db/init/`, `docker-compose.yml`, `infra/` and the workflows — **verified by a clean-clone `docker compose up`**, which is the only thing that can prove it (see `docs/deferred-work.md`)
 - [ ] Full verification walkthrough from `00-overview.md` §Verification passes end to end, locally and deployed

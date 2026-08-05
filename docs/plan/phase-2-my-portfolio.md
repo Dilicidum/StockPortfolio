@@ -71,7 +71,7 @@ No base class — see `phase-1-implementation.md` §5.2. `Holding` declares its 
 > repositories self-commit, exactly like Identity's.
 >
 > Left below as the record of what was planned and rejected. Reasoning in
-> [00-overview.md](00-overview.md) §"Three modules, not four".
+> [00-overview.md](00-overview.md) §"Four modules".
 
 **This phase reintroduces the event type.** `Shared.Kernel` has no `IDomainEvent` — one was written in Phase 1 and deleted because nothing raised it, and an empty abstraction is worse than an absent one. `HoldingRemoved` is the first real event, so Phase 2 is where `IDomainEvent` (and whatever an entity needs to raise one) gets added, with a consumer waiting in Phase 4. Add the minimum the single consumer needs; do not restore the deleted `AggregateRoot<TId>` base along with it.
 

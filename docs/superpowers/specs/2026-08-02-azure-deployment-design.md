@@ -9,6 +9,16 @@
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
 | Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-16` |
 
+**Still live on 2026-08-05.** `/health/ready` → 200 `Healthy`, SPA → 200. The running revision is
+**pre-Phase-3**: `/api/dashboard` and `/api/marketdata/health` both return 404, because `deploy.yml`
+fires on push to `main` and Phase 3 has not reached it. Getting Phase 3 live needs the merge plus a
+`FINNHUB_API_KEY` secret — **not** a local Azure CLI, which only buys the `bicep build` and `what-if`
+rehearsal; the workflow installs Bicep and runs `what-if` in the runner.
+
+⚠️ **The Prerequisites table below is historical.** Items 0 and 1 — no remote, only a `master`
+branch — were resolved before the deploy that this file records as succeeding. Item 6, no Azure CLI
+locally, is still true and is still not a blocker for deploying.
+
 Deploy the StockPortfolio API to Azure Container Apps and the SPA to GitHub Pages, driven by
 GitHub Actions, under a hard personal spending ceiling of **$100**.
 

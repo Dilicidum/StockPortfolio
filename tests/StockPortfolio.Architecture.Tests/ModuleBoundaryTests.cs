@@ -48,6 +48,13 @@ public sealed class ModuleBoundaryTests
             SolutionAssemblies.NameOf("Portfolio", "Application"),
             SolutionAssemblies.NameOf("Portfolio", "Infrastructure"),
             SolutionAssemblies.NameOf("Portfolio", "Api"),
+
+            // Phase 3 populates MarketData one layer at a time; this list grows with each.
+            SolutionAssemblies.NameOf("MarketData", "Domain"),
+            SolutionAssemblies.NameOf("MarketData", "Contracts"),
+            SolutionAssemblies.NameOf("MarketData", "Application"),
+            SolutionAssemblies.NameOf("MarketData", "Infrastructure"),
+            SolutionAssemblies.NameOf("MarketData", "Api"),
         ];
 
         var shells = populated
@@ -69,11 +76,6 @@ public sealed class ModuleBoundaryTests
         string[] expected =
         [
             "StockPortfolio.Modules.Identity.Contracts",
-            "StockPortfolio.Modules.MarketData.Api",
-            "StockPortfolio.Modules.MarketData.Application",
-            "StockPortfolio.Modules.MarketData.Contracts",
-            "StockPortfolio.Modules.MarketData.Domain",
-            "StockPortfolio.Modules.MarketData.Infrastructure",
         ];
 
         var actual = SolutionAssemblies.ScannedNames
@@ -84,8 +86,9 @@ public sealed class ModuleBoundaryTests
         actual.ShouldBe(
             expected,
             ignoreOrder: false,
-            "The set of empty-shell assemblies has moved. Rule 2 runs over Portfolio.Contracts alone "
-                + "and skips the other two, so a rule that skips everywhere reports green while enforcing nothing:"
+            "The set of empty-shell assemblies has moved. Every name on this list is an assembly the "
+                + "rules below silently skip rather than enforce, so the list is the honest count of what "
+                + "is not being checked — a rule that skips everywhere reports green while enforcing nothing:"
                 + Environment.NewLine
                 + Describe(expected.Except(actual, StringComparer.Ordinal)
                     .Select(name => name + " now carries code — delete it from the expected list, and "

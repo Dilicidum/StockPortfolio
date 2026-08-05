@@ -12,6 +12,7 @@ import { routeTree } from '../src/routeTree.gen'
 import { authStore } from '../src/auth/authStore'
 import { queryClient } from '../src/lib/queryClient'
 import { __resetRefreshInFlight } from '../src/lib/apiClient'
+import { dashboardHandlers } from './msw/dashboard'
 import { server } from './msw/server'
 
 function renderAt(path: string) {
@@ -123,6 +124,9 @@ describe('signed-in session', () => {
         logoutCalls += 1
         return new HttpResponse(null, { status: 204 })
       }),
+      // Phase 3 gave /dashboard a real fetch, and MSW is set to error on anything
+      // unhandled — so this sign-out test needs the dashboard's stubs to reach the page.
+      ...dashboardHandlers,
     )
 
     authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
