@@ -425,22 +425,15 @@ alongside the API. The Npgsql default of 100 would ask for 400.
 
 Stated plainly rather than left for you to find.
 
-- **Phase 3 is not deployed, though the app is.** There has been a live Azure deployment since
-  2026-08-02 — healthy as of 2026-08-05 — but it serves pre-Phase-3 code, because `deploy.yml` fires
-  on push to `main` and this work is on a branch. The design, cost model and the six failed first
-  attempts are in
-  [docs/superpowers/specs/2026-08-02-azure-deployment-design.md](docs/superpowers/specs/2026-08-02-azure-deployment-design.md).
-- **`what-if` is unconfirmed; the Bicep itself compiles.** `az` is not installed on the development
-  machine, but `ci.yml` has a **Bicep build** job and it passes, so the templates are known good.
-  `az deployment group what-if` has still never been read by a human — `deploy.yml` runs it in the
-  runner immediately before deploying. Phase 3 was expected to change zero lines of Bicep and changed
-  zero lines: everything it needed (the Redis connection string, the `Finnhub__ApiKey` secret and its
-  `empty()` guard, the explicit `httpGet` probes) was already in the tree.
-- **The deployed app would serve fake prices.** `FINNHUB_API_KEY` is not set as a repository secret,
-  and until it is, the public URL prices real tickers from the generated walk. Related and also
-  unverified: adding a genuinely non-existent symbol should return `UnknownTicker`, which needs a real
-  key to demonstrate. The response mapping is unit-tested and the check can now return false; the
-  end-to-end path has not been exercised against the live API.
+- **`what-if` has never been read by a human.** `az` is not installed on the development machine.
+  `ci.yml`'s **Bicep build** job compiles the templates and `deploy.yml` runs `what-if` in the runner
+  immediately before deploying, so both execute — nobody has diffed the output by eye. Phase 3 changed
+  zero lines of Bicep: everything it needed (the Redis connection string, the `Finnhub__ApiKey` secret
+  and its `empty()` guard, the explicit `httpGet` probes) was already in the tree.
+- **The free tier is the real ceiling, and it does not scale.** With `FINNHUB_API_KEY` set, twenty
+  positions is twenty of sixty calls per minute for **one** viewer at the 60-second default; three
+  concurrent viewers exhaust the budget. That is a documented property of the free tier rather than a
+  bug — over budget, tickers fall back to their last known price rather than failing.
 - **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
   `TODO`. They work and are exercised by tests; they have not been signed off.
 - **Holding visibility is a column, not a control.** The dashboard read already filters on

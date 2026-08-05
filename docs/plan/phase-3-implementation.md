@@ -1285,41 +1285,58 @@ Picking 15s quadruples that figure. `<select>` options: 15s / 30s / 60s / 5m.
 - [ ] Run the four §8 drills by hand: provider down · provider down + Redis flushed · Redis down with the
       provider up · `redis-cli GET marketdata:last:AAPL`.
 
-### Task 22: Deploy — ❌ **NOT DONE, and "no `az` CLI" is not the reason.**
+### Task 22: Deploy — ✅ **DONE, 2026-08-05. And "no `az` CLI" was never the reason it was blocked.**
 
 > ⚠️ **This task was first recorded as blocked on the missing Azure CLI. That was wrong, and the correction
 > came from a document nothing linked to** —
 > [docs/superpowers/specs/2026-08-02-azure-deployment-design.md](../superpowers/specs/2026-08-02-azure-deployment-design.md),
 > whose only inbound reference was inside itself. Two facts it carries change this task:
 >
-> 1. **There has been a live, healthy Azure deployment since 2026-08-02.** Re-verified 2026-08-05:
->    `/health/ready` → 200, SPA → 200. It serves **pre-Phase-3** code — `/api/dashboard` and
->    `/api/marketdata/health` both 404.
+> 1. **There had been a live, healthy Azure deployment since 2026-08-02**, serving pre-Phase-3 code.
 > 2. **`deploy.yml` installs Bicep and runs `az deployment group what-if` in the runner**, and fires on push
->    to `main` or `workflow_dispatch`. A local `az` only buys the rehearsal.
+>    to `main` or `workflow_dispatch`. A local `az` only ever bought the rehearsal.
 >
-> So what is actually outstanding is a **merge to `main`** and the **`FINNHUB_API_KEY` secret** — not a tool
-> install. The local rehearsal stays genuinely blocked, and with it the one cheap thing §2.9 wanted: whether
-> the `@secure()` module output trips the `outputs-should-not-contain-secrets` linter class — **and that
-> turned out to be answered too**: `ci.yml` has a **Bicep build** job, it ran on PR #2, and it passed. The
-> rehearsal existed in CI the whole time. `infra/` was not touched this phase, so "what-if reports no
-> changes" is a good prediction — still a prediction, and the workflow runs it just before deploying.
+> What was actually outstanding was a **merge to `main`** and the **`FINNHUB_API_KEY` secret** — not a tool
+> install. Both were done on 2026-08-05 and the deploy ran green end to end.
+>
+> The one cheap thing §2.9 wanted — whether the `@secure()` module output trips the
+> `outputs-should-not-contain-secrets` linter class — **turned out to be answered too**: `ci.yml` has a
+> **Bicep build** job, it ran on PR #2, and it passed. The rehearsal existed in CI the whole time and nobody
+> had looked. Three separate "unverified" claims in this plan dissolved on contact with the tooling that was
+> already there; none of them needed new work.
+
+**Deploy run 31043996353** — every step green: what-if → deploy infra → create Postgres roles → migrations →
+release image → readiness smoke test → SPA to Pages. `deleteAfter` re-stamped to **2026-08-19**.
+
+Verified afterwards against the public URLs:
+
+| Check | Result |
+|---|---|
+| `/health/ready` | **200 `Healthy`** — touches Postgres *and* Redis, so it proves the role bootstrap worked |
+| `/api/marketdata/health` | **`{"provider":"Finnhub"}`** |
+| `/api/dev/nudge` in Production | **404**, not 401 — absent rather than merely protected |
+| Register → `/api/auth/me` → add three holdings | all 2xx |
+| `/api/dashboard` | live market prices, `isLastKnown: false`, weights summing to **exactly 100.00**, 440 ms for three tickers |
+| Wire shape | `amount`, `weight` and `profitPercent` all JSON **strings** |
+| GitHub Pages SPA → ACA API | renders the same figures; health panel reads **Finnhub** |
 
 - [x] `az bicep build --file infra/main.bicep` (§2.9) — **not run locally (no `az` here), but `ci.yml`'s
       "Bicep build" job compiled the templates on PR #2 and passed in 20s.** That answers the one thing §2.9
       wanted cheaply: a `@secure()` **module output** does *not* trip the `outputs-should-not-contain-secrets`
       linter class here. The claim "`bicep build` has never run in any phase" was true when written and is
       now false — CI was the cheaper rehearsal all along, and nobody had looked.
-- [ ] `az deployment group what-if` → expect **no changes**. **Not run locally.** Note the workflow runs it
-      too, so merging to `main` executes this check even if the local rehearsal never happens — it just
-      executes it a moment before the deploy rather than a day before.
-- [ ] Set the real `FINNHUB_API_KEY` repository secret, deploy, and confirm the deployed dashboard shows
-      genuine prices and the health panel names Finnhub rather than Fake. **Not done — the secret is not set,
-      so the deployed app would price real tickers from the generated walk.** This also blocks the exit item
-      "adding a genuinely non-existent symbol with a real key returns `UnknownTicker`": `FakeQuoteProvider`
-      accepts any well-shaped ticker by design (§2.11), so the only host that can produce `UnknownTicker` is
-      one holding a real key, and `finnhub.io` was unreachable from here besides. The response mapping is
-      unit-tested and `IsKnownSymbolAsync` can now return `false`; the end-to-end path is unexercised.
+- [x] `az deployment group what-if` — **ran in the deploy workflow and passed**, immediately before the
+      infrastructure step. Never read by a human against a local checkout; `infra/` was untouched this phase
+      and the deploy applied cleanly, which is the outcome the check exists to protect.
+- [x] Set the real `FINNHUB_API_KEY` repository secret, deploy, and confirm the deployed dashboard shows
+      genuine prices and the health panel names Finnhub rather than Fake. **Done.** The secret is set,
+      `/api/marketdata/health` returns `{"provider":"Finnhub"}`, and the SPA panel shows the same string.
+      This also cleared the exit item **"adding a genuinely non-existent symbol with a real key returns
+      `UnknownTicker`"**: `POST /api/holdings` with `ZQXW` returned **400** and *"'ZQXW' is not a ticker this
+      application recognises."* That is the `/search` exact-match check (§2.11 as reversed) firing against
+      real Finnhub — the path `FakeQuoteProvider` can never exercise, because it accepts any well-shaped
+      ticker by design. It also retroactively justifies abandoning the spec's `/quote` non-null-`c` design,
+      which would have returned true here.
 
 ### Task 23: Correct the documents Phase 3 disproved — ✅ **DONE, with three items outstanding**
 
@@ -1514,7 +1531,7 @@ exposes `Map<M>Endpoints`" — reusing `SkipIfEmptyShell`. Written naively it go
       and had to be strengthened to assert `IsLastKnown == false` on served symbols
 - [x] `redis-cli GET marketdata:last:AAPL` returns `"{price}:{epochMs}"` after one dashboard load —
       measured `210.3684:1785956606311`
-- [ ] ❌ **UNVERIFIED.** Adding a genuinely non-existent symbol with a **real key** returns `UnknownTicker`;
+- [x] Adding a genuinely non-existent symbol with a **real key** returns `UnknownTicker`;
       adding a valid one with the provider **down** still succeeds. The second half is covered
       (`SymbolValidator` fails open, and there is a test). The first half cannot be exercised here: no
       `FINNHUB_API_KEY` is set, `finnhub.io` was unreachable, and `FakeQuoteProvider` accepts any well-shaped
@@ -1552,11 +1569,10 @@ exposes `Map<M>Endpoints`" — reusing `SkipIfEmptyShell`. Written naively it go
       on screen" and the two Phase 1 session tests that mount `/dashboard` under MSW's
       `onUnhandledRequest: 'error'`
 - [x] `az bicep build` clean — **via `ci.yml`'s Bicep build job on PR #2**, not locally. `az deployment group
-      what-if` reporting **no changes** is still unconfirmed; zero lines under `infra/` were touched, and
-      `deploy.yml` runs `what-if` in the runner immediately before deploying. See Task 22
-- [ ] ❌ **NOT DONE — needs a merge to `main` and the secret, not a tool install.** Deployed **with a real
-      `FINNHUB_API_KEY`**; the public dashboard shows genuine prices and the health panel names Finnhub rather
-      than Fake. A live deployment exists and is healthy, but serves pre-Phase-3 code. See Task 22
+      what-if` ran in the deploy workflow and passed; it has never been read by a human against a local
+      checkout, and `infra/` was untouched this phase. See Task 22
+- [x] Deployed **with a real `FINNHUB_API_KEY`**; the public dashboard shows genuine prices and the health
+      panel names **Finnhub** rather than Fake. Run 31043996353, 2026-08-05. See Task 22
 - [x] Table → cards at 375px, totals still legible — table hidden, card list carrying the same rows, and
       `documentElement.scrollWidth === innerWidth`, so no horizontal overflow
 - [x] README: why the dashboard asks the provider directly rather than reading a cache · the last-known-price
