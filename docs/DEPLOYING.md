@@ -24,6 +24,13 @@ Add `[skip ci]` to the commit message when a push should **not** deploy.
 | API | `https://stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` |
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
 | Burn rate | ~$1.26/day |
+| Running | **Phase 3, deployed and verified 2026-08-05** (PR #2, run 31043996353) |
+| Deletes itself on | **`deleteAfter = 2026-08-19`** — read the group's tag, not this line, before relying on it |
+
+`/api/marketdata/health` returns `{"provider":"Finnhub"}` on the live API, so the deployed dashboard
+serves genuine prices rather than the fake. **Any deploy re-stamps `deleteAfter` to that day + 14**,
+so the date moves without anyone editing this file. Read it from the resource group's tag, not from
+the table.
 
 Subscription, tenant and client IDs are in GitHub secrets, deliberately not written here — this
 file is in a public repo.
@@ -72,10 +79,10 @@ fix that, because the shell expands before `exec`.
 
 ### `FINNHUB_API_KEY` — the optional eleventh
 
-**Set as of 2026-08-05**, so the deployed dashboard serves genuine prices and
-`GET /api/marketdata/health` returns `{"provider":"Finnhub"}`. Empty is a *supported* path, not a
-broken one — it is what makes `docker compose up` work from a clean clone with no registration — but
-on a public URL it reads as broken rather than as a thoughtful fallback.
+**Set**, so the deployed dashboard serves genuine prices and `GET /api/marketdata/health` returns
+`{"provider":"Finnhub"}`. Empty is a *supported* path, not a broken one — it is what makes
+`docker compose up` work from a clean clone with no registration — but on a public URL it reads as
+broken rather than as a thoughtful fallback.
 
 To rotate or re-set it, get a key at `finnhub.io` (free tier: 60 calls/minute, 30/second burst), then:
 
@@ -87,11 +94,11 @@ It prompts for the value on stdin, so the key never lands in shell history or in
 list. Setting a secret does **not** redeploy — the value is read at deploy time, so trigger a run
 afterwards.
 
-Two things only a real key can demonstrate, **both confirmed on 2026-08-05**: `GET
-/api/marketdata/health` naming `Finnhub` instead of `Fake`, and a genuinely non-existent symbol
-returning `UnknownTicker` — `POST /api/holdings` with `ZQXW` gave 400 and *"'ZQXW' is not a ticker
+Two things only a real key can show, and both are confirmed on the live API: `GET
+/api/marketdata/health` naming `Finnhub` instead of `Fake`, and a symbol that does not exist
+returning `UnknownTicker` — `POST /api/holdings` with `ZQXW` gives 400 and *"'ZQXW' is not a ticker
 this application recognises."* `FakeQuoteProvider` accepts any well-shaped ticker by design, so it
-can never produce the second, which is why this stayed unverified through the whole of Phase 3.
+can never produce the second one. That check can only be made against the deployed app.
 
 ## Traps that each cost a deploy cycle
 
@@ -108,7 +115,11 @@ More in the Traps section of [../CLAUDE.md](../CLAUDE.md).
 ## Known state
 
 - `minReplicas: 0` for cost. **Set it back to `1` in `main.bicep` when MarketData ships its quote
-  poller**, or ingestion stops whenever traffic does.
+  poller**, or the polling stops whenever traffic does. That is Phase 4. Check the condition, not the
+  phase number: search `src/` for `BackgroundService`, `IHostedService` and `PeriodicTimer` — no hits
+  today, so `0` is right. `containerapp-api.bicep` carries a comment saying `minReplicas: 1` is
+  needed because of that poller; that comment describes the finished system, and `main.bicep` is the
+  line that actually passes `0`.
 - Managed identity covers ACR pull only; Postgres and Redis use passwords by design.
 - No Key Vault — Container App secrets only.
 - A smoke-test user (`smoke-*@example.com`) exists in the production database.

@@ -8,7 +8,7 @@ downstream module reads the user id out of the `sub` claim and never asks Identi
 is no `IUserLookup`, no `UserDto`, no event Portfolio or Alerts subscribes to.
 
 So the project ships empty on purpose — as evidence rather than as a claim. The
-[module-interactions diagram](../../../../docs/plan/module-interactions.md) argues that Identity is
+[module-interactions diagram](../../../../docs/reference/module-interactions.md) argues that Identity is
 the cheapest module to extract into its own service, because nothing points at it. An empty
 `.Contracts` is what that argument looks like when the compiler is the one making it: if a runtime
 dependency on Identity ever appears, it must appear here first, and the diff will say so.

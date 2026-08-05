@@ -1,386 +1,165 @@
-# Phase 1 — Sign in · 1.25 days
+# Phase 1 — Sign in
 
-## 1. Goal
+## Goal
 
-Register and log in on a **public Azure URL**, and locally via `docker compose up`. Hard-refresh the browser and stay signed in. Log out and watch a protected route bounce to login.
+Register, sign in, and stay signed in across a hard refresh — locally with one `docker compose up`, and on a public URL. Signing out makes a protected page bounce to the login page.
 
-This phase carries **all** the infrastructure. Every later phase adds only a delta. Infrastructure discovered on day 6 is infrastructure that sinks you.
+This phase carries **all** the plumbing: solution layout, container build, database bootstrap, test suites, cloud deployment, pipelines. Every later phase adds a delta. Infrastructure discovered on the last day is infrastructure that sinks the project.
 
-Covers P0 req 1 (auth incl. session persistence), the auth half of req 3 (routing), and req 7 (compose).
-
----
-
-## 2. Backend
-
-### 2.1 Shared.Kernel
-
-`Shared.Kernel` is framework-free and deliberately small. An `AggregateRoot<TId>` base and an `IDomainEvent` were written here and then **deleted**: nothing raised an event, so the event list was always empty and the type parameter existed only to satisfy the base. ~~Phase 2 brings an event type back, at `HoldingRemoved` — the first one anything actually raises.~~ **It did not.** `HoldingRemoved` existed only to cross the Portfolio/Alerts module boundary, and Phase 2 merged Alerts into Portfolio; with no raiser again, the type stayed deleted. See [00-overview.md](00-overview.md) §"Four modules".
-
-```csharp
-public readonly record struct Money(decimal Amount, string Currency)
-{
-    public static Money Usd(decimal amount) => new(amount, "USD");
-    public Money Add(Money other) => Currency == other.Currency
-        ? this with { Amount = Amount + other.Amount }
-        : throw new InvalidOperationException($"Cannot add {other.Currency} to {Currency}");
-}
-```
-
-CQRS contracts:
-
-```csharp
-public interface ICommandHandler<in TCommand, TResult> {
-    Task<TResult> Handle(TCommand command, CancellationToken ct);
-}
-public interface IQueryHandler<in TQuery, TResult> {
-    Task<TResult> Handle(TQuery query, CancellationToken ct);
-}
-```
-
-and the one shared failure case:
-
-```csharp
-public sealed record InvalidInput(string Field, string Message);
-```
-
-Endpoint registration is a plain extension method per module — `app.MapIdentityEndpoints()` — called manually in `Api/Program.cs`, one line each. An earlier draft had an `IEndpointModule` interface for this; it was deleted, because a single-method interface implemented once per module and called once per module by the host is the same list written twice. Assembly scanning works but is not trim-safe and hides ordering.
-
-### 2.2 Decorators (the reason CQRS earns its keep without a dispatcher)
-
-```csharp
-internal sealed class LoggingCommandHandler<TCommand, TResult>(
-    ICommandHandler<TCommand, TResult> inner,
-    ILogger<LoggingCommandHandler<TCommand, TResult>> logger)
-    : ICommandHandler<TCommand, TResult> { … }
-```
-
-**Validation is not among them.** A `ValidationDecorator` was planned and cannot work: on failure it must return a `TResult`, which is unconstrained, and no reflection can manufacture a failure case for an arbitrary union. It became a generic `IEndpointFilter` in `Shared.Api` instead, which sits in the HTTP pipeline and can simply *return* a 400. See `phase-1-implementation.md` §4.5.
-
-Register with `Decorate` over the open generic. When a handler is injected into an endpoint, DI hands it the decorated chain — no mediator involved.
-
-⚠️ If you later enable `EnableRetryOnFailure`, a transaction decorator **must** wrap its work in `context.Database.CreateExecutionStrategy().ExecuteAsync(...)`, and the handler must be safe to re-run.
-
-### 2.3 Identity module
-
-**`User` aggregate** — `Identity.Domain/User.cs`
-
-```csharp
-public sealed class User
-{
-    // The only way to build one. Assigns; guards nothing.
-    private User(UserId id, string email, string passwordHash, DateTimeOffset createdAt) { … }
-
-    public UserId Id { get; private set; }
-    public string Email { get; private set; }            // stored lowercase, normalised in Create
-    public string PasswordHash { get; private set; }
-    public DateTimeOffset CreatedAt { get; private set; }
-
-    public static string NormaliseEmail(string? email);
-    public static OneOf<User, InvalidInput> Create(string email, string passwordHash, TimeProvider clock);
-
-    public void ChangePasswordHash(string newHash) { … }
-}
-```
-
-⚠️ **This reverses an earlier instruction in this file**, which said never to write a constructor whose parameter names match mapped properties. EF's binder *will* select it for materialisation, by name, ignoring accessibility — but that is fine and intended, because the constructor only assigns. The trap is putting a **guard inside it**: EF then re-runs that guard on every row of every `SELECT`. Guards live in the factory, which EF never calls. Taking the constructor is what makes a half-built entity unrepresentable. See `phase-1-implementation.md` §5.2.
-
-**Password hashing** — Argon2id via `Konscious.Security.Cryptography.Argon2`. There is no in-box Argon2 in .NET 10 and there won't be. OWASP parameters: `m=19456` (19 MiB), `t=2`, `p=1`, 16-byte salt, 32-byte output. Encode as a PHC string (`$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`) so the parameters travel with the hash and you can rehash on upgrade.
-
-**Tokens** — `JsonWebTokenHandler` (not the older `JwtSecurityTokenHandler`). Refresh tokens are opaque random 32-byte values, **stored hashed** (SHA-256 is fine — they're already high-entropy), rotated on use, with the replaced token marked superseded.
-
-**Commands / queries**
-
-| Type | Result cases |
-|---|---|
-| `RegisterUserCommand(string Email, string Password)` | `OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>` |
-| `LoginUserCommand(string Email, string Password)` | `OneOf<TokenPair, InvalidCredentials>` |
-| `RefreshSessionCommand(string RefreshToken)` | `OneOf<TokenPair, InvalidOrExpired>` |
-| `RevokeSessionCommand(string RefreshToken)` | `OneOf<Success, NotFound>` (both `OneOf.Types`) |
-| `GetCurrentUserQuery(Guid UserId)` | `OneOf<GetCurrentUserResult, NotFound>` |
-
-The handler returns the union directly — there is no `<UseCase>Result` union class. `RefreshToken`/`RevokeToken` as command names would be **CS0542** (a positional record generates a member named after the parameter, and a member cannot share its type's name) and would collide with the `RefreshToken` entity besides.
-
-`InvalidCredentials` is deliberately one case, not "no such user" plus "wrong password" — enumeration disclosure. Also run the hash verification even when the user doesn't exist, against a dummy hash, so the timing doesn't leak.
-
-**Endpoints** — `Identity.Api/IdentityEndpoints.cs`, returning `Task<IResult>`
-
-```
-POST /api/auth/register   201 + TokenPair | 409 Problem | 400 Problem
-POST /api/auth/login      200 + TokenPair | 401 Problem
-POST /api/auth/refresh    200 + TokenPair | 401 Problem
-POST /api/auth/logout     204                                     .RequireAuthorization()
-GET  /api/auth/me         200 + { id, email }                     .RequireAuthorization()
-```
-
-Mapping shape:
-
-```csharp
-group.MapPost("/login", async (
-    LoginUserRequest request,
-    ICommandHandler<LoginUserCommand, OneOf<TokenPair, InvalidCredentials>> handler,
-    CancellationToken ct) =>
-{
-    var result = await handler.Handle(new LoginUserCommand(request.Email, request.Password), ct);
-    return result.Match<IResult>(
-        tokens => TypedResults.Ok(tokens),
-        rejected => ProblemDetailsExtensions.UnauthorizedProblem("Invalid credentials."));
-})
-.AddEndpointFilter<ValidationFilter<LoginUserRequest>>();
-```
-
-### 2.4 Persistence
-
-`IdentityDbContext`, schema `identity`, tables `users`, `refresh_tokens`.
-
-```csharp
-protected override void OnModelCreating(ModelBuilder b)
-{
-    b.HasDefaultSchema("identity");
-    b.ApplyConfigurationsFromAssembly(
-        typeof(IdentityDbContext).Assembly,
-        predicate: t => t.Namespace!.StartsWith("StockPortfolio.Modules.Identity", StringComparison.Ordinal));
-}
-```
-
-```csharp
-options.UseNpgsql(cs, npg => {
-    npg.MigrationsHistoryTable("__EFMigrationsHistory", "identity");   // ⚠️ mandatory — see §6
-    npg.MigrationsAssembly(typeof(IdentityDbContext).Assembly.FullName);
-});
-```
-
-Strongly-typed IDs registered once:
-
-```csharp
-protected override void ConfigureConventions(ModelConfigurationBuilder c)
-{
-    c.Properties<UserId>().HaveConversion<UserIdConverter>();
-    c.DefaultTypeMapping<UserId>().HasConversion<UserIdConverter>();   // ← the line people miss
-}
-```
-
-`UserId.New() => new(Guid.CreateVersion7())`, mapped `ValueGeneratedNever()`. UUIDv7 for index locality; a wrapper ID would otherwise lose Npgsql's sequential-GUID generator, because its selector switches on `property.ClrType`, which is `UserId`, not `Guid`.
-
-Database bootstrap (`db/init/01-roles.sql`, run by the Postgres container's entrypoint and by the Azure migration job):
-
-- Roles `identity_svc`, `portfolio_svc`, `marketdata_svc`, `alerts_svc` — DML only. `alerts_svc` is unused since Phase 2 merged Alerts into Portfolio; it is still created, deliberately, pending a real `docker compose up` verification (see [../deferred-work.md](../deferred-work.md))
-- Role `migrator` — owns the schemas, has `CREATE`
-- Schemas `identity`, `portfolio`, `marketdata`, `alerts`
-- `REVOKE ALL ON SCHEMA <other> FROM <role>` so a cross-schema read fails with a permission error
+It covers the acceptance items for authentication and session persistence, the routing half of the frontend requirement, parameterised database access, and the one-command local stack.
 
 ---
 
-## 3. Frontend
+## How the code is arranged
 
-Vite + React + TS. Tailwind v4 via `@tailwindcss/vite` and `@import "tailwindcss"` in `index.css` — **no `tailwind.config.js`, no PostCSS**. Every v3 tutorial is wrong on this.
+A module is five projects: contracts, domain, application, infrastructure, HTTP. Four modules are designed; this phase builds one for real and leaves the others as empty shells, so the boundary rules have more than one module to check and later phases add files rather than plumbing.
 
-### Routes (file-based, `@tanstack/router-plugin`, `routeTree.gen.ts` committed)
+**References point inward, and two of the edges are the point of the split.** Infrastructure never references the web framework. The HTTP layer never references the database or its own infrastructure. They meet only through interfaces declared in the application layer. Both rules are enforced by project references and asserted by reflection tests, so a route physically cannot reach a database context without passing through a handler.
 
-```
-src/routes/
-  __root.tsx                 QueryClientProvider, devtools, <Outlet/>
-  index.tsx                  → redirect to /dashboard or /login
-  login.tsx
-  register.tsx
-  _authenticated.tsx         guard + app shell (nav, user email, logout)
-  _authenticated/dashboard.tsx    empty shell this phase
-```
+**Inbound HTTP is presentation, not infrastructure.** An earlier shape put routes beside the database code to save a project, which forced one project to carry both the web framework and the ORM — the exact mixing the layering exists to prevent. Moving routes up into the host would also have fixed the layering, but then the host becomes the file every future feature edits and a module stops being something you could lift out whole. So each module owns its HTTP project: four extra project files, in exchange for two rules the compiler checks for free.
 
-Guard:
+**Accessibility follows the onion; it is not a blanket `internal`.** The original rule — everything internal outside contracts — cannot compile, because `internal` is per-assembly and a module is five assemblies. Contracts, domain, application and HTTP are public; infrastructure is internal apart from the one registration entry point the host calls. Infrastructure is where leaks actually happen: nothing outside a module should name its database context, repositories or password hasher. The HTTP layer is public because it is a leaf only the host references, and because serialisation and the API-document generator behave better with public types. The cost is real: the compiler no longer stops one module reaching into another's internals, so the architecture tests are the only enforcement left.
 
-```tsx
-export const Route = createFileRoute('/_authenticated')({
-  beforeLoad: ({ context, location }) => {
-    if (!context.auth.isAuthenticated) {
-      throw redirect({ to: '/login', search: { redirect: location.href } })
-    }
-  },
-  component: AppShell,
-})
-```
+The shared kernel holds money, the one shared validation-failure record, and the two handler interfaces. It stays framework-free, so anything naming a web-framework type lives in a separate shared HTTP project. An interface for "a module that registers endpoints" was written and deleted: implemented once per module and called once per module by the host, it is the same list written twice.
 
-Router context is typed via `createRouter({ context: { auth: undefined!, queryClient } })` and filled at render with `<RouterProvider router={router} context={{ auth }} />`.
-
-### Session
-
-- **Access token in memory** (a module-scoped variable + React context). Not `localStorage` — worth a README line.
-- **Refresh token in an httpOnly cookie** for the compose deployment (same origin through nginx). For GitHub Pages the origins differ, so the refresh token is returned in the body and held in memory, and the page bootstraps by calling `/api/auth/refresh` on load with a token persisted in `sessionStorage`. State the trade-off in the README; it is the honest consequence of a static-host deployment.
-- `apiClient` wrapper attaches `Authorization: Bearer`, and on 401 refreshes then retries once.
-
-⚠️ **Dedupe the refresh.** Hold a single in-flight promise so ten concurrent 401s trigger one refresh:
-
-```ts
-let refreshInFlight: Promise<string> | null = null
-async function refresh(): Promise<string> {
-  refreshInFlight ??= doRefresh().finally(() => { refreshInFlight = null })
-  return refreshInFlight
-}
-```
-
-### Components (hand-built, mockup layout minus ornament)
-
-`Button`, `TextField`, `Card`, `Alert`, `Spinner`, `AppShell` with nav. No hero section, no ticker strip.
+There is no aggregate base class and no domain-event machinery. Both were written and removed here, because nothing raised an event — the event list was always empty and the type parameter existed only to satisfy the base class.
 
 ---
 
-## 4. Infrastructure delta
+## How a use case is written
 
-Everything. `infra/main.bicep` + `infra/modules/*.bicep`, parameters in `infra/main.bicepparam`, names suffixed with `uniqueString(resourceGroup().id)`.
+CQRS with no dispatcher. Handlers are injected straight into endpoints. There is one caller per handler, so a mediator would have nothing to decouple. Cross-cutting behaviour is a dependency-injection decorator instead; logging is the only one needed here.
 
-| Resource | Key settings |
-|---|---|
-| `Microsoft.App/managedEnvironments` | Consumption workload profile · `appLogsConfiguration.destination: 'none'` (Log Analytics is optional and its ingestion is the sneakiest line on the bill) |
-| `Microsoft.App/containerApps` — API | `external: true` · `targetPort: 8080` (ASP.NET Core 8+ listens on 8080, **not** 80) · `minReplicas: 1` · `maxReplicas: 2` · `corsPolicy.allowedOrigins: [pagesOrigin]` · `allowCredentials: true` |
-| `Microsoft.DBforPostgreSQL/flexibleServers` | `Standard_B1ms` Burstable · 32 GB · public access + `AllowAllAzureServicesAndResourcesWithinAzureIps` firewall rule (ACA Consumption reaches it with no VNet) |
-| `Microsoft.Cache/redisEnterprise` — AMR | Balanced **B0** · high availability **disabled** |
-| `Microsoft.ContainerRegistry/registries` | Basic · managed-identity pull |
-| `Microsoft.ManagedIdentity/userAssignedIdentities` | One UAMI for everything. System-assigned cannot be used for Key Vault refs in a single-pass deploy |
-| `Microsoft.App/jobs` — migrations | `triggerType: 'Manual'` · `replicaCompletionCount: 1` · `parallelism: 1` · `replicaTimeout: 600` · runs an EF migrations bundle as `migrator` |
+A handler returns a union of its outcomes directly in its signature. An earlier shape wrapped each union in a named result class; the wrapper hid the thing a reader most wants to see. Matching over a union takes one delegate per case, so adding an outcome breaks every call site — exhaustiveness comes from that, not from a wrapper or an analyser.
 
-Secrets as plain ACA secrets — Key Vault is not worth the round trip at this scale. Connection strings carry `Maximum Pool Size=2`.
+**Validation happens in three places, and only one uses result types.**
 
-⚠️ **The `AcrPull` role assignment races the container app** in a single deployment. Put the role assignment in its own module and `dependsOn` it from the container app.
+| Kind | Where | What happens |
+|---|---|---|
+| Shape — is this even an email? | the module's HTTP layer | 400 with field-level problem details |
+| Context — does this account exist, is this allowed? | the handler | a failure case in the returned union |
+| Invariant — a user can never have a blank email | the entity | throws |
 
-### Workflows
+Shape validation is an endpoint filter, not a dependency-injection decorator. A decorator would have to manufacture a failure value of an unconstrained result type — impossible in general, and impossible in particular for a login whose outcome union has no shape-failure case at all. A filter sits in the HTTP pipeline and can simply return a 400.
 
-`.github/workflows/ci.yml` — on PR: `dotnet build`, `dotnet test`, `npm test`, `bicep build`, `az deployment group what-if`.
+It validates the **request** bound off the wire, not the command; the application layer never binds off the wire. The two records look nearly identical today, and that is fine — the wire contract and the use-case input are free to move apart, and only the request appears in the published API document. The consequence: a non-HTTP caller of a handler would skip the shape rules. There is one caller per handler today, so it costs nothing; a background job calling a handler directly would need its own guard.
 
-`.github/workflows/deploy.yml` — on push to `main`:
-1. `azure/login` with **OIDC federated credentials** (no stored secret)
-2. Build + push API image to ACR
-3. `az deployment group create`
-4. `az containerapp job start -n job-migrate-<suffix>` and wait for success
-5. `az containerapp update` with the new image
-6. Build the SPA with `VITE_API_BASE_URL=<api fqdn>` and `--base=/<repo>/`, copy `dist/index.html` → `dist/404.html`, publish to Pages
-
-### Compose
-
-```yaml
-services:
-  postgres:   healthcheck: pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
-  redis:      command: redis-server --appendonly yes --appendfsync everysec
-  migrations: depends_on: { postgres: { condition: service_healthy } }
-  api:        depends_on: { migrations: { condition: service_completed_successfully } }
-  web:        nginx, proxies /api → api
-```
-
-⚠️ The Postgres healthcheck **must** pass `-U` and `-d`. A bare `pg_isready` returns healthy while the init scripts are still running, and the migration container then fails against a database with no roles.
-
-⚠️ nginx `location /api/alerts/stream` needs `proxy_buffering off; gzip off; proxy_read_timeout 3600s; proxy_http_version 1.1;` — set it now even though Phase 4 uses it. Its default `proxy_read_timeout 60s` is *stricter* than ACA's 240s.
+The framework's built-in attribute-driven validation was evaluated and rejected: fine for "required" and "looks like an email", awkward the moment a rule is conditional, spans two fields, or needs a lookup. Validators are injected one at a time, never as a collection — the collection form silently validates nothing when a validator is missing.
 
 ---
 
-## 5. Tests
+## Entities
 
-### Unit — `Identity.UnitTests`
+An entity has exactly one constructor: private, taking every mapped value, assigning and doing nothing else. No parameterless constructor, no object initialiser, no settable property, so a half-built entity cannot be represented and a static factory returning a union is the only way in.
 
-| Test | Asserts |
-|---|---|
-| `Create_MalformedEmail_ReturnsInvalidInput` | Email shape rejected, no exception thrown |
-| `Create_NormalisesEmailToLowercase` | `Foo@Bar.com` stored as `foo@bar.com` |
-| `Argon2_VerifyRoundTrip_Succeeds` | Hash then verify returns true |
-| `Argon2_WrongPassword_Fails` | Returns false, not an exception |
-| `Argon2_ProducesDistinctHashesForSamePassword` | Salt is actually random |
-| `PhcString_RoundTrips_Parameters` | m/t/p survive encode→decode |
-| `RefreshToken_Rotate_SupersedesPrevious` | Old token marked superseded, new one active |
-| `RefreshToken_UseSuperseded_Fails` | Replay rejected |
+An earlier version of this plan said the opposite — never write a constructor whose parameter names match mapped properties, because the ORM's binder will select it for loading rows. The hazard is real; the conclusion was wrong. The binder does pick that constructor, by parameter name, regardless of accessibility, and that is fine because it only assigns. What makes it a trap is putting a **guard** inside it: the guard then runs on every row of every read. Keep the constructor guard-free and validate in the factory, which the ORM never calls.
 
-### Unit — `Shared.Kernel.UnitTests`
+The sharp edge: binding is by name, so renaming a constructor parameter without renaming its property leaves nothing bindable, and with no parameterless fallback the whole model fails to build at startup rather than on first query. Validation in a setter would be dead code that looks alive, because the ORM writes the backing field and never calls the setter — which is why there is no settable surface at all.
 
-`Money_Add_SameCurrency_Sums` · `Money_Add_DifferentCurrency_Throws` · `UserId_Converter_RoundTrips` · `UserId_New_ProducesSortableGuids` (v7 monotonicity)
-
-### Integration — `Api.IntegrationTests`
-
-Testcontainers Postgres + Redis, one collection fixture, `WebApplicationFactory<Program>`.
-
-| Test | Asserts |
-|---|---|
-| `Migrations_ApplyCleanly_OnEmptyDatabase` | All four contexts migrate; four schemas exist |
-| `Register_ThenLogin_ReturnsTokens` | 201 then 200 with a non-empty token pair |
-| `Register_DuplicateEmail_Returns409` | Second registration conflicts |
-| `Register_WeakPassword_Returns400WithProblemDetails` | `application/problem+json`, field-level errors |
-| `Me_WithoutToken_Returns401` | |
-| `Me_WithValidToken_ReturnsEmail` | |
-| `Refresh_RotatesToken_OldOneRejected` | Second use of the old refresh token → 401 |
-| `Health_ReturnsHealthy_WithPostgresAndRedis` | Both checks reported |
-| `PortfolioRole_CannotReadIdentitySchema` | Connecting as `portfolio_svc` and selecting from `identity.users` throws a permission error — **this is the test that proves the role isolation is real rather than aspirational** |
-
-### Architecture — `Architecture.Tests`
-
-| Test | Asserts |
-|---|---|
-| `Modules_DoNotReferenceOtherModulesInternals` | Only `*.Contracts` crosses a module boundary |
-| `ContractsProjects_HaveNoEfCoreReference` | |
-| `DomainTypes_HaveNoPublicSetters` | Reflection over `Modules.*.Domain` |
-
-### Frontend — `Web`
-
-Vitest + RTL + MSW: `redirects unauthenticated visit to /login` · `login form shows server error without crashing` · `concurrent 401s trigger exactly one refresh call` (MSW request counter)
+Time comes from an injectable clock, never a static "now". Identifiers are UUIDv7, generated in the domain for index locality. Money is a decimal on the server, serialised as a string and never computed in the browser; its currency is normalised as the value is constructed, so the same currency in two casings compares and adds correctly.
 
 ---
 
-## 6. Gotchas
+## Registering and signing in
 
-**`HasDefaultSchema` does not move `__EFMigrationsHistory`.** efcore#24127, closed *not planned*. Without `MigrationsHistoryTable(name, schema)` on every context, all four share `public.__EFMigrationsHistory`, each sees the others' migration IDs, and `database update` reports migrations as applied-but-missing. Looks like corruption. Set it on day one.
+**"Is this address already taken?" is a context question, so the handler asks it.** It looks the address up and returns a conflict; it does not insert and read a unique-violation back out of an exception. The exception route was genuinely race-free and was rejected anyway, because it put the rule "an address may be used once" in the persistence layer as an error-code filter, while the file you read to learn what registration does never mentioned it.
 
-**Do not put `SearchPath=` in the connection string.** Two open Npgsql bugs (efcore.pg#3359, #2917) make it fail migrations with `42P07: relation "__EFMigrationsHistory" already exists`. Explicit `MigrationsHistoryTable` sidesteps the whole class.
+The accepted cost, stated rather than hidden: two simultaneous registrations of one address can both pass the check, and the loser hits the unique index and surfaces as a 500 instead of a 409. The index stays — it is what keeps the data correct — and the window is a millisecond wide. The exception catch comes back only if that 500 is ever actually observed.
 
-**`ApplyConfigurationsFromAssembly` silently skips configurations with constructor parameters**, logging only `SkippedEntityTypeConfigurationWarning`. Add `.ConfigureWarnings(w => w.Throw(CoreEventId.SkippedEntityTypeConfigurationWarning))` in Development.
+The lookup normalises through the same single definition of the canonical stored form used when the account was created; normalise differently and the lookup simply misses, which here also means a 500. The check runs before hashing, because hashing is deliberately slow and a taken address is a conflict whatever the password was.
 
-**JWT claim mapping.** Set `MapInboundClaims = false` **and** explicit `NameClaimType`/`RoleClaimType` in `TokenValidationParameters`, or `User.FindFirst("sub")` silently returns null because the handler renamed it to the long Microsoft claim URI.
+**Login reports one undifferentiated failure**, not "no such user" plus "wrong password", because two cases leak whether an account exists. It also verifies against a fixed dummy hash when the account does not exist, so the timing does not leak what the body refuses to.
 
-**ASP.NET Core listens on 8080** since .NET 8, not 80. `targetPort: 8080` in Bicep and `EXPOSE 8080` in the Dockerfile.
+Passwords use Argon2id at the OWASP parameters with a random salt, encoded in the standard PHC string so the parameters travel with the hash and can be upgraded later. There is no Argon2 in the framework and none planned. Refresh tokens are opaque random values stored as a plain SHA-256 hash — no work factor, correct precisely because the token is already high-entropy: a slow hash over a random 256-bit value buys nothing and costs memory on every refresh.
 
-**The base image creates an `app` user but only `*-chiseled` images set `USER`.** Without an explicit `USER app` line you run as root.
-
-**GitHub Pages + SPA routing.** Copy `index.html` to `404.html` at build time, set Vite `base: '/<repo>/'`, and give the router a matching `basepath`. Without all three you get a 404 on any deep link and a blank page on refresh.
-
-**`VITE_*` variables are build-time only and are not secrets.** The API base URL is baked into the bundle by the Actions job. Never put a key there.
+The public surface is five routes: `POST /api/auth/register`, `/login`, `/refresh`, `/logout`, and `GET /api/auth/me`. The three that take a body carry the validation filter; the two that carry only a bearer token do not get an empty validator for symmetry.
 
 ---
 
-## 7. Your call
+## Sessions
 
-### Token lifetimes — `Identity.Application/TokenPolicy.cs`
+**Rotation is unconditional.** Every use of a refresh token issues a new one and retires the old. A flag to turn that off was planned and never written — a switch whose only legal value is on is not a decision.
 
-The file will exist with the signature and a comment block. Fill in:
+**A just-rotated token keeps working for a thirty-second grace period**, or two browser tabs refreshing at the same moment log each other out.
 
-```csharp
-internal static class TokenPolicy
-{
-    // TODO(you): Access-token TTL, refresh-token TTL, and whether refresh rotates on every use.
-    //
-    // Trade-offs:
-    //   Short access TTL  → smaller stolen-token window, more refresh round-trips.
-    //   Rotate-on-use     → detects replay, but breaks concurrent tabs unless you allow a
-    //                       grace period where the superseded token still works briefly.
-    //   Long refresh TTL  → fewer logins, larger blast radius if the token store leaks.
-    //
-    // Note this interacts with the GitHub Pages deployment: the refresh token lives in
-    // sessionStorage there, not an httpOnly cookie, which argues for a shorter TTL.
-    public static TimeSpan AccessTokenLifetime => …;
-    public static TimeSpan RefreshTokenLifetime => …;
-    public static bool RotateOnUse => …;
-    public static TimeSpan RotationGracePeriod => …;
-}
-```
+**Revoking a session and rotating it are genuinely different ends.** Both mark the old session superseded; only rotation records which session replaced it. A grace check written against "was it superseded?" alone keeps accepting the exact token the user just signed out with, for the whole window — sign-out silently does nothing for thirty seconds while every test stays green. The check asks whether a replacement was named, and only then allows the grace window.
 
-~8 lines. The values propagate into the integration tests, so pick before writing `Refresh_RotatesToken_OldOneRejected`.
+Lifetimes: fifteen minutes for the access token, fourteen days for the refresh token. A short access token makes a leaked one a small window, and the extra round trips are cheap because concurrent refreshes collapse into one.
+
+### In the browser
+
+**The access token lives in a module-scoped variable and nowhere else.** A bearer sitting in web storage is readable by any injected script that runs once; in a closure, an attacker has to be live and resident.
+
+**The refresh token lives in session storage, and there is no cookie in any deployment.** That is the honest consequence of where the halves are hosted: the site is static on one origin and the API is on another, so a cookie would be third-party and Safari blocks those outright. An earlier design claimed a dual mode — a same-origin cookie behind the local proxy, storage on the public site — and the cookie half was never built on either side. Adding a cookie later changes this decision, not just an implementation detail.
+
+Session storage rather than local storage: it dies with the tab, so a shared machine does not hand a live fourteen-day session to the next person. Being tab-scoped means a second tab starts signed out, which is fixed by handing the session between tabs over a broadcast channel — not by moving the token somewhere shared.
+
+**Concurrent refreshes collapse into one in-flight request**, or ten simultaneous 401s fire ten refreshes and nine race a rotated token into failure. The in-flight promise must also be cleared when it settles, or one failed refresh wedges the session forever.
+
+**The session must be restored before the router mounts.** The route guard is synchronous and a React effect runs after the first render, so a session restored in an effect arrives too late and a hard refresh of a protected page always bounces to login. This is the most likely way the phase ships "done" and demos broken, because in-app navigation hides it completely. The app refreshes imperatively at startup, shows a splash while it settles, and mounts the router only once the answer is known.
+
+The route base path derives from the build environment in one chain, so the router and the asset URLs cannot disagree: the local stack serves the app at the root, the public site under a repository path.
 
 ---
 
-## 8. Done when
+## The database
 
-- [ ] `docker compose up` from a clean clone → `http://localhost:5173` serves the app, `/health` reports Healthy with both Postgres and Redis
-- [ ] Register a new account → land on the dashboard shell
-- [ ] Hard-refresh → still signed in
-- [ ] Log out → navigating to `/dashboard` bounces to `/login` with `?redirect=` set
-- [ ] Log in again → returned to `/dashboard`, not the home page
-- [ ] `dotnet test` green, including `PortfolioRole_CannotReadIdentitySchema`
-- [ ] `npm test` green
-- [ ] `bicep build` and `az deployment group what-if` clean
-- [ ] Deployed: `https://<user>.github.io/<repo>/` talks to `https://ca-api-<suffix>.<region>.azurecontainerapps.io` — register and log in there
-- [ ] Deep-link straight to `https://<user>.github.io/<repo>/login` → loads (proves the `404.html` fallback)
-- [x] OneOf toolchain verified against Roslyn 5 — `OneOfDiagnosticSuppressor` does not exist and is unnecessary; see `phase-1-implementation.md` §3
-- [ ] README: run instructions, the token-storage decision, the Postgres role isolation
-- [ ] Screens usable at 375px
+**One schema per module, and each module connects as its own database user.** A migrating role owns the schemas and is the only one that can create; each service role gets read-write on its own schema and nothing on anyone else's. Cross-schema access is revoked explicitly rather than merely not granted, so the boundary claim exists as executable SQL that survives someone adding a broad grant later. Default privileges are granted for future tables too — grant only on what exists today and the next migration produces tables the service role cannot read, which surfaces a phase later and looks like an ORM bug.
+
+An integration test connects as one module's role, tries to read another module's tables, and asserts the specific permission error code rather than the message. That turns a design claim into a fact the pipeline re-checks. All four schemas and all five roles are created here, though only one module has tables, because that test needs a second role to exist.
+
+**Every module's migration history table lives in that module's own schema.** Setting a default schema does not move it; without an explicit setting they share one table, each sees the others' migration identifiers, and the tooling reports migrations as applied-but-missing. It looks like corruption.
+
+**Migrations are applied by a separate console program, never by the app at startup** — two replicas racing one migration corrupts the history table. The same program and image serve the local stack and the cloud job, so there is one code path.
+
+**The database is reached only through the ORM's query API, never raw SQL.** The brief asks for parameterisation; going through the query API makes it structural. A command interceptor in the test fixture asserts no user-supplied value ever appears in the text of a command — the only way that requirement is visible to a reader. Connection pools are capped small: a burstable database allows few connections, and each distinct database user is a separate pool.
+
+---
+
+## The host
+
+- Unhandled errors and bare status codes both become problem details, so a declared response body is always actually there.
+- **Two health endpoints.** Liveness checks nothing; readiness checks the database and the cache. The platform restarts a container failing liveness, so a liveness probe touching the database turns a blip into a restart loop. The probes must also be declared explicitly in the infrastructure template, or the platform injects TCP probes, never calls either path, and the split is decorative.
+- **Never enable response compression** — it buffers server-sent events, and the later alert feed dies silently.
+- JSON numbers are handled strictly and money gets its own converter, rather than loosening a global setting. Inbound claim mapping is switched off explicitly, or the subject claim is renamed and reads back as null.
+- **Exactly one CORS layer is active, and it is the application one.** Two layers on one response risk a duplicate allow-origin header, which browsers reject outright.
+
+Configuration keys cross assembly boundaries freely; types do not. Anything the host must *name* has to be public, so it belongs in the module's one registration entry point; anything it only needs to *configure* travels as a configuration key.
+
+---
+
+## Infrastructure
+
+Three targets, all established here: the local stack, the static site, and the API in a container app with a managed database and cache. Deployment happens by pushing to the main branch; the procedure, cost ceiling and failure history live in the deployment runbook and design record.
+
+The cache ships with no business consumer — nothing needs it until live prices arrive — but it stays in the stack and in the readiness check so the topology is real from day one and the later phase adds a client rather than a service. Data-protection key persistence is deferred; it must land alongside the first stored ciphertext, or every new revision orphans it.
+
+---
+
+## Known gaps and deviations
+
+- **The brief lists WebSockets; this project ships server-sent events.** The reasoning and the comparison belong in the README from the first commit, not deferred to the phase that adds the stream. Real-time is not part of the acceptance gate, so this cannot fail it either way.
+- **The identity module's contracts project ships empty**, deliberately, with a note inside saying why. Nothing calls identity at runtime — the token is self-contained — which is the argument that it is the cheapest module to extract.
+- **Changing a password is not built.** There is no caller until the settings screen. When it is written, the guard belongs in the mutator, unlike the constructor rule above: the ORM never calls a setter, so a guard there runs only for real callers.
+
+---
+
+## Done when
+
+- `docker compose up` from a clean clone serves the app and reports the database and cache healthy.
+- Register, land on the dashboard shell, hard-refresh, still signed in.
+- Sign out, hit a protected page, bounce to login with the return path preserved, sign in, come back to where you were.
+- A malformed email on registration returns 400 with field-level problem details, from the filter and not from an exception.
+- Backend and frontend suites pass, including role isolation, the parameterisation interceptor and the single-refresh count.
+- The infrastructure template compiles, a what-if run is clean, and HTTP probes are declared.
+- The public site talks to the deployed API; a deep link straight to the login page loads.
+- The README records how to run it, the token-storage decision, the role isolation and the transport comparison.
+- Usable at 375 pixels wide.
+
+## Reference
+
+These describe the shape of the system rather than the order it gets built in. They live in `docs/reference/`.
+
+- [Identity — sessions and tokens](../reference/identity-contracts.md) — the token rules this phase sets, and what about them is fixed.
+- [Data model](../reference/er-diagram.md) — the users and refresh-token tables, and the per-module schema rule.
+- [Module boundaries](../reference/module-boundaries.md) — why the layering is the way this phase establishes it.
