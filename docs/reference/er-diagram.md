@@ -94,10 +94,12 @@ erDiagram
         uuid user_id "logical reference"
         text ticker
         text direction "fall | rise"
-        numeric change_percent
-        numeric trigger_price "the price that fired it"
-        numeric reference_price "the window extreme it was measured against"
-        char currency
+        numeric change_percent "the move against the window extreme, signed"
+        numeric endpoint_percent "the move end to end, signed - both must agree in sign to fire"
+        numeric trigger_price_amount "the price that fired it"
+        char trigger_price_currency
+        numeric reference_price_amount "the window extreme it was measured against"
+        char reference_price_currency
         timestamptz fired_at
         boolean is_simulated "fired by the manual test button"
     }
@@ -112,14 +114,14 @@ erDiagram
     identity_users ||..o{ alerts_fired_alerts : "no foreign key"
 ```
 
-**Eight tables plus the key ring are drawn. Three of them exist.**
+**Eight tables plus the key ring are drawn. Five of them exist.**
 
-| Built today | Arrives with alerting | Arrives with settings and per-user keys |
-|---|---|---|
-| `identity.users`, `identity.refresh_tokens`, `portfolio.holdings` | `alerts.alert_settings`, `alerts.fired_alerts` | `identity.user_preferences`, `identity.data_protection_keys`, `portfolio.dashboard_settings`, `marketdata.user_api_keys` |
+| Built today | Arrives with settings and per-user keys |
+|---|---|
+| `identity.users`, `identity.refresh_tokens`, `portfolio.holdings`, `alerts.alert_settings`, `alerts.fired_alerts` | `identity.user_preferences`, `identity.data_protection_keys`, `portfolio.dashboard_settings`, `marketdata.user_api_keys` |
 
-Only two schemas have any migration history, and a test pins that list — so a third appearing is a
-deliberate act, not a drift.
+Three schemas have migration history, and a test pins that list — so a fourth appearing is a deliberate act,
+not a drift.
 
 ### Two tables from an earlier draft that are gone
 
@@ -154,6 +156,10 @@ rotation lookups never touch retired tokens.
 `alerts.fired_alerts` needs an index on user and fired-at descending. The history endpoint is the only thing
 that reads it, and it reads it exactly one way.
 
+`alerts.alert_settings` needs a unique index on user and ticker. That is what makes "one threshold per
+position" true rather than intended, and it is what turns saving the same threshold twice into an update
+instead of a second row.
+
 ---
 
 ## Migration history — the trap
@@ -185,10 +191,14 @@ integration test asserts exactly that by connecting as one role and reading anot
 
 **Connection budget.** The database tier allows 35 user connections, and every connection string caps its
 pool at two. What opens a pool is a **registered database context, not a database role** — the roles above
-outnumber them. Two contexts are registered, the API runs at most two copies, and the pool cap is two, so
-eight connections is the ceiling. The client library's default pool size of one hundred would ask for four
-hundred. Connection pooling in front of the database is unavailable on this tier, so there is no escape
-hatch below this. The migration job runs separately and not alongside the API.
+outnumber them. Three contexts are registered, the API runs at most two copies, and the pool cap is two, so
+**twelve** connections is the ceiling, leaving 23 spare. The client library's default pool size of one
+hundred would ask for six hundred. Connection pooling in front of the database is unavailable on this tier,
+so there is no escape hatch below this. The migration job runs separately and not alongside the API.
+
+The arithmetic moves whenever a context is added and has been published wrong before, so count the
+registrations rather than reciting the figure. It was eight through Phase 3, when only Identity and Portfolio
+registered one; the alerts context is what made it twelve. MarketData still registers none.
 
 ---
 
@@ -203,17 +213,23 @@ That risk profile is what licenses a different store.
 | `marketdata:last:{ticker}` | string | the last price any path fetched, with the time it was seen | **never trimmed** — the dashboard's only fallback when the provider is unreachable |
 | `marketdata:name:{ticker}` | string | the company name, learned whenever a search returns one | expires after a week, so a company that renames itself corrects without anyone acting |
 | `marketdata:prices:{ticker}` | sorted set | recent observations, scored by time | trimmed on write to a little over an hour; written only for tickers with an active alert |
-| `marketdata:claim:{window}` | string | decides *who* polls this window | expires shortly after the window |
+| `marketdata:claim:{cycle}` | string | decides *who* polls this cycle | expires shortly after the cycle |
 | `marketdata:cycle-inflight` | string | decides *whether* any cycle is running | expires, and is deleted when the cycle ends |
 | `alerts:cooldown:{user}:{ticker}:{direction}` | string | present means suppressed | expires after the user's cooldown |
 | `alerts:ticket:{ticket}` | string | who a live-stream ticket belongs to | expires in thirty seconds, deleted on first use |
 | `alerts:user:{user}` | channel | fired alerts, fanned out to whichever copy holds the stream | — |
 
-**Only the first two keys exist today.** Everything else arrives with alerting.
+**All eight exist.** The first two shipped with the dashboard; the rest arrived with alerting.
 
 Each observation in the series is stored as time-and-price together, not price alone. Members of a sorted
 set must be unique, so a bare price would mean a ticker hitting the same value twice updates the existing
-entry's timestamp instead of adding a second reading — silently erasing the earlier one.
+entry's timestamp instead of adding a second reading — silently erasing the earlier one. That erasure is
+invisible to any assertion about prices or ordering; only counting the members catches it.
+
+**The claim key is named after the poll cycle, not after the clock.** It was first named by the calendar
+minute, which is only equivalent while the interval happens to be a minute: the key's lifetime is a multiple
+of the poll interval, so at a shorter interval the claim expires inside the minute it names and a second copy
+claims that same minute again.
 
 **The two price structures are separate on purpose, and it is not redundancy.** The first answers *what is
 it worth*; the second answers *how has it moved*. Their lifetimes differ: one is kept for as long as someone
@@ -221,10 +237,13 @@ might look, the other is trimmed to an hour and exists only while an alert does.
 ticker and it has no series at all, which is exactly when the dashboard still needs a fallback. Collapsing
 them would also tie how far back the dashboard can degrade to the alert retention setting.
 
-**The two poll locks are separate on purpose.** The window claim guarantees one winner *within* a window and
-says nothing *across* windows, so a cycle that overruns is still fetching when the next window opens and a
-different copy claims it. The in-flight guard closes that gap.
+**The two poll locks are separate on purpose.** The cycle claim guarantees one winner *within* a cycle and
+says nothing *across* cycles, so a cycle that overruns is still fetching when the next one opens and a
+different copy claims it. The in-flight guard closes that gap. Acquire the claim first and release only what
+was actually acquired — releasing after a refused claim deletes the winner's in-flight key and re-opens the
+overlap.
 
 ---
 
-**Where the unbuilt parts come from.** Three tables exist. The alert tables and the price-window key arrive with [Phase 4](../plan/phase-4-alerts.md); the settings tables and the per-user key table arrive with [Phase 5](../plan/phase-5-make-it-mine.md).
+**Where the unbuilt parts come from.** Five tables exist, and every Redis key does. The settings tables and
+the per-user key table arrive with [Phase 5](../plan/phase-5-make-it-mine.md).

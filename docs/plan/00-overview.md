@@ -31,7 +31,7 @@ days. Phases 1 to 3 cover every gate item, so the gate is passed a little over h
 | 1 | Sign in | Register and log in, locally and on the public URL | Built and deployed |
 | 2 | My portfolio | Add, merge, edit and delete holdings | Built and deployed |
 | 3 | Live prices & P&L | Dashboard with real prices, totals, profit and loss | Built and deployed |
-| 4 | Alerts | Threshold alerts pushed live, and the price poller behind them | Next |
+| 4 | Alerts | Threshold alerts pushed live, and the price poller behind them | Built and verified locally; **not deployed, so not done** |
 | 5 | Make it mine | Theme, language, refresh interval, thresholds, row visibility, bring-your-own API key | Not started |
 | 6 | Doesn't break | Visible, honest degradation when a dependency fails | Not started |
 
@@ -45,8 +45,7 @@ A phase is done when it works in a browser and is deployed — not when its test
 
 ## The modules, and why they are where they are
 
-Four modules are designed: **Identity**, **Portfolio**, **MarketData** and **Alerts**. Three exist. Alerts is
-Phase 4's first job.
+Four modules: **Identity**, **Portfolio**, **MarketData** and **Alerts**. All four exist.
 
 - **Identity** owns users, passwords and tokens. Nothing at runtime depends on it; the token it issues
   carries everything a request needs.
@@ -86,8 +85,8 @@ machinery.
 | How has it moved over the last few minutes? | Alert evaluation | Sample on a timer, keep a short series in Redis |
 
 Only the second needs history, so only the second needs a poller — and the poller only runs for tickers that
-somebody has an active alert on. With no alerts configured anywhere, nothing polls at all, and the dashboard
-behaves exactly the same. Both the poller and the price history arrive in Phase 4.
+somebody has an active alert on. With no alerts configured anywhere, the cycle finds an empty list and calls
+nothing, and the dashboard behaves exactly the same.
 
 **The dashboard never reads the cache first.** It asks the provider, every load. This is the opposite of a
 read-through cache, and the difference matters: when a fetch fails for one ticker, that ticker falls back to
@@ -139,10 +138,10 @@ one.
    that could not be fetched come back as a last-known value with its age, flagged as such.
 4. The browser keeps the dashboard fresh by refetching on an interval and when the window regains focus.
    These queries are cached client-side, which is also what keeps the deployed API warm during a session.
-5. From Phase 4: they set a percentage threshold on a position. A background poller samples the prices that
-   thresholds care about, and when one breaches, the alert is written down and pushed to any open browser
-   over a server-sent-events stream. A simulate button forces one so the mechanism is demonstrable without
-   waiting for the market.
+5. They set a percentage threshold on a position. A background poller samples the prices that thresholds care
+   about, and when one breaches, the alert is written down and pushed to any open browser over a
+   server-sent-events stream. A simulate button forces one so the mechanism is demonstrable without waiting
+   for the market.
 
 ## Where it runs, and what it costs
 
@@ -172,15 +171,19 @@ Instead, every deploy stamps a delete-by date on the resource group, and a sched
 group once that date passes. Deploying extends the window by using it. A group with no readable deadline is
 also deleted, deliberately — an unbounded group is exactly what this is guarding against.
 
-The measured burn is about **$1.26 a day**: a small managed Postgres, a small managed Redis with high
-availability off, a container registry, and an API that scales to zero when nobody is using it. Scaling to
-zero is only safe while nothing needs to run in the background, which stops being true in Phase 4 — the
-poller needs an always-on replica, and that is when the bill rises to roughly the price of one small
-always-on container on top.
+The burn measured through Phase 3 was about **$1.26 a day**: a small managed Postgres, a small managed Redis
+with high availability off, a container registry, and an API that scaled to zero when nobody was using it.
 
-The honest cost of scaling to zero is that the first request of a session pays for a cold start and then the
-fan-out of quote calls, one after the other. Client-side refetching keeps it warm after that, so it is a
-first-load cost, not a per-request one.
+**Phase 4 ends the scaling to zero**, and this is one decision rather than two. The poller has to run between
+requests; a sleeping copy samples nothing, so no alert ever fires and nothing reports a fault. So the minimum
+is one copy always running, and the bill rises by roughly the price of one small always-on container. What is
+bought back is the cold start — until now the first request of a session paid for a container to start and
+*then* for the fan-out of quote calls, one after the other.
+
+The concurrency threshold the platform scales on had to rise with it. A held-open stream can count as one
+in-flight request for as long as it lives, so at the old setting a few dozen connected browsers would have
+scaled the app on how many people were watching rather than on how much work it was doing. The ceiling stays
+at two copies, which is what the database connection budget allows.
 
 Read the [deployment runbook](../DEPLOYING.md) before touching anything operational, and the
 [deployment design record](../superpowers/specs/2026-08-02-azure-deployment-design.md) for the reasoning
@@ -204,12 +207,14 @@ Cut on purpose. Don't reintroduce without asking.
 
 ## Known gaps
 
-- **Ticker search** — typing a company name and picking the symbol from a list — was specified in Phase 2 and
-  never built. What Phase 3 shipped is a server-side existence check that rejects a bad symbol after submit;
-  that is a safety net, not the same affordance. It is tracked in [deferred-work.md](../deferred-work.md).
-- **The database and deployment cleanup** left behind when Alerts was merged and unmerged is still
-  outstanding, in the same register.
-- **The provider's rate limit still needs turning into a real ticker ceiling** before the readme quotes one.
+- **Phase 4 has not been deployed.** It is green locally. Two of its conditions can only be checked against
+  the public URL: an alert arriving there, and a stream still alive after four minutes.
+- **Readiness checks one database login of three.** The probe opens Identity's connection and answers for
+  the database as a whole, so the portfolio or alerts login could be unreachable while the app reports
+  itself healthy. It matters more now that alerts run on a timer rather than on a request, because nothing
+  outside the process would notice. Tracked in [deferred-work.md](../deferred-work.md).
+- **The provider's rate limit is quoted from a search snippet, not from the provider's own documentation.**
+  The readme says so where it quotes it.
 - **Token lifetimes are provisional** and want a deliberate decision.
 
 ## Where to go next

@@ -1,7 +1,7 @@
 # Module interactions
 
-Four modules in one process — **three exist**; Alerts is designed and unbuilt. A module may reach only the
-small set of types another module publishes for that purpose, and nothing deeper.
+Four modules in one process, **all four built**. A module may reach only the small set of types another
+module publishes for that purpose, and nothing deeper.
 
 **Nothing but a test enforces that, so the test is load-bearing.** Most of a module is publicly visible,
 because a module is several assemblies and hiding things per assembly would stop it compiling. So the
@@ -22,25 +22,25 @@ flowchart TB
 
     ID["<b>Identity</b><br/>publishes nothing"]
     PF["<b>Portfolio</b>"]
-    AL["<b>Alerts</b> — designed, nothing on disk"]
+    AL["<b>Alerts</b>"]
     MD["<b>MarketData</b>"]
     SK["Shared kernel — money, validation failures,<br/>the command and query shapes"]
 
     Web -->|"REST, plus a live stream for alerts"| Host
     Host --> ID
     Host --> PF
-    Host -.-> AL
+    Host --> AL
     Host --> MD
-    Host -.->|"tells the price module<br/>which tickers to poll"| MD
+    Host -->|"answers which tickers to sample,<br/>and carries each sample back"| MD
 
     PF -->|"what is this worth now?"| MD
     PF -->|"does this ticker exist?"| MD
-    AL -.->|"how has this ticker moved<br/>over the last N minutes?"| MD
-    AL -.->|"does this user hold this ticker?"| PF
+    AL -->|"how has this ticker moved<br/>over the last N minutes?"| MD
+    AL -->|"does this user hold this ticker?"| PF
 
     ID --> SK
     PF --> SK
-    AL -.-> SK
+    AL --> SK
     MD --> SK
 
     style SK fill:#3a3a52,stroke:#818cf8,color:#e8eaf6
@@ -54,12 +54,15 @@ Every arrow is an ordinary in-process call. **There are no domain events** — t
 had existed to clear an alert cooldown when a holding was deleted, and a cooldown expires by itself.
 
 **Nothing depends on Alerts.** It reads price history and asks Portfolio one yes-or-no question. The host
-reads its list of watched tickers to drive the poller, which is the host adapting one module to another, not
-an inbound dependency.
+reads its list of watched tickers to drive the poller and hands each fresh sample back to it for evaluation,
+which is the host adapting one module to another, not an inbound dependency.
 
-**MarketData depends on nothing.** It states its own need for a list of tickers to poll and the host answers
-it from Alerts. The two sides word the question differently on purpose, and if the answer ever has to come
-from somewhere else, only the host's adapter changes.
+**MarketData depends on nothing.** It states **two** needs of its own — which tickers am I to sample, and
+here is a sample that landed — and the host answers both from Alerts. The second is the one that is easy to
+miss: evaluation runs in the same cycle as the fetch and belongs to Alerts, so without an outbound port the
+poller would have to call Alerts directly, which is the one edge this graph forbids. Both are worded as
+MarketData's own need rather than as "ask Alerts", so if either answer ever has to come from somewhere else,
+only the host's adapter changes.
 
 **Nothing calls Identity at runtime.** The sign-in token is self-contained, so Identity publishes no types
 at all and that emptiness is the evidence. It is the cheapest module to extract; MarketData is the dearest,
@@ -71,17 +74,18 @@ across the line with it.
 
 ### What crosses each line
 
-Dashed edges above are designed, not built, and every one of them terminates in Alerts.
+Every edge is built.
 
-| From → To | What it asks | State |
-|---|---|---|
-| Portfolio → MarketData | what is each of these tickers worth right now | built |
-| Portfolio → MarketData | does this ticker actually exist | built |
-| Portfolio → MarketData | what are these companies called | built |
-| Alerts → Portfolio | does this user hold this ticker | built and offered; no caller until Alerts exists |
-| Host → MarketData | which tickers have an active alert | designed |
-| Alerts → MarketData | current, lowest and highest price over the user's window | designed |
-| Anything → Identity | **nothing** — the token already carries what anyone needs | built; Identity publishes zero types |
+| From → To | What it asks |
+|---|---|
+| Portfolio → MarketData | what is each of these tickers worth right now |
+| Portfolio → MarketData | does this ticker actually exist |
+| Portfolio → MarketData | what are these companies called |
+| Alerts → Portfolio | does this user hold this ticker |
+| Alerts → MarketData | current, oldest, lowest and highest price over the user's window, and the longest gap in it |
+| Host → MarketData | which tickers have an active alert |
+| Host → Alerts | this ticker has a fresh sample — evaluate it |
+| Anything → Identity | **nothing** — the token already carries what anyone needs. Identity publishes zero types |
 
 **Portfolio asks MarketData three questions, not one, and they are deliberately kept apart** — see
 [module-boundaries.md](module-boundaries.md) §4. When the provider is unreachable, a price request falls
@@ -143,9 +147,8 @@ destroyed at the boundary. Weight and percentages are computed on the server for
 
 ## 3. Runtime — the poll cycle and an alert
 
-**Nothing in this section exists yet.** The poller, the price history, the evaluator, the cooldowns and the
-live stream are all designed. Today nothing at all runs in the background, which is the condition that lets
-the deployed API scale to zero copies (§4).
+**This is the only thing in the system that runs without a request**, which is why the deployed API can no
+longer scale to zero copies (§4).
 
 ```mermaid
 sequenceDiagram
@@ -159,7 +162,7 @@ sequenceDiagram
     participant B as Browser
 
     T->>P: tick
-    P->>R: claim this window; refuse if a cycle is still running
+    P->>R: claim this cycle; refuse if a cycle is still running
     Note over P,R: two locks — one picks WHO polls,<br/>the other stops cycles overlapping
 
     P->>DB: which tickers have an active alert
@@ -168,8 +171,8 @@ sequenceDiagram
     P->>R: append to the recent series, trim to the retention window
     P->>R: remember the last price (the dashboard's fallback)
 
-    P->>E: evaluate ticker against current, lowest and highest
-    Note over E: guards — enough samples,<br/>same trading session, feed not stale
+    P->>E: evaluate ticker against current, oldest, lowest and highest
+    Note over E: guards — enough samples, no gap<br/>inside the window, feed not stale
     E->>R: is this user already in cooldown for this direction?
     E->>DB: record the fired alert
     E->>R: start the cooldown
@@ -184,7 +187,14 @@ The alert is recorded before it is published, so a failed publish leaves a recor
 is **no replay** — an alert that fires while nobody is connected is simply not pushed. It appears next time
 the panel loads its history, because history is an ordinary request, not a protocol feature.
 
-The cooldown lives in Redis with an expiry, because expiry is the entire meaning of a cooldown.
+The cooldown lives in Redis with an expiry, because expiry is the entire meaning of a cooldown. It is claimed
+with a single set-if-absent, never a read followed by a write: two copies of the app evaluating the same
+ticker in the same millisecond would both pass a read-then-write check and send the user two alerts.
+
+**An alert fires only when both measurements of the window agree in sign** — the move end to end and the
+move against the extreme. A price that dips and recovers is up against the window low and down end to end,
+and firing on the extreme alone would report that as a rise on every cycle, forever. The full argument is in
+[the phase plan](../plan/phase-4-alerts.md).
 
 ---
 
@@ -200,7 +210,7 @@ flowchart TB
     subgraph AZ["Azure — one resource group"]
         ACR["Container registry"]
         subgraph ENV["Container Apps environment"]
-            API["API container<br/>scales to zero · at most two copies"]
+            API["API container<br/>always one copy · at most two"]
             JOB["Migration job — run on demand"]
         end
         PG[("Postgres — small burstable tier")]
@@ -229,11 +239,14 @@ a single-use, short-lived ticket and passes that on the stream URL.
 four minutes, and four minutes is both the default and the floor on this tier — raising it needs a
 dedicated, much more expensive plan.
 
-**The API scales to zero, and at most to two copies.** Zero is correct only while nothing runs in the
-background, which is true today; it goes to one when the poller lands, because scaling to zero would stop
-price collection. The ceiling of two is what the database connection budget allows — see
-[er-diagram.md](er-diagram.md). The honest cost of zero is a cold start on the first request of a session;
-after that the app keeps itself warm by refetching.
+**The API keeps at least one copy running, and at most two.** It scaled to zero until the poller landed, and
+zero was only ever correct while nothing ran between requests — a sleeping copy samples no prices, so no
+alert fires and nothing reports a fault. The two are one decision. What that bought back is the cold start
+the first request of a session used to pay for; what it costs is one container billed around the clock, and
+a copy holding an open stream never qualifies for the reduced idle rate either. The ceiling of two is what
+the database connection budget allows — see [er-diagram.md](er-diagram.md). The concurrency threshold the
+platform scales on had to rise fourfold with it, because a held-open stream can count as one in-flight
+request for its whole life.
 
 Locally, one command brings up the same API plus a web server for the SPA, Postgres and Redis. The brief
 requires the whole stack in one command, so the SPA container stays even though production serves it
@@ -241,4 +254,4 @@ statically.
 
 ---
 
-**Where the unbuilt parts come from.** Every dashed edge terminates in Alerts and is designed rather than built. [Phase 4](../plan/phase-4-alerts.md) builds them. The background poller and the live stream arrive with it.
+**Everything on this page is built.** [Phase 4](../plan/phase-4-alerts.md) built the edges terminating in Alerts, the background poller and the live stream, and is where a change to any of them belongs — change it there first, then bring this file into line.
