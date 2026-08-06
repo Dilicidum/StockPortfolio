@@ -20,3 +20,6 @@ dist/
 ## OS
 Thumbs.db
 .DS_Store
+
+# Transient agent worktrees
+.claude/worktrees/

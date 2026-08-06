@@ -272,6 +272,43 @@ Added to `src/Api/appsettings.json` as empty/`0` placeholders and to
 | `Alerts:CooldownMinutes` | `15` | Long enough that a nudge twice inside it yields one alert, short enough to demo |
 | `Alerts:HistoryLimit` | `50` | The `?limit=` ceiling on `GET /api/alerts` |
 
+### 2.9 DECISION — the wire contract, pinned against a built client
+
+Task 14 shipped before any server route existed, so the browser side is now the specification and these are
+findings from a real client rather than guesses. Tasks 6, 9, 11, 12 and 13 must match them.
+
+**`thresholdPercent` is a JSON number, and that is not a contradiction of the money rule.** `Program.cs` sets
+`JsonNumberHandling.Strict`, so a quoted number on `PUT /api/alerts/settings` would be **rejected**. The rule
+that survives is narrower than "percentages are strings": a figure the **server computes** travels as a
+string, because that is where precision is lost; a value the **user typed** travels as a number, because the
+server is about to parse it into a `decimal` either way. So `thresholdPercent` is a number, and
+`changePercent` and `endpointPercent` are strings.
+
+**The history record and the pushed record are two different shapes feeding one list, and one of them has to
+give.** Task 11's `GetFiredAlertsResult` carries `Money`; Task 9's `AlertNotification` carries bare price
+strings plus a single shared `currency`. The client prepends a pushed row into the history cache, so a cache
+holding both renders two ways. The client currently carries a `toFiredAlert` adapter with a test pinning it.
+**Decide server-side: make `AlertNotification` carry `Money` and delete the adapter, or keep both and keep
+it.** Do not leave it undecided — a silent drift here renders every pushed row's price as an em dash, and
+only for rows that arrived live, which is the hardest possible thing to notice.
+
+Five smaller ones, each a real 4xx or a blank panel if missed:
+
+- **`GET /api/alerts/settings` returns `200 []` for a user with no thresholds, never 404.** The portfolio
+  page reads it on every mount.
+- **`POST /api/alerts/simulate` must accept a body of `{"ticker": null}`** and pick a position itself. The
+  client always sends a body with `Content-Type: application/json`, because a bodiless POST 415s against a
+  required parameter. Answer 202 with no body; 409 when there is nothing to simulate.
+- **`POST /api/alerts/stream-ticket` returns `{ ticket, expiresAt }`** and is sent with no body, like logout.
+- **The alert frame must be a *named* `alert` event.** An unnamed frame arrives as `message` and the client
+  never sees it. The `ping` frame costs nothing precisely because a named event with no listener is dropped
+  by `EventSource` before it reaches any code.
+- **`direction` arrives as `"Fall"` / `"Rise"`, not `0` / `1`.** `JsonStringEnumConverter` is registered so
+  this holds today; it breaks the moment anyone serialises the enum by hand.
+
+**`userId` on `AlertNotification` is redundant** — the stream is already per-user. The client types it
+optional so the history record need not carry it.
+
 ---
 
 ## 3. File structure
