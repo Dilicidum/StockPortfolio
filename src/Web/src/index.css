@@ -7,11 +7,11 @@
  * a @custom-variant declared here. Get this wrong and nothing errors: `dark:`
  * utilities are simply never generated.
  *
- * Phase 1 is dark-only (<html class="dark"> in index.html). Phase 5 makes the
- * theme a server-persisted user setting on [data-theme]; when it does, this one
- * line is what changes.
+ * The theme is a server-persisted user setting, applied as data-theme on <html>
+ * by the inline script in index.html before first paint. Two places key off it,
+ * not one: this @custom-variant, and the palette block below.
  */
-@custom-variant dark (&:where(.dark, .dark *));
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /*
  * Palette lifted from the design mock. Defined as plain CSS variables so both
@@ -35,7 +35,7 @@
   --ac-contrast: #ffffff;
 }
 
-.dark {
+[data-theme="dark"] {
   --bg: #0b0c0f;
   --panel: #13151a;
   --panel-2: #181b22;

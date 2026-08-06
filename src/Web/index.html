@@ -1,6 +1,24 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
+    <script>
+      // Runs before the first paint. Without it every load flashes light before React mounts.
+      // The server is the source of truth; this cache exists only so there is something to read
+      // synchronously, because a fetch cannot happen before paint.
+      (function () {
+        try {
+          var stored = localStorage.getItem('stockportfolio.theme') || 'system'
+          var dark =
+            stored === 'dark' ||
+            (stored === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark')
+          document.documentElement.style.colorScheme = 'dark'
+        }
+      })()
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
