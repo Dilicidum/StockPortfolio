@@ -4,6 +4,12 @@
     "minutesShort": "{{count}}хв",
     "hoursShort": "{{count}}год"
   },
+  "actions": {
+    "cancel": "Скасувати",
+    "save": "Зберегти",
+    "saving": "Збереження…",
+    "tryAgain": "Спробувати ще раз"
+  },
   "fallbackError": "Щось пішло не так. Спробуйте ще раз.",
   "requestFailed": "Запит не вдався."
 }

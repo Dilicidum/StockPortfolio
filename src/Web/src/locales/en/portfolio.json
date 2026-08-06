@@ -1,1 +1,52 @@
-{}
+{
+  "title": "Portfolio",
+  "subtitle": "Positions you hold, and what you paid for them",
+  "error": {
+    "title": "Could not load your positions",
+    "fallback": "The server did not answer."
+  },
+  "mergedNotice": "Merged into your {{ticker}} position — {{quantity}} shares, average {{price}}.",
+  "addForm": {
+    "title": "Add a position",
+    "submit": "Add position",
+    "submitting": "Adding…"
+  },
+  "fields": {
+    "tickerLabel": "Ticker",
+    "tickerPlaceholder": "AAPL",
+    "quantityLabel": "Quantity",
+    "quantityPlaceholder": "10",
+    "priceLabel": "Price",
+    "pricePlaceholder": "100.00"
+  },
+  "positions": {
+    "title": "Positions",
+    "invested": "Invested",
+    "caption": "Your positions",
+    "empty": "No positions yet. Add one above.",
+    "columns": {
+      "asset": "Asset",
+      "qty": "Qty",
+      "buy": "Buy",
+      "actions": "Actions"
+    }
+  },
+  "rowActions": {
+    "setAlert": "Alert",
+    "setAlertAria": "Set an alert on {{ticker}}",
+    "thresholdLabel": "{{threshold}}% / {{window}}m",
+    "edit": "Edit",
+    "editAria": "Edit {{ticker}}",
+    "removeAria": "Remove {{ticker}}"
+  },
+  "removeDialog": {
+    "title": "Remove position",
+    "body": "This removes your {{ticker}} position and everything recorded against it.",
+    "confirm": "Remove",
+    "failure": "Could not remove {{ticker}}. Please try again."
+  },
+  "editForm": {
+    "heading": "Correct {{ticker}}",
+    "description": "These values replace the position outright — nothing is averaged with what is recorded now. To add to it instead, buy it again above."
+  }
+}

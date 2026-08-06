@@ -57,11 +57,16 @@ export function applyServerErrors<T extends FieldValues>(
  * NAMESPACE, spelled with a dot to match every existing message rather than i18next's own
  * `:` separator, so this strips it and looks the remainder up in that namespace explicitly.
  *
+ * A field can also carry a message `applyServerErrors` set from the API's own response text,
+ * which is ordinary English prose, not a key — passed through unchanged rather than handed
+ * to `t()`, which (with a plain string containing `.` and no matching resource) would try to
+ * walk it as a nested key path instead of rendering the sentence.
+ *
  * Returns `undefined` for no message, exactly as the field's `error` prop expects.
  */
 export function translateFieldError(t: TFunction, message: string | undefined): string | undefined {
   if (!message) return undefined
+  if (!message.startsWith('errors.')) return message
 
-  const key = message.startsWith('errors.') ? message.slice('errors.'.length) : message
-  return t(key, { ns: 'errors' })
+  return t(message.slice('errors.'.length), { ns: 'errors' })
 }

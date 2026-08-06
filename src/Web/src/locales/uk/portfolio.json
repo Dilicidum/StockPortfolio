@@ -1,1 +1,52 @@
-{}
+{
+  "title": "Портфель",
+  "subtitle": "Позиції, які ви тримаєте, і скільки за них заплачено",
+  "error": {
+    "title": "Не вдалося завантажити ваші позиції",
+    "fallback": "Сервер не відповів."
+  },
+  "mergedNotice": "Об'єднано з позицією {{ticker}} — {{quantity}} акцій, середня ціна {{price}}.",
+  "addForm": {
+    "title": "Додати позицію",
+    "submit": "Додати позицію",
+    "submitting": "Додавання…"
+  },
+  "fields": {
+    "tickerLabel": "Тікер",
+    "tickerPlaceholder": "AAPL",
+    "quantityLabel": "Кількість",
+    "quantityPlaceholder": "10",
+    "priceLabel": "Ціна купівлі",
+    "pricePlaceholder": "100.00"
+  },
+  "positions": {
+    "title": "Позиції",
+    "invested": "Інвестовано",
+    "caption": "Ваші позиції",
+    "empty": "Поки немає жодної позиції. Додайте її вище.",
+    "columns": {
+      "asset": "Актив",
+      "qty": "Кіл-сть",
+      "buy": "Купівля",
+      "actions": "Дії"
+    }
+  },
+  "rowActions": {
+    "setAlert": "Сповіщення",
+    "setAlertAria": "Налаштувати сповіщення для {{ticker}}",
+    "thresholdLabel": "{{threshold}}% / {{window}}хв",
+    "edit": "Редагувати",
+    "editAria": "Редагувати {{ticker}}",
+    "removeAria": "Видалити {{ticker}}"
+  },
+  "removeDialog": {
+    "title": "Видалити позицію",
+    "body": "Це видалить вашу позицію {{ticker}} і все, що з нею пов'язано.",
+    "confirm": "Видалити",
+    "failure": "Не вдалося видалити {{ticker}}. Спробуйте ще раз."
+  },
+  "editForm": {
+    "heading": "Коригування {{ticker}}",
+    "description": "Ці значення повністю замінюють позицію — нічого не усереднюється з тим, що записано зараз. Щоб додати до неї, купіть цей актив ще раз вище."
+  }
+}

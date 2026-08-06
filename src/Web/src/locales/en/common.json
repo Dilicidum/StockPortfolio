@@ -4,6 +4,12 @@
     "minutesShort": "{{count}}m",
     "hoursShort": "{{count}}h"
   },
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "tryAgain": "Try again"
+  },
   "fallbackError": "Something went wrong. Please try again.",
   "requestFailed": "Request failed."
 }
