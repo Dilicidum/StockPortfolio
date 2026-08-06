@@ -355,8 +355,8 @@ The published limits, and how confident we are in each:
 Taking 60/minute as read, the arithmetic is unkind and worth stating plainly rather than hiding:
 
 - Twenty positions is **twenty calls for one viewer, per refresh**.
-- At a fifteen-second refresh, one viewer with twenty positions spends a third of the minute's budget.
-- **Three concurrent viewers at that interval exhaust it.**
+- At a fifteen-second refresh that is four times as often, so **one viewer with twenty positions is already
+  past sixty calls a minute on their own** — no second viewer required.
 
 That is a property of the free tier, not a bug to engineer around — and it is not what the refresh interval
 is sized against. The interval is a per-user preference, 60 seconds by default because that is a sensible
@@ -523,6 +523,78 @@ Not a fake push straight to the socket, which would prove nothing about the mech
 
 ---
 
+## Settings
+
+Five things are configurable per user, and each is owned by the module that can enforce it — theme and
+language by Identity, the refresh interval and which positions show by Portfolio, the alert threshold by
+Alerts, and your own provider key by MarketData. There is no shared settings table: one would be a piece of
+the system nobody designed and everybody writes to. The screen reads each section from its own route and
+writes each back separately, so a refused API key cannot discard a theme change you made in the same visit.
+
+### The theme is applied before the page paints
+
+The choice lives on the server so it follows you between devices, but a fetch cannot happen before the first
+paint. So a blocking inline script in `<head>` — ahead of any stylesheet — reads a browser-storage copy and
+stamps `data-theme` on `<html>`. Without it every load flashes light before React mounts, on every
+navigation. Browser storage is a bootstrap cache only; the server value wins once you are signed in.
+
+Tailwind v4 has no config file, so dark mode is a `@custom-variant` line in CSS — and the palette variables
+are a *second* place keyed off the same state. Changing only the variant leaves the app rendering the light
+palette in both modes with no error anywhere.
+
+"Follow the system" watches the OS preference and reacts live, so changing your laptop theme changes the app
+without a reload.
+
+### A faster refresh costs real calls
+
+The interval is yours, between 10 and 300 seconds, 60 by default. Every refresh is one provider call per
+visible position, so fifteen seconds makes four times the requests sixty does. Sixty is the default because
+it is a sensible cadence for a stock dashboard, not because of any provider's ceiling.
+
+### Hiding a position hides it, and nothing else
+
+The dashboard table shows only the positions you have left visible, and the totals follow — what you see adds
+up. **Alerts ignore visibility entirely.** You still own a hidden position, and a 6% drop still matters to
+your money whether or not the row is on your screen, so a threshold on a hidden ticker still fires. This is
+the first thing a reviewer asks, and there is a test that fails if anyone "fixes" it.
+
+Hiding also has nothing to do with what gets polled. The poller samples tickers somebody has an active alert
+on, not everything anybody holds — so a hidden position with no alert is never sampled, and the dashboard
+prices it from the provider the moment you unhide it.
+
+### Your own API key
+
+Paste a Finnhub key and the app uses it for **your** dashboard fetches. The shared background poller behind
+alerts keeps using the application's key, because the polled ticker list is shared — two people with an alert
+on the same ticker would otherwise fetch it twice.
+
+The key is validated with one live call before it is stored, so a bad key is refused while you are looking at
+the field. "The provider refused your key" and "the provider could not answer" are different messages: telling
+someone their key is wrong when the provider was merely down is its own kind of bug. If a stored key is later
+revoked, the next fetch that sees a 401 marks it, and the settings screen tells you to re-enter it — otherwise
+revocation is invisible and you just see stale prices.
+
+It is encrypted at rest, and the encryption key ring is persisted to Postgres. The framework's default keeps
+that ring in the container filesystem, and Azure replaces the container on every deploy, which would turn
+every stored key into ciphertext nothing can read.
+
+**The key is never returned to the browser.** Not to the person who set it, not masked beyond the last four
+characters. The status response says whether one is configured and shows those four, and that is all — every
+path that can return it is a path that can leak it.
+
+Bring-your-own-key requests go out on their own HTTP client. Not for quota: the circuit breaker is shared, and
+one user whose key is revoked would otherwise open it for everybody, including the poller.
+
+### Language
+
+English and Ukrainian. Numbers and dates use the chosen locale; the currency stays US dollars and only the
+presentation localises. A build check fails if the two locale files disagree on a single key — there is no
+fallback to English, because falling back hides a missing translation from whoever added it and shows it to
+everyone else.
+
+Server-generated text — API validation messages, a fired alert's reason — stays English. The backend does no
+language negotiation.
+
 ## Testing
 
 | Suite | Covers |
@@ -610,21 +682,24 @@ Stated plainly rather than left for you to find.
   immediately before deploying, so both run — nobody has compared the output by eye. Phase 3 changed
   zero lines of Bicep; Phase 4 is the first phase since Phase 1 that changes any, which makes it the
   first one where reading that output would actually tell you something.
-- **The free tier is the real ceiling, and it does not scale.** With `FINNHUB_API_KEY` set, twenty
-  positions is twenty of sixty calls per minute for **one** viewer at the 60-second default; three
-  concurrent viewers exhaust the budget. That is a documented property of the free tier rather than a
-  bug — over budget, tickers fall back to their last known price rather than failing.
+- **The free tier is a ceiling, and nothing in the app models it any more.** The client-side token
+  bucket that used to pace calls at sixty a minute was removed in Phase 5: it was sized to one
+  provider's free plan and the brief says free-tier limits are not a problem here. What survives is
+  what a normal client does — retry honouring `Retry-After`, a circuit breaker, per-ticker isolation,
+  and a fall back to the last known price with its age. Over budget, tickers degrade rather than fail.
+  A user who supplies their own key gets a separate outbound client, so a revoked key of theirs cannot
+  open the breaker for everybody.
 - **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
   `TODO`. They work and are exercised by tests; they have not been signed off.
-- **Holding visibility is a column, not a control.** The dashboard read already filters on
-  `holdings.is_visible`, which is always `true` until Phase 5 adds the toggle. The filter is a no-op
-  today and costs nothing.
+- **The readiness probe checks one database role of four.** It opens the Identity connection and
+  registers under the unqualified name `postgres`, so `portfolio_svc`, `alerts_svc` or
+  `marketdata_svc` could be unreachable while readiness still reports healthy and traffic keeps
+  arriving. Tracked in [docs/deferred-work.md](docs/deferred-work.md) as **C7**.
 - **The portfolio table has no price or profit/loss columns.** Those live on the dashboard, which is
   the screen that fetches prices. This is a decision, not an omission: adding them to the holdings
   table would make a CRUD screen pay the provider fan-out on every render.
-- **The readiness probe checks one database role of three.** It opens the Identity connection and
-  registers under the unqualified name `postgres`, so `portfolio_svc` or `alerts_svc` could be
-  unreachable while readiness still reports healthy and traffic keeps arriving. Tracked in
-  [docs/deferred-work.md](docs/deferred-work.md) as **C7**.
+- **Server-generated text stays English.** API validation messages and a fired alert's reason are
+  produced by the backend, which does no language negotiation, so they do not follow the interface
+  language. Everything the SPA itself renders does.
 - **Npgsql logs `Cannot load library libgssapi_krb5.so.2`** in the container at startup. It is
   probing for Kerberos, falls back to password auth, and is harmless.
