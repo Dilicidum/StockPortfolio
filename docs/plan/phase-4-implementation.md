@@ -1387,8 +1387,65 @@ private static async IAsyncEnumerable<SseItem<object>> StreamAsync(
    cheaper, and Alerts' `ConnectionStringName` makes C6 worse.
 4. Update the three reference documents' "what exists today" lines. The `alerts_*` tables and four of the
    Redis keys stop being marked as arriving later.
-5. **Delete this file.** An implementation plan exists only while its phase is in flight.
-6. Commit: `docs: record Phase 4 and close C8, C11 and E1`.
+5. Commit: `docs: record Phase 4 and close C8, C11 and E1`.
+6. **Delete this file — but only after Task 18.** An implementation plan exists only while its phase is
+   in flight, and a phase is in flight until it runs in a browser and is deployed.
+
+---
+
+### Task 17 — Verify it in a browser, locally
+
+**This task was missing from the first draft of this plan, and its absence was a real hole**: §5 lists
+browser outcomes as acceptance criteria and no task produced them. The frontend was built and unit-tested
+against mocked requests, so until now nobody has opened the application and clicked the button.
+
+**Steps.**
+
+1. `docker compose up` from a clean volume, with a real `FINNHUB_API_KEY` absent so the fake provider runs.
+2. Register, add a position, set a threshold on it.
+3. **Click Simulate. The alert must appear in the panel in under a second, badged as simulated.** This is
+   the phase's headline claim and the only way to check it is to watch it.
+4. Reload. The alert is still listed — from history, not replay.
+5. Simulate with the tab closed, reopen: the alert is in the list.
+6. Leave the tab open five minutes; the connection is still alive and the badge still reads "Live (SSE)".
+7. Nudge a price past a threshold; a real, evaluation-driven alert arrives with no help.
+8. Nudge twice inside the cooldown — one alert. Nudge back and forth across the threshold repeatedly —
+   alerts stay bounded rather than one per cycle.
+9. The notifications screen lists history. **The panel is usable at 375px.**
+10. Disable every threshold and confirm no `marketdata:prices:*` key is written on the next cycle.
+
+Nothing is committed by this task unless it finds a defect. What it produces is a yes or a no.
+
+---
+
+### Task 18 — Deploy, and verify the deployed thing
+
+**Also missing from the first draft.** `docs/DEPLOYING.md` is the runbook and it wins over anything here.
+
+**Deploying is a push to `main`, and that is the whole mechanism** — `deploy.yml` fires on `push:
+branches: [main]` and on `workflow_dispatch`. How the work reaches `main` is a separate decision and is
+the user's: this repository has done both a squash-merged pull request and a local squash merge.
+
+**Never run `az deployment group create` by hand.** The workflow installs Bicep and runs
+`az deployment group what-if` inside the runner.
+
+**Steps.**
+
+1. Confirm `docs/DEPLOYING.md`'s six-step verification is still current, and read its five recorded
+   failure cases before starting.
+2. Get the branch onto `main` by whichever route the user chooses. **Ask; do not assume.**
+3. Watch the run. The first deploy after this phase changes `minReplicas` to 1 and the scale rule to 400,
+   so the container app revision is replaced rather than updated in place.
+4. Verify on the deployed API, not locally: `/api/marketdata/health` still reports the real provider;
+   a threshold can be set; Simulate returns 202; the alert appears in history.
+5. **Open the stream against the deployed API and hold it past four minutes.** This is the one thing no
+   local test can prove, because the four-minute idle close is a platform behaviour of the hosting plan.
+   If the heartbeat is wrong, this is where it shows.
+6. Confirm the SPA on GitHub Pages renders alerts from the deployed API across origins.
+7. **Re-check the resource group's delete-by tag.** A deploy re-stamps it to today + 14 days; the last
+   recorded value was 2026-08-19. An unreadable or missing tag deletes the group.
+
+Only when this passes is Phase 4 done, and only then does Task 16 step 6 delete this file.
 
 ---
 
