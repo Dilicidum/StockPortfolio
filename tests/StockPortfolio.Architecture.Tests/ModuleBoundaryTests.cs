@@ -54,6 +54,7 @@ public sealed class ModuleBoundaryTests
             SolutionAssemblies.NameOf("Alerts", "Domain"),
             SolutionAssemblies.NameOf("Alerts", "Application"),
             SolutionAssemblies.NameOf("Alerts", "Infrastructure"),
+            SolutionAssemblies.NameOf("Alerts", "Api"),
 
             SolutionAssemblies.NameOf("MarketData", "Domain"),
             SolutionAssemblies.NameOf("MarketData", "Contracts"),
@@ -81,8 +82,6 @@ public sealed class ModuleBoundaryTests
         // Ordinal order, because the assertion below compares the two lists in order.
         string[] expected =
         [
-            // Phase 4 builds Alerts one layer at a time; a name leaves this list the commit its layer lands.
-            "StockPortfolio.Modules.Alerts.Api",
             "StockPortfolio.Modules.Identity.Contracts",
         ];
 

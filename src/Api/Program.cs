@@ -1,7 +1,8 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using StockPortfolio.Api.Extensions;
 using StockPortfolio.Api.Middleware;
+using StockPortfolio.Modules.Alerts.Api;
 using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
 using StockPortfolio.Modules.Identity.Api;
@@ -71,6 +72,7 @@ builder.Services.AddMarketDataModule(builder.Configuration);
 builder.Services.AddMarketDataApi();
 
 builder.Services.AddAlertsModule(builder.Configuration);
+builder.Services.AddAlertsApi();
 
 // Must come AFTER the modules: a decorator only applies to descriptors that already exist.
 // Not load-bearing for MarketData, which registers no ICommandHandler or IQueryHandler at all -
@@ -95,6 +97,7 @@ if (app.Environment.IsDevelopment())
 app.MapIdentityEndpoints();
 app.MapPortfolioEndpoints();
 app.MapMarketDataEndpoints();
+app.MapAlertsEndpoints();
 app.MapStockPortfolioHealthChecks();
 
 await app.RunAsync();

@@ -35,6 +35,13 @@ public sealed record HoldingPayload(
 /// <summary>One ticker suggestion.</summary>
 public sealed record TickerMatchPayload(string Symbol, string Description);
 
+/// <summary>One threshold as the API returns it. ThresholdPercent is a JSON number: the user typed it.</summary>
+public sealed record AlertSettingPayload(
+    string Ticker,
+    decimal ThresholdPercent,
+    int WindowMinutes,
+    bool Enabled);
+
 /// <summary>One dashboard row. Every nullable member is nullable on the wire too — null means unknown.</summary>
 public sealed record DashboardPositionPayload(
     Guid Id,
@@ -77,6 +84,9 @@ internal static class Wire
 
     /// <summary>Ticker search, under /api/marketdata/ with the health route rather than under /api/tickers/.</summary>
     public const string SearchPath = "/api/marketdata/search";
+
+    /// <summary>Thresholds: one GET for the lot, one PUT per position.</summary>
+    public const string AlertSettingsPath = "/api/alerts/settings";
 
     /// <summary>Media type the API must use for RFC 7807 errors.</summary>
     public const string ProblemJson = "application/problem+json";
@@ -169,6 +179,38 @@ internal static class Wire
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
 
         var payload = await response.Content.ReadFromJsonAsync<List<HoldingPayload>>(JsonSerializerOptions.Web);
+
+        payload.ShouldNotBeNull();
+
+        return payload;
+    }
+
+    /// <summary>Puts a threshold to /api/alerts/settings.</summary>
+    public static Task<HttpResponseMessage> SaveAlertSettingAsync(
+        HttpClient client,
+        string? accessToken,
+        string ticker,
+        decimal thresholdPercent,
+        int windowMinutes,
+        bool enabled = true) =>
+        SendAsync(
+            client,
+            HttpMethod.Put,
+            AlertSettingsPath,
+            accessToken,
+            new { ticker, thresholdPercent, windowMinutes, enabled });
+
+    /// <summary>Reads /api/alerts/settings, asserting the 200 on the way.</summary>
+    public static async Task<IReadOnlyList<AlertSettingPayload>> ListAlertSettingsAsync(
+        HttpClient client,
+        string accessToken)
+    {
+        using var response = await SendAsync(client, HttpMethod.Get, AlertSettingsPath, accessToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        var payload = await response.Content.ReadFromJsonAsync<List<AlertSettingPayload>>(
+            JsonSerializerOptions.Web);
 
         payload.ShouldNotBeNull();
 

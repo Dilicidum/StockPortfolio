@@ -1,7 +1,10 @@
+using System.Globalization;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using StockPortfolio.Modules.Alerts.Application;
 using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Infrastructure.Persistence;
 
@@ -13,7 +16,10 @@ public static class AlertsModule
     /// <summary>The ConnectionStrings key this module reads.</summary>
     public const string ConnectionStringName = "Alerts";
 
-    /// <summary>Registers the Alerts module: its DbContext and its two repositories.</summary>
+    /// <summary>The configuration section the module's tunable numbers are read from.</summary>
+    public const string SectionName = "Alerts";
+
+    /// <summary>Registers the Alerts module: its DbContext, its two repositories and its handlers.</summary>
     public static IServiceCollection AddAlertsModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -44,6 +50,27 @@ public static class AlertsModule
         services.AddScoped<IAlertSettingRepository, AlertSettingRepository>();
         services.AddScoped<IFiredAlertRepository, FiredAlertRepository>();
 
+        services.AddSingleton(ReadOptions(config));
+
+        services.AddAlertsHandlers();
+
         return services;
+    }
+
+    /// <summary>Reads the tunable numbers. A missing or unusable value falls back rather than throwing.</summary>
+    private static AlertsOptions ReadOptions(IConfiguration config)
+    {
+        // Deliberately not eager: a blank or absent Alerts:MaxWindowMinutes is a configuration file that
+        // has not been told about this module yet, not a reason to refuse to start. The connection
+        // string above is the only thing the module genuinely cannot run without.
+        var configured = config.GetSection(SectionName)["MaxWindowMinutes"];
+
+        var maxWindowMinutes =
+            int.TryParse(configured, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            && parsed > 0
+                ? parsed
+                : AlertsOptions.DefaultMaxWindowMinutes;
+
+        return new AlertsOptions(maxWindowMinutes);
     }
 }

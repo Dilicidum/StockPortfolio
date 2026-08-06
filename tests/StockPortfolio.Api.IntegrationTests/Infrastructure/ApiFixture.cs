@@ -215,6 +215,7 @@ public sealed class ApiFixture : IAsyncLifetime
                 // Both, or ParameterisationTests' assembly-wide proof silently stops covering holdings.
                 ModuleDbContextInterceptors.AddToIdentity(services, RecordedCommands);
                 ModuleDbContextInterceptors.AddToPortfolio(services, RecordedCommands);
+                ModuleDbContextInterceptors.AddToAlerts(services, RecordedCommands);
 
                 // ConfigureTestServices runs after the app's own registrations, so this is the whole
                 // collection - which is what makes it comparable with the Migrator's.

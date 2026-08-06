@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
@@ -24,6 +26,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
         // The two that ship in every environment; the dev nudge is not mapped in all.
         ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
+
+        // The settings pair; the rest of /api/alerts arrives with the stream and the history.
+        ["Alerts"] = ["GetAlertSettings", "SaveAlertSetting"],
     };
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
@@ -37,6 +42,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>MarketData's names.</summary>
     private static string[] MarketDataRouteNames => ExpectedRouteNames["MarketData"];
 
+    /// <summary>Alerts' names.</summary>
+    private static string[] AlertsRouteNames => ExpectedRouteNames["Alerts"];
+
     /// <summary>The five routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
@@ -45,6 +53,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>The MarketData routes, as theory data.</summary>
     public static TheoryData<string> MarketDataRoutes => [.. MarketDataRouteNames];
+
+    /// <summary>The Alerts routes, as theory data.</summary>
+    public static TheoryData<string> AlertsRoutes => [.. AlertsRouteNames];
 
     /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
@@ -58,6 +69,10 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [Fact]
     public void EndpointDataSource_ExposesTheMarketDataRoutes() => ShouldExposeExactly(MarketDataRouteNames);
 
+    /// <summary>And for Alerts, the fourth module — the one C11 was written about.</summary>
+    [Fact]
+    public void EndpointDataSource_ExposesTheAlertsRoutes() => ShouldExposeExactly(AlertsRouteNames);
+
     /// <summary>The rule the three above cannot make: a module nobody maps is a module nobody tests.</summary>
     [Fact]
     public void EveryModuleWithAnApiAssembly_ContributesAtLeastOneMappedRoute()
@@ -67,7 +82,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         // A rule that passes by finding nothing needs a companion assertion that fails if the search
         // finds nothing. Raise this the commit a fourth module's endpoints are mapped, not before.
         modules.Count.ShouldBe(
-            3,
+            4,
             "The set of loaded .Api assemblies is derived, not listed, so an empty or short set would "
                 + "make the loop below pass over nothing. Modules found: "
                 + string.Join(", ", modules));
@@ -142,6 +157,24 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
+    /// <summary>The alert settings pair. Both 409s are driven, because they come from different checks.</summary>
+    [Theory]
+    [InlineData("GetAlertSettings", "bearer", 200)]
+    [InlineData("GetAlertSettings", "anonymous", 401)]
+    [InlineData("SaveAlertSetting", "held", 200)]
+    [InlineData("SaveAlertSetting", "not-held", 409)]
+    [InlineData("SaveAlertSetting", "window-over-cap", 409)]
+    [InlineData("SaveAlertSetting", "bad-ticker", 400)]
+    [InlineData("SaveAlertSetting", "wrong-content-type", 415)]
+    [InlineData("SaveAlertSetting", "anonymous", 401)]
+    public async Task AlertsRoute_DeclaresTheStatusItReturned(
+        string routeName,
+        string scenario,
+        int expectedStatus)
+    {
+        await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
+    }
+
     /// <summary>A declared failure that claims no problem+json is a lie about what the client will parse.</summary>
     [Theory]
     [MemberData(nameof(AuthRoutes))]
@@ -158,6 +191,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [Theory]
     [MemberData(nameof(MarketDataRoutes))]
     public void MarketDataRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
+        ShouldDeclareProblemJsonForEveryFailure(routeName);
+
+    /// <summary>And over the alert settings pair, whose 409 is the only 409 outside /register.</summary>
+    [Theory]
+    [MemberData(nameof(AlertsRoutes))]
+    public void AlertsRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
         ShouldDeclareProblemJsonForEveryFailure(routeName);
 
     private void ShouldDeclareProblemJsonForEveryFailure(string routeName)
@@ -518,6 +557,97 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("SearchTickers", "anonymous"):
             {
                 using var response = await Wire.SearchTickersAsync(client, accessToken: null, "appl");
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlertSettings", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-settings");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.AlertSettingsPath,
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlertSettings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AlertSettingsPath);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "held"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-save");
+                _ = await OpenPositionAsync(client, token, "AAPL");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "AAPL", 5m, 30);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "not-held"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-not-held");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "MSFT", 5m, 30);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "window-over-cap"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-window");
+                _ = await OpenPositionAsync(client, token, "AAPL");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "AAPL", 5m, 61);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "bad-ticker"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-bad-ticker");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "BRK.B", 5m, 30);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-415");
+
+                // A media type the route cannot read is what produces 415. An ABSENT body is a 400,
+                // not a 415 — checked against the running host, which is why this sends text/plain.
+                using var request = new HttpRequestMessage(HttpMethod.Put, Wire.AlertSettingsPath)
+                {
+                    Content = new StringContent(
+                        """{"ticker":"AAPL","thresholdPercent":5,"windowMinutes":30,"enabled":true}""",
+                        Encoding.UTF8,
+                        "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "anonymous"):
+            {
+                using var response = await Wire.SaveAlertSettingAsync(
+                    client,
+                    accessToken: null,
+                    "AAPL",
+                    5m,
+                    30);
 
                 return response.StatusCode;
             }
