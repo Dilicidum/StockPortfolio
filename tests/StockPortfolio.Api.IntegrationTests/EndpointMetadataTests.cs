@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
 
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
@@ -13,18 +15,43 @@ namespace StockPortfolio.Api.IntegrationTests;
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class EndpointMetadataTests(ApiFixture fixture)
 {
-    /// <summary>The five names WithName gives the /api/auth routes.</summary>
-    private static readonly string[] AuthRouteNames =
-        ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"];
+    /// <summary>The names WithName gives each module's routes, keyed by the module that ships them.</summary>
+    private static readonly Dictionary<string, string[]> ExpectedRouteNames = new(StringComparer.Ordinal)
+    {
+        // The /api/auth five.
+        ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"],
 
-    /// <summary>The five names WithName gives Portfolio's routes: four under /api/holdings, plus the dashboard.</summary>
-    private static readonly string[] PortfolioRouteNames =
-        ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"];
+        // Four under /api/holdings, plus the dashboard.
+        ["Portfolio"] = ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"],
 
-    /// <summary>MarketData's two routes that ship in every environment; the dev nudge is not mapped in all.</summary>
-    private static readonly string[] MarketDataRouteNames = ["GetMarketDataHealth", "SearchTickers"];
+        // The two that ship in every environment; the dev nudge is not mapped in all.
+        ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
+
+        // The settings pair, history, and the two-step handshake the stream needs.
+        ["Alerts"] =
+        [
+            "GetAlertSettings",
+            "SaveAlertSetting",
+            "GetAlerts",
+            "CreateStreamTicket",
+            "StreamAlerts",
+            "SimulateAlert",
+        ],
+    };
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
+
+    /// <summary>The five names WithName gives the /api/auth routes.</summary>
+    private static string[] AuthRouteNames => ExpectedRouteNames["Identity"];
+
+    /// <summary>The five names WithName gives Portfolio's routes.</summary>
+    private static string[] PortfolioRouteNames => ExpectedRouteNames["Portfolio"];
+
+    /// <summary>MarketData's names.</summary>
+    private static string[] MarketDataRouteNames => ExpectedRouteNames["MarketData"];
+
+    /// <summary>Alerts' names.</summary>
+    private static string[] AlertsRouteNames => ExpectedRouteNames["Alerts"];
 
     /// <summary>The five routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
@@ -34,6 +61,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>The MarketData routes, as theory data.</summary>
     public static TheoryData<string> MarketDataRoutes => [.. MarketDataRouteNames];
+
+    /// <summary>The Alerts routes, as theory data.</summary>
+    public static TheoryData<string> AlertsRoutes => [.. AlertsRouteNames];
 
     /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
@@ -46,6 +76,40 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]
     public void EndpointDataSource_ExposesTheMarketDataRoutes() => ShouldExposeExactly(MarketDataRouteNames);
+
+    /// <summary>And for Alerts, the fourth module — the one C11 was written about.</summary>
+    [Fact]
+    public void EndpointDataSource_ExposesTheAlertsRoutes() => ShouldExposeExactly(AlertsRouteNames);
+
+    /// <summary>The rule the three above cannot make: a module nobody maps is a module nobody tests.</summary>
+    [Fact]
+    public void EveryModuleWithAnApiAssembly_ContributesAtLeastOneMappedRoute()
+    {
+        var modules = MappedModules();
+
+        // A rule that passes by finding nothing needs a companion assertion that fails if the search
+        // finds nothing. Raise this the commit a fourth module's endpoints are mapped, not before.
+        modules.Count.ShouldBe(
+            4,
+            "The set of loaded .Api assemblies is derived, not listed, so an empty or short set would "
+                + "make the loop below pass over nothing. Modules found: "
+                + string.Join(", ", modules));
+
+        var mapped = MappedRouteNames();
+
+        foreach (var module in modules)
+        {
+            ExpectedRouteNames.ShouldContainKey(
+                module,
+                module + " ships an .Api assembly that no entry in ExpectedRouteNames names, so its "
+                    + "routes are checked by nothing at all. Add its WithName names to the dictionary.");
+
+            ExpectedRouteNames[module].Any(mapped.Contains).ShouldBeTrue(
+                module + " ships an .Api assembly and contributes no route to the host's "
+                    + "EndpointDataSource. The usual cause is a missing Map" + module + "Endpoints call "
+                    + "in Program.cs — which compiles, registers, and serves nothing.");
+        }
+    }
 
     /// <summary>The check the typed Results union used to make: a status the route emits must be a status it.</summary>
     [Theory]
@@ -101,6 +165,36 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
+    /// <summary>The alert settings pair. Both 409s are driven, because they come from different checks.</summary>
+    [Theory]
+    [InlineData("GetAlertSettings", "bearer", 200)]
+    [InlineData("GetAlertSettings", "anonymous", 401)]
+    [InlineData("SaveAlertSetting", "held", 200)]
+    [InlineData("SaveAlertSetting", "not-held", 409)]
+    [InlineData("SaveAlertSetting", "window-over-cap", 409)]
+    [InlineData("SaveAlertSetting", "bad-ticker", 400)]
+    [InlineData("SaveAlertSetting", "wrong-content-type", 415)]
+    [InlineData("SaveAlertSetting", "anonymous", 401)]
+    [InlineData("GetAlerts", "bearer", 200)]
+    [InlineData("GetAlerts", "silly-limit", 200)]
+    [InlineData("GetAlerts", "anonymous", 401)]
+    [InlineData("CreateStreamTicket", "bearer", 200)]
+    [InlineData("CreateStreamTicket", "anonymous", 401)]
+    [InlineData("StreamAlerts", "no-ticket", 401)]
+    [InlineData("SimulateAlert", "watched", 202)]
+    [InlineData("SimulateAlert", "nothing-to-simulate", 409)]
+    [InlineData("SimulateAlert", "bad-ticker", 400)]
+    [InlineData("SimulateAlert", "no-body", 400)]
+    [InlineData("SimulateAlert", "wrong-content-type", 415)]
+    [InlineData("SimulateAlert", "anonymous", 401)]
+    public async Task AlertsRoute_DeclaresTheStatusItReturned(
+        string routeName,
+        string scenario,
+        int expectedStatus)
+    {
+        await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
+    }
+
     /// <summary>A declared failure that claims no problem+json is a lie about what the client will parse.</summary>
     [Theory]
     [MemberData(nameof(AuthRoutes))]
@@ -117,6 +211,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [Theory]
     [MemberData(nameof(MarketDataRoutes))]
     public void MarketDataRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
+        ShouldDeclareProblemJsonForEveryFailure(routeName);
+
+    /// <summary>And over the alert settings pair, whose 409 is the only 409 outside /register.</summary>
+    [Theory]
+    [MemberData(nameof(AlertsRoutes))]
+    public void AlertsRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
         ShouldDeclareProblemJsonForEveryFailure(routeName);
 
     private void ShouldDeclareProblemJsonForEveryFailure(string routeName)
@@ -176,10 +276,30 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 + "not the one the host built — both rules pass over an empty set and enforce nothing.");
     }
 
+    /// <summary>Every module that ships an .Api assembly, read from what the host loaded rather than a list.</summary>
+    private static List<string> MappedModules() =>
+        AppDomain.CurrentDomain.GetAssemblies()
+            .Select(assembly => assembly.GetName().Name)
+            .Where(name => name is not null
+                && name.StartsWith("StockPortfolio.Modules.", StringComparison.Ordinal)
+                && name.EndsWith(".Api", StringComparison.Ordinal))
+            .Select(name => name!["StockPortfolio.Modules.".Length..^".Api".Length])
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>Every name the host's endpoints carry, unfiltered — the set a module must intersect.</summary>
+    private HashSet<string> MappedRouteNames() =>
+        _fixture.Services.GetRequiredService<EndpointDataSource>()
+            .Endpoints
+            .Select(endpoint => endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .ToHashSet(StringComparer.Ordinal);
+
     /// <summary>Reads the response metadata off the endpoint the host actually built.</summary>
     private IReadOnlyList<IProducesResponseTypeMetadata> DeclaredResponses(string routeName)
     {
-        var endpoints = EndpointsByName([.. AuthRouteNames, .. PortfolioRouteNames, .. MarketDataRouteNames]);
+        var endpoints = EndpointsByName([.. ExpectedRouteNames.Values.SelectMany(names => names)]);
 
         endpoints.ShouldContainKey(routeName);
 
@@ -457,6 +577,241 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("SearchTickers", "anonymous"):
             {
                 using var response = await Wire.SearchTickersAsync(client, accessToken: null, "appl");
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlertSettings", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-settings");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.AlertSettingsPath,
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlertSettings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AlertSettingsPath);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "held"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-save");
+                _ = await OpenPositionAsync(client, token, "AAPL");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "AAPL", 5m, 30);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "not-held"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-not-held");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "MSFT", 5m, 30);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "window-over-cap"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-window");
+                _ = await OpenPositionAsync(client, token, "AAPL");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "AAPL", 5m, 61);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "bad-ticker"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-bad-ticker");
+
+                using var response = await Wire.SaveAlertSettingAsync(client, token, "BRK.B", 5m, 30);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-415");
+
+                // A media type the route cannot read is what produces 415. An ABSENT body is a 400,
+                // not a 415 — checked against the running host, which is why this sends text/plain.
+                using var request = new HttpRequestMessage(HttpMethod.Put, Wire.AlertSettingsPath)
+                {
+                    Content = new StringContent(
+                        """{"ticker":"AAPL","thresholdPercent":5,"windowMinutes":30,"enabled":true}""",
+                        Encoding.UTF8,
+                        "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAlertSetting", "anonymous"):
+            {
+                using var response = await Wire.SaveAlertSettingAsync(
+                    client,
+                    accessToken: null,
+                    "AAPL",
+                    5m,
+                    30);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlerts", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-history");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.AlertHistoryPath + "?limit=50",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlerts", "silly-limit"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-history-limit");
+
+                // Clamped rather than refused, so this is a 200 and not the 400 a reader might expect.
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.AlertHistoryPath + "?limit=100000",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlerts", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AlertHistoryPath);
+
+                return response.StatusCode;
+            }
+
+            case ("CreateStreamTicket", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-ticket");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Post,
+                    "/api/alerts/stream-ticket",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("CreateStreamTicket", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Post,
+                    "/api/alerts/stream-ticket");
+
+                return response.StatusCode;
+            }
+
+            case ("StreamAlerts", "no-ticket"):
+            {
+                // Only the refusal is driven here. A ticket that IS accepted holds the response open
+                // forever by design, and TestServer does not hand a never-ending body back to a client
+                // — see StockPortfolio.Api.IntegrationTests.AlertStreamTests for where the accepted
+                // path is proven instead.
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/alerts/stream");
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "watched"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate");
+                var ticker = Wire.UniqueTicker();
+
+                using (var bought = await Wire.AddHoldingAsync(client, token, ticker, 10m, 100m))
+                {
+                    bought.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(bought));
+                }
+
+                using (var saved = await Wire.SaveAlertSettingAsync(client, token, ticker, 5m, 30))
+                {
+                    saved.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(saved));
+                }
+
+                using var response = await Wire.SimulateAlertAsync(client, token);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "nothing-to-simulate"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-none");
+
+                using var response = await Wire.SimulateAlertAsync(client, token);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "bad-ticker"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-shape");
+
+                using var response = await Wire.SimulateAlertAsync(client, token, "BRK.B");
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "no-body"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-bodiless");
+
+                // An ABSENT body is 400, not 415 — driven here because this is the one route whose
+                // client is documented as always sending a body precisely to avoid the other one.
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Post,
+                    "/api/alerts/simulate",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-415");
+
+                using var request = new HttpRequestMessage(HttpMethod.Post, "/api/alerts/simulate")
+                {
+                    Content = new StringContent("""{"ticker":null}""", Encoding.UTF8, "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "anonymous"):
+            {
+                using var response = await Wire.SimulateAlertAsync(client, accessToken: null);
 
                 return response.StatusCode;
             }

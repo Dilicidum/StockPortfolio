@@ -1,4 +1,5 @@
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
+import { useAlertStream } from '../alerts/useAlertStream'
 
 /**
  * THE GUARD.
@@ -24,5 +25,22 @@ export const Route = createFileRoute('/_authenticated')({
       throw redirect({ to: '/login', search: { redirect: location.href } })
     }
   },
-  component: () => <Outlet />,
+  component: AuthenticatedLayout,
 })
+
+/**
+ * THE ONE PLACE THE ALERT STREAM IS OPENED.
+ *
+ * Here rather than in a component, and here rather than in `__root`. In a component it
+ * would open once per mounted panel, and a held-open stream costs one of the browser's six
+ * connections per origin for as long as it lives. In `__root` it would run on /login and
+ * /register too, where there is no session and every ticket request is a guaranteed 401.
+ *
+ * This layout is the exact set of pages that are both signed in and long-lived, and
+ * navigating between them does not remount it — so one connection covers the whole session.
+ */
+function AuthenticatedLayout() {
+  useAlertStream()
+
+  return <Outlet />
+}

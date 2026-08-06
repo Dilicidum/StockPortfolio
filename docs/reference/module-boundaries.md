@@ -1,7 +1,6 @@
 # Module boundaries
 
-Four modules are designed: **Identity**, **Portfolio**, **MarketData**, **Alerts**. Three of them exist.
-Alerts is a decision, not code — everything below that describes alerting is design.
+Four modules: **Identity**, **Portfolio**, **MarketData**, **Alerts**. All four exist.
 
 This file says why the lines fall where they do, and, more usefully, the three places a line could have been
 drawn and deliberately was not.
@@ -54,11 +53,11 @@ flowchart TB
     HOST --> PF
     HOST --> MD
     HOST --> AL
-    HOST -.->|"tells the price module<br/>which tickers to poll"| MD
+    HOST -->|"answers which tickers to sample,<br/>and carries each sample back"| MD
 
     PF -->|"what is this worth now?<br/>does this ticker exist?"| MD
-    AL -.->|"does this user hold this ticker?"| PF
-    AL -.->|"how has this ticker moved<br/>over the last N minutes?"| MD
+    AL -->|"does this user hold this ticker?"| PF
+    AL -->|"how has this ticker moved<br/>over the last N minutes?"| MD
 
     style PF fill:#14532d,stroke:#4ade80,color:#dcfce7
     style AL fill:#1e3a5f,stroke:#60a5fa,color:#e3f2fd
@@ -71,10 +70,12 @@ Read the graph two ways and it says the same thing both times.
 **Nothing depends on Alerts, and Alerts depends on two things.** It is a pure consumer — the leaf of the
 graph, and therefore the module whose internals nobody else can be broken by.
 
-**MarketData depends on nothing.** It needs to know which tickers to poll, but it states that need itself
-and the host supplies the answer from Alerts. Without that inversion the graph would cycle. The two sides
-also ask different questions — MarketData asks *what should I poll*, Alerts answers *these have an active
-alert* — and they only happen to coincide today.
+**MarketData depends on nothing.** It needs to know which tickers to poll and it needs to announce each
+sample it takes, but it states both needs itself and the host supplies the answers from Alerts. Without that
+inversion the graph would cycle — twice, because evaluation runs in the same cycle as the fetch, so the
+outbound announcement is as load-bearing as the inbound list. The two sides also ask different questions —
+MarketData asks *what should I sample*, Alerts answers *these have an active alert* — and they only happen to
+coincide today.
 
 **Nothing calls Identity at runtime.** The sign-in token carries everything any other module needs, so
 Identity publishes no types at all. That emptiness is the evidence.
@@ -118,6 +119,12 @@ price it saw for every ticker, and falls back to that remembered value — with 
 unreachable. With no provider key configured it serves generated prices instead, which is what lets the
 whole stack start from a clean clone.
 
+It also owns the only thing in the application that runs without a request: a poller that samples the tickers
+it is told to sample and keeps a trimmed recent series for each. The list comes from outside, and so does
+what happens with each sample — see §2. Whatever it fetches on that path updates the last-known price through
+the **same single writer** the dashboard uses, so the real and generated provider paths cannot record
+differently.
+
 **It keeps no database.** Everything it stores is one value per ticker in Redis. A schema and a database
 role exist for it and are inert; they become real when per-user provider keys arrive.
 
@@ -144,6 +151,10 @@ live stream to the browser, and a button to simulate a firing.
 The threshold is measured against **the extreme of your own window** — the highest and lowest price seen in
 the last N minutes — never against the provider's own "change today" figure, which answers a different
 question in the same units.
+
+Measuring against the extreme alone reports a standing property of the window as if it were an event, so an
+alert fires only when the extreme move and the end-to-end move **agree in sign**. That rule, and the two
+alternatives it beat, are argued in [the phase plan](../plan/phase-4-alerts.md).
 
 Depends on Portfolio (validation only) and MarketData (price history). Nothing depends on it.
 
@@ -226,11 +237,12 @@ written in one transaction, the traffic is one lookup per ticker per cycle, aler
 dashboard renders, and each table has one writer. Three groups of data with no rule spanning any two of them
 are not one context.
 
-**The cost of the round trip:** the database initialisation, compose file and infrastructure templates were
-never stripped of the alerts schema and role during the merge, and they still are not. They are now the
-right shape for the module that will be built, which is better than before — but nothing owns them yet, so
-they are still orphans. That is tracked as deferred work, closing when an alerts database context actually
-connects as the alerts role.
+**The cost of the round trip, and how it ended:** the database initialisation, compose file and
+infrastructure templates were never stripped of the alerts schema and role during the merge, so for two
+phases they were orphans — the right shape for a module that did not exist. That closed when the module was
+built: an alerts database context now connects as the alerts role, with its own migration history table, from
+a clean volume. The settings were never edited to fix this, which was the whole gamble; being the right shape
+already is what made the reversal cheap.
 
 ---
 
@@ -310,4 +322,4 @@ put an un-absorbed network hop on the hottest path in the app.
 
 ---
 
-**Where the unbuilt parts come from.** Everything here about Alerts is design, not code. [Phase 4](../plan/phase-4-alerts.md) builds it, and is where a change to that design belongs — change it there first, then bring this file into line.
+**Everything here is built**, except the per-user provider keys in the marketdata schema, which arrive with [Phase 5](../plan/phase-5-make-it-mine.md). Alerts was built by [Phase 4](../plan/phase-4-alerts.md), and that file is where a change to its design belongs — change it there first, then bring this file into line.

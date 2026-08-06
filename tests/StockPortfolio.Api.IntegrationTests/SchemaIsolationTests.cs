@@ -66,6 +66,48 @@ public sealed class SchemaIsolationTests(ApiFixture fixture)
         count.ShouldBeOfType<long>().ShouldBeGreaterThanOrEqualTo(0);
     }
 
+    /// <summary>The Alerts role reaches its own schema and no other — the role E1 had no consumer for.</summary>
+    [Fact]
+    public async Task AlertsRole_HasUsageOnAlertsAlone()
+    {
+        await using var connection = new NpgsqlConnection(_fixture.MigratorConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            """
+            SELECT has_schema_privilege(@role, 'alerts',    'USAGE'),
+                   has_schema_privilege(@role, 'identity',  'USAGE'),
+                   has_schema_privilege(@role, 'portfolio', 'USAGE')
+            """,
+            connection);
+
+        command.Parameters.AddWithValue("role", ApiFixture.AlertsRole);
+
+        await using var reader = await command.ExecuteReaderAsync(TestContext.Current.CancellationToken);
+
+        (await reader.ReadAsync(TestContext.Current.CancellationToken)).ShouldBeTrue();
+
+        reader.GetBoolean(0).ShouldBeTrue("alerts_svc must have USAGE on its own schema");
+        reader.GetBoolean(1).ShouldBeFalse("alerts_svc must not have USAGE on the identity schema");
+        reader.GetBoolean(2).ShouldBeFalse("alerts_svc must not have USAGE on the portfolio schema");
+    }
+
+    /// <summary>And it can actually read the tables the migration created, so the rule above is not vacuous.</summary>
+    [Fact]
+    public async Task AlertsRole_CanReadItsOwnTables()
+    {
+        await using var connection = new NpgsqlConnection(_fixture.AlertsConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM alerts.alert_settings",
+            connection);
+
+        var count = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+
+        count.ShouldBeOfType<long>().ShouldBeGreaterThanOrEqualTo(0);
+    }
+
     /// <summary>The Identity role holds DML only — it cannot create tables.</summary>
     [Fact]
     public async Task IdentityRole_CannotRunDdl()

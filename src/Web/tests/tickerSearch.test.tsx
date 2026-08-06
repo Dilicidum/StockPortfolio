@@ -15,6 +15,7 @@ import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { holdingKeys, type Holding } from '../src/portfolio/holdingsApi'
 import type { GetDashboardResult } from '../src/marketdata/dashboardApi'
 import type { TickerSuggestion } from '../src/marketdata/tickerSearchApi'
+import { alertsHandlers } from './msw/alerts'
 import { marketDataHealthHandler } from './msw/dashboard'
 import { emptyTickerSearchHandler, tickerSearchHandler } from './msw/tickerSearch'
 import { server } from './msw/server'
@@ -62,6 +63,9 @@ async function renderPortfolio(seed: Holding[] = [AAPL]) {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), seed)
 
+  // The authenticated layout opens the alert stream and the rows read their thresholds.
+  server.use(...alertsHandlers)
+
   const router = createRouter({
     routeTree,
     history: createMemoryHistory({ initialEntries: ['/portfolio'] }),
@@ -77,7 +81,11 @@ async function renderPortfolio(seed: Holding[] = [AAPL]) {
 
 async function renderDashboard(data: GetDashboardResult) {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
-  server.use(marketDataHealthHandler, http.get('*/api/dashboard', () => HttpResponse.json(data)))
+  server.use(
+    marketDataHealthHandler,
+    ...alertsHandlers,
+    http.get('*/api/dashboard', () => HttpResponse.json(data)),
+  )
 
   const router = createRouter({
     routeTree,

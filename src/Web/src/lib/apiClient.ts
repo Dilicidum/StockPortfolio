@@ -96,8 +96,10 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    // Required for the compose deployment: the refresh token is an httpOnly
-    // cookie and will not be sent without it.
+    // Kept, but not for the reason this comment used to give. There is no
+    // cookie in any deployment (see lib/tokenStore.ts), so nothing here relies
+    // on credentials being sent. Removing it would relax the CORS contract the
+    // API is already configured for, which is not a change worth making blind.
     credentials: 'include',
     signal: options.signal ?? null,
   })
@@ -123,7 +125,8 @@ let refreshInFlight: Promise<string> | null = null
 async function doRefresh(): Promise<string> {
   const response = await send('/api/auth/refresh', {
     method: 'POST',
-    // May be null under compose, where the httpOnly cookie carries it instead.
+    // Read at call time, never captured: another tab may have rotated it since
+    // this request was queued, and a superseded token is a 401.
     body: { refreshToken: getRefreshToken() },
     authenticated: false,
   })

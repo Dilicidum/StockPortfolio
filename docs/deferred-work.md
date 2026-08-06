@@ -31,10 +31,12 @@ silent bypass.
 
 **Trigger:** Phase 2, when the route count roughly triples and the filters stop being individually obvious.
 
-**Status: the trigger has happened, and the item stays deferred by choice.** There are six filtered routes:
+**Status: the trigger has happened, and the item stays deferred by choice.** There are eight filtered routes:
 `IdentityEndpoints.cs:53,64,75` (`RegisterUserRequest`, `LoginUserRequest`, `RefreshSessionRequest`),
-`PortfolioEndpoints.cs:61,71` (`AddHoldingRequest`, `UpdateHoldingRequest`) and `MarketDataEndpoints.cs:78`
-(`NudgeRequest`). Six is not "roughly triples", and the filters are still individually obvious.
+`PortfolioEndpoints.cs:61,71` (`AddHoldingRequest`, `UpdateHoldingRequest`), `MarketDataEndpoints.cs:95`
+(`NudgeRequest`) and `AlertsEndpoints.cs:72,101` (`SimulateAlertRequest`, `SaveAlertSettingRequest`). Eight is
+not "roughly triples", and the filters are still individually obvious. Alerts added the two routes without
+adding a new *shape* of mistake: both declare a matching non-nullable body parameter like every other.
 
 ### B4 / B6 — no handler unit tests exist
 
@@ -55,12 +57,15 @@ so every handler assertion has to go end to end through Docker. Consequences tod
 **Trigger:** the first Portfolio handler. Building the fakes for one module is hard to justify; building them
 for two is not.
 
-**Status: the trigger happened in Phase 2 and this is the most overdue item in the file.** Portfolio's
-handlers shipped in Phase 2 and MarketData's in Phase 3, so the "hard to justify for one module" argument is
-two modules out of date. There is still no `Fakes/` directory anywhere under `tests/`, and
-`tests/StockPortfolio.Modules.Identity.UnitTests/` still holds only entity, value-object, validator and
-hasher tests — no handler test of any kind. The consequence named above is live: move `Hash` above
-`FindByEmailAsync` in `RegisterUserCommandHandler` and every test still passes.
+**Status: the trigger happened in Phase 2, this is still the most overdue item in the file, and Phase 4 made
+it markedly cheaper rather than staler.** The gap in Identity is unchanged — every consequence listed above
+is still live, and moving `Hash` above `FindByEmailAsync` in `RegisterUserCommandHandler` still leaves the
+whole suite green. What changed is the cost of closing it. `tests/StockPortfolio.Modules.Alerts.UnitTests/`
+now has the repository's first and only `Fakes/` directory: in-memory repositories, a cooldown store, a
+publisher and a window reader, all driven by `FakeTimeProvider`, unit-testing an entire handler and its five
+abstractions with no Docker. That is the shape this item asks for, built and working, so Identity's version
+is now a copy rather than a design. Nothing about Identity was touched, deliberately — Phase 4 was not the
+phase to do it in, but the "hard to justify" argument no longer has anything left in it.
 
 ### B10 — fragile assertions and duplicated test code
 
@@ -78,8 +83,10 @@ identically and also drives `CreateTimer`, which the Phase 4 poll loop needs.
 
 **Trigger:** Phase 2's test suite — the point where the duplication stops being two copies and becomes four.
 
-**Status: the trigger has happened.** Phase 2 and Phase 3 both added test assemblies; there are six now.
-Not done.
+**Status: the trigger has happened.** Phase 2, Phase 3 and Phase 4 each added a test assembly; there are
+seven now. Not done. The clock half is now decided in practice rather than in principle: Phase 4's poll loop
+and heartbeat are driven by `FakeTimeProvider` throughout, including its `CreateTimer`, exactly as this item
+predicted — and `TestClock` is still sitting in the integration project doing the same job worse.
 
 ### C2 — JWT configuration is read and validated twice
 
@@ -97,13 +104,15 @@ validator agree on the configured path. Only the *defaults* and the key-length c
 
 **Trigger:** the first time either default is changed, or auth registration moves into `Identity.Api`.
 
-**Status: not yet triggered.**
+**Status: still not triggered.** Phase 4 split `AddIdentityPersistence` out of `AddIdentityModule` (C8),
+which moved the eager signing-key check off the migrator's path but left both readers of the `Jwt` section
+exactly where they were. Neither default changed.
 
-### C3 — two Dockerfiles duplicate 17 identical `COPY` lines
+### C3 — two Dockerfiles duplicate 22 identical `COPY` lines
 
-`src/Api/Dockerfile` and `src/Migrator/Dockerfile` each copy **18** `.csproj` files, and 17 of the 18 lines
-are byte-identical between them including column alignment — only the host project differs. (18 =
-`Shared.Kernel`, `Shared.Api`, the host, and 5 layers × 3 modules.) This has already bitten once: a
+`src/Api/Dockerfile` and `src/Migrator/Dockerfile` each copy **23** `.csproj` files, and 22 of the 23 lines
+are byte-identical between them including column alignment — only the host project differs. (23 =
+`Shared.Kernel`, `Shared.Api`, the host, and 5 layers × 4 modules.) This has already bitten once: a
 repo-wide rename left both images copying `*.Presentation.csproj`, and `dotnet build` stayed green because
 those paths only exist inside the container build context.
 
@@ -112,8 +121,9 @@ those paths only exist inside the container build context.
 
 **Trigger:** the next project rename, or a phase adding projects — whichever comes first.
 
-**Status: the trigger has happened twice**, in Phase 2 and again in Phase 3, both of which added projects
-that had to be hand-added to both files. Still not done.
+**Status: the trigger has happened three times**, in Phases 2, 3 and 4, each of which added projects that had
+to be hand-added to both files. Phase 4 added five at once and knew it was walking into this item. Still not
+done.
 
 ### C4 — the application's Redis multiplexer was registered inside the health-check extension — **DONE (Phase 3)**
 
@@ -144,10 +154,16 @@ else references the existing public constant.
 **Trigger:** Phase 2. With three modules this becomes twelve places, and the value is almost entirely in not
 stamping the pattern out three times.
 
-**Status: the trigger has happened and the pattern was stamped out anyway.** `ConnectionStringName` now
-exists independently in `IdentityModule.cs:15`, `PortfolioModule.cs:15`, `PostgresHealthCheck.cs:11` and
-`RedisExtensions.cs:9`. It is fewer places than forecast only because MarketData has no `DbContext`;
-Phase 4's `AlertsDbContext` brings the count back up.
+**Status: the trigger has happened, the pattern was stamped out anyway, and Phase 4 made it worse exactly as
+forecast.** `ConnectionStringName` now exists independently in `IdentityModule.cs:15`,
+`PortfolioModule.cs:15`, `AlertsModule.cs:21`, `PostgresHealthCheck.cs:11` and `RedisExtensions.cs:9` — five
+declarations of the same idea, up from four.
+
+The second half is the one that matters more. The `UseNpgsql` + `MigrationsHistoryTable` block now exists
+**six** times: three modules × (module registration, design-time factory). Alerts was written by copying
+Portfolio's, which is precisely the mechanism this item warns about — the copy was correct, and a copy that
+had dropped the history-table call would have put four contexts into one bookkeeping table with no error
+anywhere. Getting it right by copying carefully is not the same as it being enforced.
 
 ### C7 — the `postgres` readiness check probes one of three roles
 
@@ -163,69 +179,79 @@ as to the consuming project.
 
 **Trigger:** Phase 2, when the second role exists.
 
-**Status: the trigger happened in Phase 2 and the gap is live today.** `portfolio_svc` is the second real
-role, and `PostgresHealthCheck.cs:11` still hard-codes `"Identity"` while registering as the unqualified
-`postgres`. Portfolio's role could be unreachable and readiness would still report Healthy. MarketData did
-not widen the gap, because it has no `DbContext` and so contributes no check; readiness probes one of two
-real roles.
+**Status: the trigger happened in Phase 2, the gap is live, and Phase 4 widened it.** `PostgresHealthCheck.cs:11`
+still hard-codes `"Identity"` while registering as the unqualified `postgres`. There are now **three** real
+roles — `identity_svc`, `portfolio_svc` and `alerts_svc` — and readiness probes one of them. Either of the
+other two could be unreachable while the probe reports Healthy and ACA keeps routing to the revision.
+MarketData still contributes no check, correctly, because it has no `DbContext`.
 
-### C8 — the Migrator invents a JWT signing key
+Alerts sharpens it in a second way: the poller and the evaluator run on a timer rather than on a request, so
+an unreachable `alerts_svc` produces no failing HTTP call for anyone to notice. It is the first module whose
+database being down is invisible from the outside.
 
-`src/Migrator/Program.cs:30-32` supplies `"migrator-placeholder-signing-key-unused-32b"` because
-`AddIdentityModule` validates the `Jwt` section eagerly, and the migration job builds the entire module —
+### C8 — the Migrator invents a JWT signing key — **DONE (Phase 4)**
+
+`src/Migrator/Program.cs` supplied `"migrator-placeholder-signing-key-unused-32b"` because
+`AddIdentityModule` validated the `Jwt` section eagerly, and the migration job built the entire module —
 Argon2 hasher, token issuer, five handlers — to reach one `DbContext`.
 
-**Fix:** split `AddIdentityPersistence(IServiceCollection, IConfiguration)` out of `AddIdentityModule`, which
-then composes it. The migrator calls only the persistence half and the placeholder disappears. That also
-tightens the `ServiceCollection` walk, since the collection then holds nothing but persistence.
+**Done.** `AddIdentityPersistence(IServiceCollection, IConfiguration)` is split out of `AddIdentityModule`,
+which now composes it. `MigratedModules` calls the persistence half only, and the placeholder literal and
+its two configuration entries — in `Migrator/Program.cs` and in `ApiFixture`'s `MigratorConfiguration` — are
+gone. Portfolio needed no split; it validates nothing beyond its connection string. Neither did Alerts, and
+that is worth knowing: it was expected to need one, but its only eager check is the connection string it
+genuinely cannot run without, which is exactly what the migrator wants supplied anyway.
 
-**Trigger:** whichever module first adds eager validation of a runtime concern — a Finnhub key, a
-Polly-wrapped `HttpClient`, a `BackgroundService`. Each one otherwise adds another placeholder line here.
+**The stated fix was wrong about the benefit, and the wrong version must not be repeated.** It claimed the
+split "tightens the `ServiceCollection` walk". It does not. The walk filters on
+`ServiceType.IsSubclassOf(typeof(DbContext))`, and nothing `AddIdentityModule` registered was ever a
+`DbContext` — the options record, two repositories, the hasher, the token issuer and six closed-generic
+handlers are all unrelated types. The filter had no false positive to reject before and has none now. The
+collection is about eleven descriptors smaller and **the walk's result is identical.**
 
-**Status: not triggered yet, and Phase 3 is not what triggers it.** MarketData added the opposite of eager
-validation: a missing `Finnhub__ApiKey` is a *supported* state, `FinnhubOptions.FromConfiguration` must not
-throw, and `AddMarketDataModule` falls back to the fake — validating eagerly there would take down
-`docker compose up`, the P0 gate. MarketData therefore adds no placeholder line to the Migrator, and it has
-no `DbContext` either. Doing the split anyway would have cost three coordinated edits — split
-`AddIdentityPersistence` out of `IdentityModule`, change `MigratedModules.cs`, change `ApiFixture`'s
-`MigratorConfiguration` — and bought nothing demonstrable.
+**What the split actually buys**, and it is the thing the trigger was written about:
 
-**Phase 4 is where it genuinely fires:** Alerts brings a real `DbContext` **and** a `BackgroundService`, so
-the placeholder stops being one line and the split stops being speculative.
+- The options factory is the *argument* to `AddSingleton`, so it runs at **registration** time. Every
+  migrator run was parsing, base64-decoding and length-checking a signing key before touching a database.
+  That code is now unreachable from the migrator rather than merely fed a dummy value.
+- The migrator's contract with a module is now "give me a connection string". No future module's eager
+  validation of a runtime concern can force a new placeholder line back into `Migrator/Program.cs`, which
+  is what would otherwise have happened once per module for the rest of the build.
 
-Related, same file: `IsSubclassOf(typeof(DbContext))` at `:46` finds nothing if a module uses
+**Honest cost.** Running against a bare `ServiceCollection` used to prove *incidentally* that
+`Add<M>Module` was self-contained — that it leaned on no host-registered service. That proof now covers
+only Identity's persistence half. `ApiFixture` builds the real host and would catch a missing host service
+by a different route, so this narrows coverage rather than opening a hole, but it is a real change in what
+the migrator seam enforces for free.
+
+Still open and unchanged, same file: `IsSubclassOf(typeof(DbContext))` finds nothing if a module uses
 `AddDbContextFactory<T>` — the service type is then `IDbContextFactory<T>`. With one module the `Count == 0`
-check catches it loudly; with two it does not, and that module's migrations are silently skipped.
+check catches it loudly; with three it does not, and that module's migrations are silently skipped. Each
+module carries a comment saying `AddDbContext`, never `AddDbContextFactory`, which is a convention rather
+than a check.
 
-### C11 — adding a module takes four edits across three files, and nothing checks them
+### C11 — adding a module takes four edits across three files, and nothing checks them — **DONE (Phase 4)**
 
 `Program.cs` needs `Add<M>Module`, `Add<M>Api` and `Map<M>Endpoints`, and `Migrator/Program.cs` needs its own
 registration. Miss `Map<M>Endpoints` and the module builds, registers, passes every unit and architecture
-test, and serves nothing.
+test, and serves nothing. The old test compared against a hard-coded list of route names per module, so a
+**fourth** module added and never mapped passed everything — nobody would have added its route names to the
+list either, and the two omissions cancelled out into a green run.
 
-**Fix:** a test reflecting over `StockPortfolio.Modules.*.Api` assemblies asserting each exposes a
-`Map<M>Endpoints` that appears in the host's `EndpointDataSource`.
+**Done.** `EndpointMetadataTests` now derives the set of modules that must appear from the loaded
+`StockPortfolio.Modules.*.Api` assemblies rather than from a literal list, and asserts each contributes at
+least one endpoint name to the host's `EndpointDataSource`. It was closed **second in the phase, before any
+Alerts endpoint existed**, so the rest of the phase was protected by it rather than judged by it afterwards.
+Deliberately broken and watched go red, naming the module. `IEndpointModule` was not reintroduced; the fix is
+a test, not an interface.
 
-Note: `IEndpointModule` was deliberately deleted and should **not** be reintroduced to solve this — the fix
-is a test, not an interface.
-
-**Trigger:** Phase 2. With one module the test asserts that one module registers itself.
-
-**Status: the trigger has happened, and a test now covers most but not all of it.**
-`tests/StockPortfolio.Api.IntegrationTests/EndpointMetadataTests.cs` asserts against the host's
-`EndpointDataSource` — `EndpointDataSource_ExposesTheFiveAuthRoutes`, `…TheFivePortfolioRoutes` and
-`…TheMarketDataHealthRoute` — so forgetting `Map<M>Endpoints` for one of the three existing modules now
-fails a test. It lands as an integration test rather than an architecture test, which is fine.
-
-What it does not cover is the case the item was written for. The test compares against a hard-coded list of
-route names per module; it does not reflect over `StockPortfolio.Modules.*.Api` assemblies. So a **fourth**
-module added and never mapped still passes everything — nobody would have added its route names to the list
-either, and the two omissions cancel out into a green run.
-
-**Restated for Phase 4:** Alerts is the fourth module and the first that would actually expose the gap.
-Close this item by making the test derive the expected module set from the loaded `*.Api` assemblies rather
-than from a literal list. Checkable: delete `MapAlertsEndpoints` from `Program.cs` and watch a test go red
-without editing any list.
+One thing came out of doing it that the item had not anticipated, and it decides how the test may be edited
+later. **Deleting `Map<M>Endpoints` does not change the derived module count**, because `Add<M>Api` keeps
+that assembly loaded — the derived set is what catches a missing `Map`. The separate assertion that the
+derived count equals the number of modules is therefore the only thing that would catch a module wired
+nowhere at all, and it is load-bearing: raise it when a module lands, and never soften it to "the list is
+non-empty". That is the same lesson `ReferenceWalker_FindsEdgesThatDoExist` carries — a rule that can pass by
+finding nothing needs a companion assertion that fails when the search finds nothing.
 
 ### D10 — compose startup ordering gaps
 
@@ -248,50 +274,37 @@ with `service_started` (`:162`). The database half *is* ordered correctly — `a
 halves are not. `web` has its own healthcheck (`:165`), which makes the missing one on `api` easy to misread
 as present.
 
-### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables have no module behind them
+Re-read at the end of Phase 4: the Redis half is now the more interesting one. The poller starts with the
+host and reaches for Redis on its first cycle, so `api` starting before Redis is ready is no longer only a
+first-request problem. The per-cycle `try/catch` absorbs it and the next cycle succeeds, which is why this is
+still deferred rather than promoted.
 
-Phase 2 merged the Alerts module into Portfolio. The five `.csproj` files, the
-`Shared.Kernel/DomainEvents/` folder and the solution entries went with it. The **database and deployment
-settings did not**:
+### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables have no module behind them — **DONE (Phase 4)**
 
-| Still carries it | What |
-|---|---|
-| `db/init/00-roles.sh`, `db/init/01-roles.sql` | `CREATE SCHEMA alerts`, role `alerts_svc`, its grants, revokes and `ALTER DEFAULT PRIVILEGES` |
-| `docker-compose.yml`, `.env.example` | `ALERTS_PW`, and a `ConnectionStrings__Alerts` value passed to the API |
-| `infra/*.bicep` | the Alerts password secret and connection-string parameter |
-| `.github/workflows/*` | `ALERTS_PW` as a secret and parameter on the deploy path |
+Phase 2 merged the Alerts module into Portfolio and the code went with it, but the database and deployment
+settings did not: `CREATE SCHEMA alerts` and the `alerts_svc` role with its grants in `db/init/`, `ALERTS_PW`
+and a `ConnectionStrings__Alerts` value in compose and `.env.example`, the password secret and
+connection-string parameter in the Bicep, and `ALERTS_PW` as a secret and parameter on the deploy path. One
+extra role and one empty schema, owned by nothing.
 
-Alerts is a module again as a *design decision*, but no Alerts code exists: `src/Modules/` has three folders,
-`ModuleBoundaryTests.cs` pins seventeen assemblies, and there is no `.csproj`, `DbContext` or connection
-string for Alerts anywhere. So these settings are still unused and still unowned —
-`db/init/01-roles.sql:57-59,84,138-146`, `docker-compose.yml:43,128`, `.env.example:39`,
-`containerapp-api.bicep:126`, `ci.yml:129`, `deploy.yml:202,222,314`. `module-boundaries.md:237-239` claims
-this is resolved and is wrong.
+**Done, and proven rather than asserted.** `AlertsDbContext` exists, registers with a `Maximum Pool Size=2`
+connection string named `Alerts`, and carries its own `MigrationsHistoryTable` in the `alerts` schema. From a
+clean volume — `docker compose down -v && docker compose up` — the migrator reports three contexts checked
+with the initial Alerts migration applied, `/health/ready` comes up green, and `psql -U alerts_svc` reads
+`alerts.alert_settings`. `SchemaIsolationTests` still passes, which is what shows `alerts_svc` reaches
+`alerts` and nothing else. The variables in compose, the Bicep and the workflows now feed something.
 
-Nothing connects as `alerts_svc` — the API has no Alerts connection string in `appsettings.json` and no
-context to open one — so the leftovers are inert: one extra role and one empty schema. The connection budget
-is unaffected, because a pool is only created for a connection string that exists.
+The item said not to close it on the strength of a plan, and it was not. What made it real was the clean-clone
+boot, which is also the acceptance gate — the same reason the leftovers were never deleted blind in the
+first place.
 
-**Why it was not cleaned up with the module.** `docker compose up` from a clean clone is the **P0 acceptance
-gate**, and `db/init/` is the exact area that has already broken it once (`docker-entrypoint-initdb.d` passes
-no `-v` to psql, so a `.sql` using `:'password'` aborts init under `ON_ERROR_STOP=1`). The environment that
-made the merge had no Docker daemon, so a clean-clone boot could not be re-checked. Editing init SQL and
-deployment parameters blind, against the one gate that must not fail, was the worse trade. That is still
-true today.
+**Two consequences that were not leftovers and are now live.** The connection budget moves: a pool is opened
+for a registered context, and there are now three, so the ceiling is 3 × 2 × 2 = **12** of the tier's 35. And
+`alerts_svc` becoming a real role widens **C7** — the readiness probe still checks one connection string of
+three.
 
-**How this closes.** Phase 4 builds Alerts. If it does, the item closes because the leftovers become owned,
-which is real and checkable — an `AlertsDbContext` connecting as `alerts_svc`. Do not close it on the
-strength of a plan; a decision recorded in a document is not a change made in the code.
-
-**Fallback fix if Phase 4 slips:** delete the `alerts` schema, the `alerts_svc` role and every `ALERTS_PW`
-and Alerts-connection-string reference across those four places, then boot from a clean clone —
-`docker compose down -v && docker compose up` — and confirm the migrator still reports every context and
-`/health/ready` comes up green. Check the Bicep with `az deployment group what-if` before deploying: a
-removed parameter that a workflow still passes fails at preflight, not at runtime.
-
-**Trigger for the fallback:** the next `docker compose up` on a machine with a Docker daemon. Firm deadline
-is the Phase 6 README and verification pass, which is where a reviewer reading `db/init/01-roles.sql` would
-find a role for a module that does not exist.
+The fallback plan — delete the schema, the role and every reference — is no longer needed and is not recorded
+here; git has it.
 
 ### E2 — ticker search was specified and unbuilt — **DONE (after Phase 3, ahead of Phase 4)**
 
@@ -377,10 +390,11 @@ Recorded so the same ground is not covered again.
 - **The liveness / readiness split** — `Predicate = _ => false` on liveness, and a test that boots a host
   with unreachable dependencies and asserts live=200 and ready=503. Not decorative.
 - **`Maximum Pool Size=2`** on every production connection string. Connection strings are defined for five
-  roles, but a pool is only opened for a context that exists, and `Program.cs` registers two — Identity's and
-  Portfolio's. Two pools per replica × size 2 × `maxReplicas: 2` = **8** of the B1ms budget of 35.
-  MarketData has no `DbContext` and `alerts_svc` has no consumer (E1); `migrator` runs as a separate job. Do
-  not restate this figure from memory — count `AddDbContext` calls.
+  roles, but a pool is only opened for a context that exists, and `Program.cs` registers three — Identity's,
+  Portfolio's and Alerts'. Three pools per replica × size 2 × `maxReplicas: 2` = **12** of the B1ms budget of
+  35. MarketData has no `DbContext` and opens no pool; `migrator` runs as a separate job. Do not restate this
+  figure from memory — count `AddDbContext` calls. It was 8 through Phase 3 and that figure is now wrong
+  wherever it survives.
 - **`AddProblemDetails()` and `UseStatusCodePages()` are both registered**, so the 415 and 500
   `problem+json` declarations are honest — for JSON `Accept` headers. A client sending `Accept: text/html`
   gets the plain-text fallback.

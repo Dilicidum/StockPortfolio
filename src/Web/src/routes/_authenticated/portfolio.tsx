@@ -1,9 +1,11 @@
 import { useRef, useState } from 'react'
 import { createFileRoute, useRouter, type ErrorComponentProps } from '@tanstack/react-router'
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { AlertSettingsForm, type AlertSettingValues } from '../../alerts/AlertSettingsForm'
+import { alertKeys, alertSettingsQuery, saveAlertSetting } from '../../alerts/alertsApi'
 import { Alert } from '../../components/Alert'
 import { AppShell } from '../../components/AppShell'
 import { Button } from '../../components/Button'
@@ -114,18 +116,37 @@ function totalInvested(holdings: Holding[]): string {
 
 export function PortfolioPage() {
   const { data: holdings } = useSuspenseQuery(holdingsQuery)
+  const queryClient = useQueryClient()
 
   const add = useAddHolding()
   const update = useUpdateHolding()
   const remove = useRemoveHolding()
 
+  /*
+   * PLAIN `useQuery`, NOT a loader and not `useSuspenseQuery`. Thresholds are a decoration
+   * on this page: a position is still addable, correctable and removable with the alerts
+   * module completely down, so a failure here must not reach the route's error component
+   * and replace the whole table. `data ?? []` is the degraded state, and it is the same
+   * page minus one button label.
+   */
+  const { data: alertSettings } = useQuery(alertSettingsQuery)
+
+  const saveAlert = useMutation({
+    mutationFn: saveAlertSetting,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: alertKeys.settings() }),
+  })
+
   const [formError, setFormError] = useState('')
   const [merged, setMerged] = useState<Holding | null>(null)
   const [removing, setRemoving] = useState<Holding | null>(null)
   const [editing, setEditing] = useState<Holding | null>(null)
+  const [alerting, setAlerting] = useState<Holding | null>(null)
 
-  // The Edit button that opened the panel, so focus can go back to it on close.
+  // The Edit or Alert button that opened the panel, so focus can go back to it on close.
   const editOpenerRef = useRef<HTMLElement | null>(null)
+
+  const settingFor = (ticker: string) =>
+    alertSettings?.find((setting) => setting.ticker === ticker)
 
   const {
     register,
@@ -157,6 +178,7 @@ export function PortfolioPage() {
   function openEditor(holding: Holding) {
     setFormError('')
     editOpenerRef.current = document.activeElement as HTMLElement | null
+    setAlerting(null)
     setEditing(holding)
   }
 
@@ -165,6 +187,29 @@ export function PortfolioPage() {
     // Focus is inside a form that is about to unmount. Hand it back to the Edit button
     // that opened it, rather than letting the browser drop it on <body>.
     editOpenerRef.current?.focus()
+  }
+
+  function openAlerts(holding: Holding) {
+    setFormError('')
+    editOpenerRef.current = document.activeElement as HTMLElement | null
+    // One inline panel at a time: two forms sitting above the same table, both with a
+    // Save button, is a guess about which one a keyboard submit belongs to.
+    setEditing(null)
+    setAlerting(holding)
+  }
+
+  function closeAlerts() {
+    setAlerting(null)
+    editOpenerRef.current?.focus()
+  }
+
+  /** Rejects on failure, which is how `AlertSettingsForm` learns to place the server's errors. */
+  async function saveThreshold(values: AlertSettingValues) {
+    if (!alerting) return
+
+    setFormError('')
+    await saveAlert.mutateAsync({ ticker: alerting.ticker, ...values })
+    closeAlerts()
   }
 
   /** Rejects on failure, which is how `EditHoldingForm` learns to place the server's errors. */
@@ -187,8 +232,30 @@ export function PortfolioPage() {
       // `numeric` only for its right alignment; `font-sans` puts the word "Edit" back
       // into the body face, because the monospace half of that flag is for figures.
       numeric: true,
-      cell: (holding) => (
+      cell: (holding) => {
+        const setting = settingFor(holding.ticker)
+
+        return (
         <div className="flex items-center justify-end gap-1 font-sans">
+          {/*
+           * A threshold belongs to a POSITION, so the control that sets it lives on the
+           * row rather than on a settings screen. The label doubles as the current value:
+           * "5% / 15m" is the whole configuration, and there is nowhere else to read it.
+           */}
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={`Set an alert on ${holding.ticker}`}
+            onClick={() => openAlerts(holding)}
+          >
+            {setting && setting.enabled ? (
+              <span className="text-ac font-mono">
+                {setting.thresholdPercent}% / {setting.windowMinutes}m
+              </span>
+            ) : (
+              'Alert'
+            )}
+          </Button>
           <Button
             variant="ghost"
             size="sm"
@@ -210,7 +277,8 @@ export function PortfolioPage() {
             <span aria-hidden="true">×</span>
           </Button>
         </div>
-      ),
+        )
+      },
     },
   ]
 
@@ -296,6 +364,20 @@ export function PortfolioPage() {
           </span>
         }
       >
+        {alerting ? (
+          <AlertSettingsForm
+            // Keyed on the row for react-hook-form's once-at-mount `defaultValues`, the
+            // same reason the edit form below is keyed.
+            key={alerting.id}
+            ticker={alerting.ticker}
+            setting={settingFor(alerting.ticker)}
+            pending={saveAlert.isPending}
+            onSave={saveThreshold}
+            onError={setFormError}
+            onCancel={closeAlerts}
+          />
+        ) : null}
+
         {editing ? (
           <EditHoldingForm
             // Keyed on the row: react-hook-form reads `defaultValues` once, at mount.

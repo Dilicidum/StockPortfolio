@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 
+using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
 using StockPortfolio.Modules.Portfolio.Infrastructure;
 
@@ -19,6 +20,13 @@ internal static class ModuleDbContextInterceptors
     /// <summary>Adds interceptors to the Portfolio module's DbContext registration.</summary>
     public static void AddToPortfolio(IServiceCollection services, params IInterceptor[] interceptors) =>
         AddTo(services, PortfolioDbContextType(), interceptors);
+
+    /// <summary>Adds interceptors to the Alerts module's DbContext registration.</summary>
+    public static void AddToAlerts(IServiceCollection services, params IInterceptor[] interceptors) =>
+        AddTo(services, AlertsDbContextType(), interceptors);
+
+    /// <summary>Finds the single DbContext declared by Alerts.Infrastructure.</summary>
+    public static Type AlertsDbContextType() => SingleDbContextIn(typeof(AlertsModule).Assembly);
 
     /// <summary>Finds the single DbContext declared by Identity.Infrastructure.</summary>
     public static Type IdentityDbContextType() => SingleDbContextIn(typeof(IdentityModule).Assembly);

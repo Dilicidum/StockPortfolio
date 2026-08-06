@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
+import { LiveBadge } from '../alerts/LiveBadge'
 import { useAuth } from '../auth/useAuth'
 import { Button } from './Button'
 import { Logo } from './Logo'
@@ -10,8 +11,6 @@ interface NavItem {
 }
 
 /**
- * Alerts joins this list in phase 4.
- *
  * An earlier comment here claimed a nav entry pointing at an unknown route is a
  * type error. It is not, and relying on that would be a silent 404: `NavItem.to`
  * is declared `string`, and TanStack Router's `ToPathOption` short-circuits on
@@ -22,6 +21,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/portfolio', label: 'Portfolio' },
+  { to: '/notifications', label: 'Notifications' },
 ]
 
 function initialsOf(email: string): string {
@@ -99,16 +99,22 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
             {subtitle ? <span className="text-mu text-xs">{subtitle}</span> : null}
           </div>
 
-          <div className="flex items-center gap-2.5 rounded-full border border-bd bg-panel-2 py-[5px] pr-3 pl-[6px]">
-            <span
-              aria-hidden="true"
-              className="grid h-6 w-6 place-items-center rounded-full bg-ac-soft text-[11px] font-semibold text-ac"
-            >
-              {initialsOf(email)}
-            </span>
-            <span className="max-w-[42vw] truncate text-[12.5px]" title={email}>
-              {email}
-            </span>
+          <div className="flex items-center gap-2.5">
+            {/* Says what was built. The transport is server-sent events, so the badge says
+                so — labelling this a WebSocket would be the app misdescribing itself. */}
+            <LiveBadge />
+
+            <div className="flex items-center gap-2.5 rounded-full border border-bd bg-panel-2 py-[5px] pr-3 pl-[6px]">
+              <span
+                aria-hidden="true"
+                className="grid h-6 w-6 place-items-center rounded-full bg-ac-soft text-[11px] font-semibold text-ac"
+              >
+                {initialsOf(email)}
+              </span>
+              <span className="max-w-[42vw] truncate text-[12.5px]" title={email}>
+                {email}
+              </span>
+            </div>
           </div>
         </header>
 

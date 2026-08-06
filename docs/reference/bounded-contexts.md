@@ -48,7 +48,7 @@ no types at all.
 | **Identity** | a user, a refresh token | **Revoking and rotating are different endings.** Both retire a token; only rotation names a successor |
 | **Portfolio** | a holding, a ticker, an amount of money | **Buying more averages; correcting replaces.** "I bought more" is not "I typed it wrong" |
 | **MarketData** | a price observation, a ticker | **Observed-at is when *this app* saw the price**, never the provider's own trade time |
-| **Alerts** *(designed)* | an alert setting, a fired alert, a direction | The threshold is measured against **your own window**, never the provider's "change today" |
+| **Alerts** | an alert setting, a fired alert, a direction | The threshold is measured against **your own window**, never the provider's "change today" — and only when the window's two measurements agree in sign |
 
 ## The relationships
 
@@ -58,10 +58,10 @@ no types at all.
 | MarketData → the provider | **Anticorruption Layer** | the provider's response shapes are private to the module and are translated once, at the edge | built |
 | Portfolio → Identity | **Published Language** | the user's identity arrives as a plain identifier from the token; there is no call | built |
 | everything → the kernel | **Shared Kernel** | money, a validation-failure shape, the command and query shapes — and deliberately *not* the ticker | built |
-| Alerts → Portfolio | Customer/Supplier | one yes-or-no question, shaped for Alerts' need | offered; no caller yet |
-| Alerts → MarketData | Customer/Supplier | price history exists because alerts need it | designed |
-| MarketData → Alerts | Anticorruption Layer, owned by the host | MarketData states its own need for a poll list; the host adapts Alerts' answer to it | designed |
-| Alerts → Identity | **Published Language** | the same token claim, the same plain identifier | designed |
+| Alerts → Portfolio | Customer/Supplier | one yes-or-no question, shaped for Alerts' need | built |
+| Alerts → MarketData | Customer/Supplier | price history exists because alerts need it | built |
+| MarketData → Alerts | Anticorruption Layer, owned by the host | MarketData states two needs of its own — which tickers to sample, and where a sample goes; the host adapts Alerts to both | built |
+| Alerts → Identity | **Published Language** | the same token claim, the same plain identifier | built |
 
 **The bold patterns are structural** — you can check them by reading the code. Is there a translation layer?
 Is the published surface empty? Is the shared subset small? **Customer/Supplier is not structural.** It is
@@ -70,4 +70,4 @@ developer. Those rows record intent, not an observable fact.
 
 ---
 
-**Where the unbuilt parts come from.** The Alerts context is modelled, not built. [Phase 4](../plan/phase-4-alerts.md) builds it.
+**Every context here is built.** Alerts arrived with [Phase 4](../plan/phase-4-alerts.md), which is where a change to its model belongs.

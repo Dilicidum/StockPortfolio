@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
+using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Domain;
 using StockPortfolio.Modules.MarketData.Infrastructure;
 
@@ -30,6 +31,9 @@ public sealed class MarketDataModuleTests
         return services.BuildServiceProvider();
     }
 
+    private static ServiceLifetime Lifetime<TService>(IServiceCollection services) =>
+        services.Single(descriptor => descriptor.ServiceType == typeof(TService)).Lifetime;
+
     [Fact]
     public void Module_WithNoApiKey_BootsOntoTheFakeProviderRatherThanThrowing()
     {
@@ -45,6 +49,59 @@ public sealed class MarketDataModuleTests
         using var provider = Build(Config(("Finnhub:ApiKey", "   ")));
 
         provider.GetRequiredService<IQuoteProvider>().Name.ShouldBe("Fake");
+    }
+
+    [Fact]
+    public void Module_PriceWindow_RegistersTheStoreOnceAndTheReaderPerRequest()
+    {
+        // Read off the collection rather than the provider: both types need IConnectionMultiplexer, which
+        // AddStockPortfolioRedis registers in the host and nothing in this module declares.
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddMarketDataModule(Config());
+
+        Lifetime<IPriceWindowStore>(services).ShouldBe(ServiceLifetime.Singleton);
+        Lifetime<IPriceWindowReader>(services).ShouldBe(ServiceLifetime.Scoped);
+    }
+
+    [Fact]
+    public void Module_Polling_RegistersThePollerAndADefaultObserver()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddMarketDataModule(Config());
+
+        services.Any(descriptor =>
+                descriptor.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService)
+                && descriptor.ImplementationType?.Name == "QuotePoller")
+            .ShouldBeTrue();
+
+        // A no-op default, so MarketData needs no stub of its own. Nothing registers IPollTargetSource:
+        // "the host never told me what to poll" has to be a loud failure, not an empty list.
+        Lifetime<IPriceSampleObserver>(services).ShouldBe(ServiceLifetime.Singleton);
+        services.Any(descriptor => descriptor.ServiceType == typeof(IPollTargetSource)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Module_HostRegistersAnObserverAfterwards_TheHostsWins()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddMarketDataModule(Config());
+        services.AddScoped<IPriceSampleObserver, SpyObserver>();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        // Last registration wins, which is the only reason the host's adapter is the one resolved. TryAdd
+        // in the module protects the reverse order; it is not what makes this case work.
+        scope.ServiceProvider.GetRequiredService<IPriceSampleObserver>().ShouldBeOfType<SpyObserver>();
     }
 
     [Fact]
@@ -83,5 +140,10 @@ public sealed class MarketDataModuleTests
         using var services = Build(Config(("Finnhub:ApiKey", "a-real-looking-key")));
 
         services.GetRequiredService<IQuoteProvider>().Name.ShouldBe("Finnhub");
+    }
+
+    private sealed class SpyObserver : IPriceSampleObserver
+    {
+        public Task OnSampleStoredAsync(string ticker, CancellationToken ct) => Task.CompletedTask;
     }
 }

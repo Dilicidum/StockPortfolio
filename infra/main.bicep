@@ -242,12 +242,12 @@ module api 'modules/containerapp-api.bicep' = {
     jwtIssuer: jwtIssuer
     jwtAudience: jwtAudience
     finnhubApiKey: finnhubApiKey
-    // 0, not the module's default of 1, and this is a cost decision with an expiry date.
-    // Scale-to-zero is only safe while nothing needs an always-on replica: there is no
-    // BackgroundService, IHostedService or PeriodicTimer anywhere in src/ yet. The moment
-    // MarketData ships its quote poller this must go back to 1, or ingestion stops whenever
-    // traffic does. See modules/containerapp-api.bicep for the original rationale.
-    minReplicas: 0
+    // Back to 1 with Phase 4, and the expiry date on the old cost decision has passed.
+    // QuotePoller is a BackgroundService, so a sleeping replica evaluates no thresholds: the app
+    // would look alive and quietly never alert. The two go together and one without the other is
+    // a feature that stops working whenever traffic does.
+    // The honest cost is roughly one small always-on container on top of the previous ~$1.26/day.
+    minReplicas: 1
     maxReplicas: 2
     tags: tags
   }

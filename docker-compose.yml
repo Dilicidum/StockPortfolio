@@ -138,6 +138,16 @@ services:
       # warning. Finnhub killed its sandbox in 2022, so the demo must work
       # without a key.
       Finnhub__ApiKey: ${FINNHUB_API_KEY:-}
+      # Polling and alerting. RetentionMinutes must stay ABOVE Alerts__MaxWindowMinutes or the
+      # host refuses to start: a window longer than the history kept stops alerts firing silently.
+      # With no thresholds configured the poller finds an empty list and does nothing.
+      MarketData__Polling__IntervalSeconds: ${POLL_INTERVAL_SECONDS:-60}
+      MarketData__Polling__RetentionMinutes: ${POLL_RETENTION_MINUTES:-75}
+      MarketData__Polling__MaxMissedSamples: ${POLL_MAX_MISSED_SAMPLES:-3}
+      MarketData__Polling__MinimumSamples: ${POLL_MINIMUM_SAMPLES:-5}
+      Alerts__MaxWindowMinutes: ${ALERTS_MAX_WINDOW_MINUTES:-60}
+      Alerts__CooldownMinutes: ${ALERTS_COOLDOWN_MINUTES:-15}
+      Alerts__HistoryLimit: ${ALERTS_HISTORY_LIMIT:-50}
     ports:
       - "${API_PORT:-8080}:8080"
     restart: unless-stopped

@@ -4,7 +4,7 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Application.Prices;
 
-/// <summary>Provider first, last-known second, and the only writer of the last-known store.</summary>
+/// <summary>Provider first, last-known second. The dashboard's whole path to a price.</summary>
 public sealed class QuoteReader(
     IQuoteProvider provider,
     ILastKnownPriceStore store,
@@ -34,8 +34,9 @@ public sealed class QuoteReader(
 
         var fetched = await provider.GetQuotesAsync(requested, ct);
 
-        // The write lives here, not in the provider: with no API key the fake is the only provider, so a
-        // write inside FinnhubQuoteProvider would leave marketdata:last:* empty on the whole P0 compose path.
+        // The write lives here and in the poller, never in a provider: with no API key the fake is the only
+        // provider, so a write inside FinnhubQuoteProvider would leave marketdata:last:* empty on the whole
+        // P0 compose path.
         await store.WriteAsync(fetched, ct);
 
         foreach (var quote in fetched)

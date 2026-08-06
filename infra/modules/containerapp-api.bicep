@@ -150,6 +150,39 @@ var baseEnv = [
   }
 ]
 
+// Polling and alerting. RetentionMinutes must stay ABOVE Alerts__MaxWindowMinutes: the host refuses
+// to start otherwise, because a window longer than the history kept stops alerts firing in silence.
+var pollingEnv = [
+  {
+    name: 'MarketData__Polling__IntervalSeconds'
+    value: '60'
+  }
+  {
+    name: 'MarketData__Polling__RetentionMinutes'
+    value: '75'
+  }
+  {
+    name: 'MarketData__Polling__MaxMissedSamples'
+    value: '3'
+  }
+  {
+    name: 'MarketData__Polling__MinimumSamples'
+    value: '5'
+  }
+  {
+    name: 'Alerts__MaxWindowMinutes'
+    value: '60'
+  }
+  {
+    name: 'Alerts__CooldownMinutes'
+    value: '15'
+  }
+  {
+    name: 'Alerts__HistoryLimit'
+    value: '50'
+  }
+]
+
 var finnhubEnv = empty(finnhubApiKey)
   ? []
   : [
@@ -218,7 +251,7 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: concat(baseEnv, finnhubEnv)
+          env: concat(baseEnv, pollingEnv, finnhubEnv)
 
           // EXPLICIT HTTP PROBES ARE LOAD-BEARING.
           //
@@ -271,7 +304,11 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
             name: 'http-concurrency'
             http: {
               metadata: {
-                concurrentRequests: '100'
+                // 400, not the default 100. A held-open SSE stream may count as one in-flight
+                // request for its whole life, so at 100 a few dozen connected browsers would
+                // scale on USER COUNT rather than on load - and maxReplicas is 2 regardless,
+                // because that is what the Postgres connection budget allows.
+                concurrentRequests: '400'
               }
             }
           }

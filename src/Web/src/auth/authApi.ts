@@ -77,7 +77,7 @@ export async function logout(): Promise<void> {
 
 /**
  * Restores a session on page load: swap the refresh token — always from
- * sessionStorage, there is no cookie in any deployment, see lib/tokenStore.ts —
+ * localStorage, there is no cookie in any deployment, see lib/tokenStore.ts —
  * for a fresh access token, then identify the user. `refreshAccessToken` has
  * already stored the pair by the time this returns.
  *

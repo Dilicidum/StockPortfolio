@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
 using StockPortfolio.Modules.Portfolio.Infrastructure;
 
@@ -16,9 +17,11 @@ public static class MigratedModules
         IConfiguration configuration)
     {
         // AddDbContext, never AddDbContextFactory: DbContextTypesIn only sees a context registered as
-        // its own type. This runs against a bare ServiceCollection, so Add<M>Module must be self-contained.
-        services.AddIdentityModule(configuration);
+        // its own type. This runs against a bare ServiceCollection, so what is called here must be
+        // self-contained - and must register persistence only, so nothing else needs configuring to migrate.
+        services.AddIdentityPersistence(configuration);
         services.AddPortfolioModule(configuration);
+        services.AddAlertsModule(configuration);
 
         return services;
     }

@@ -50,6 +50,18 @@ public sealed class MigrationTests(ApiFixture fixture)
         portfolioTables.ShouldContain("holdings");
         portfolioTables.ShouldContain("__EFMigrationsHistory");
 
+        var alertsTables = await ReadStringsAsync(
+            connection,
+            """
+            SELECT table_name FROM information_schema.tables
+             WHERE table_schema = 'alerts'
+             ORDER BY table_name
+            """);
+
+        alertsTables.ShouldContain("alert_settings");
+        alertsTables.ShouldContain("fired_alerts");
+        alertsTables.ShouldContain("__EFMigrationsHistory");
+
         var historySchemas = await ReadStringsAsync(
             connection,
             """
@@ -61,7 +73,7 @@ public sealed class MigrationTests(ApiFixture fixture)
         // The load-bearing line, and with a second context it finally has something to say: HasDefaultSchema
         // does not move __EFMigrationsHistory, so without MigrationsHistoryTable per context both land in
         // public, each context reads the other's ids as applied, and it looks exactly like corruption.
-        historySchemas.ShouldBe(["identity", "portfolio"]);
+        historySchemas.ShouldBe(["alerts", "identity", "portfolio"]);
         historySchemas.ShouldNotContain("public");
 
         // The migration is recorded, not merely the tables created: an empty history table with the right.
@@ -78,6 +90,13 @@ public sealed class MigrationTests(ApiFixture fixture)
 
         portfolioApplied.ShouldNotBeEmpty();
         portfolioApplied.ShouldContain(id => id.EndsWith("InitialPortfolio", StringComparison.Ordinal));
+
+        var alertsApplied = await ReadStringsAsync(
+            connection,
+            """SELECT "MigrationId" FROM alerts."__EFMigrationsHistory" ORDER BY "MigrationId" """);
+
+        alertsApplied.ShouldNotBeEmpty();
+        alertsApplied.ShouldContain(id => id.EndsWith("InitialAlerts", StringComparison.Ordinal));
     }
 
     private static async Task<IReadOnlyList<string>> ReadStringsAsync(NpgsqlConnection connection, string sql)

@@ -13,6 +13,7 @@ import { authStore } from '../src/auth/authStore'
 import { queryClient } from '../src/lib/queryClient'
 import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { holdingKeys, type Holding } from '../src/portfolio/holdingsApi'
+import { alertsHandlers } from './msw/alerts'
 import { emptyTickerSearchHandler } from './msw/tickerSearch'
 import { server } from './msw/server'
 
@@ -54,7 +55,9 @@ async function renderPortfolio(seed: Holding[] = [AAPL]) {
 
   // The ticker field searches as you type; every test below types into it. It is added
   // FIRST so a test that wants real matches can still shadow it with its own handler.
-  server.use(emptyTickerSearchHandler)
+  // The alert handlers come with it: the layout opens the stream and the rows read their
+  // thresholds, so a portfolio mount is three alert requests before anything is typed.
+  server.use(emptyTickerSearchHandler, ...alertsHandlers)
 
   const router = createRouter({
     routeTree,
@@ -343,6 +346,9 @@ describe('portfolio', () => {
     let calls = 0
 
     server.use(
+      // This test builds its own router instead of calling `renderPortfolio`, so the
+      // layout's alert requests need stubbing here too.
+      ...alertsHandlers,
       http.get('*/api/holdings', () => {
         calls += 1
         return calls === 1

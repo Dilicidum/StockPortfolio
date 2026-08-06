@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Configurations;
@@ -36,6 +36,9 @@ public sealed class ApiFixture : IAsyncLifetime
 
     /// <summary>The Portfolio module's DML role.</summary>
     public const string PortfolioRole = "portfolio_svc";
+
+    /// <summary>The Alerts module's DML role — the one E1 was waiting for a consumer of.</summary>
+    public const string AlertsRole = "alerts_svc";
 
     private const string RolePassword = "role_test_only";
 
@@ -104,6 +107,9 @@ public sealed class ApiFixture : IAsyncLifetime
     /// <summary>Gets the connection string for the Portfolio role, which must not see identity.</summary>
     public string PortfolioConnectionString => ConnectionStringFor(PortfolioRole, RolePassword);
 
+    /// <summary>Gets the connection string for the Alerts role, which must not see identity either.</summary>
+    public string AlertsConnectionString => ConnectionStringFor(AlertsRole, RolePassword);
+
     /// <summary>Gets the configuration the module list is registered against, shaped like the Migrator's own.</summary>
     public IConfiguration MigratorConfiguration => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -111,11 +117,12 @@ public sealed class ApiFixture : IAsyncLifetime
             // Every module on the migrator role: it owns every schema, and no _svc role has DDL rights.
             ["ConnectionStrings:Identity"] = MigratorConnectionString,
             ["ConnectionStrings:Portfolio"] = MigratorConnectionString,
-
-            // AddIdentityModule validates the Jwt section eagerly; the migrator never signs anything.
-            ["Jwt:SigningKey"] = SigningKey,
+            ["ConnectionStrings:Alerts"] = MigratorConnectionString,
         })
         .Build();
+
+    /// <summary>Gets the Redis endpoint, so a test can open a SECOND connection and prove the fan-out.</summary>
+    public string RedisConnectionString => _redis.GetConnectionString();
 
     /// <summary>Gets the module DbContext types the API host registered, read off the host as it was built.</summary>
     public IReadOnlyList<Type> HostDbContextTypes { get; private set; } = [];
@@ -131,7 +138,11 @@ public sealed class ApiFixture : IAsyncLifetime
         ArgumentNullException.ThrowIfNull(clock);
 
         return new ApiFactory(
-            SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
+            SettingsFor(
+                IdentityConnectionString,
+                PortfolioConnectionString,
+                AlertsConnectionString,
+                _redis.GetConnectionString()),
             services =>
             {
                 services.RemoveAll<TimeProvider>();
@@ -145,7 +156,11 @@ public sealed class ApiFixture : IAsyncLifetime
         ArgumentNullException.ThrowIfNull(provider);
 
         return new ApiFactory(
-            SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
+            SettingsFor(
+                IdentityConnectionString,
+                PortfolioConnectionString,
+                AlertsConnectionString,
+                _redis.GetConnectionString()),
             services =>
             {
                 services.RemoveAll<IQuoteProvider>();
@@ -164,6 +179,7 @@ public sealed class ApiFixture : IAsyncLifetime
     public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(
         IdentityConnectionString,
         PortfolioConnectionString,
+        AlertsConnectionString,
 
         // A port nothing listens on, per host and reversible. Stopping the _redis container instead would
         // mutate shared fixture state with no guarantee this class runs last. abortConnect=false stops
@@ -180,6 +196,7 @@ public sealed class ApiFixture : IAsyncLifetime
         return new ApiFactory(SettingsFor(
             Nowhere,
             Nowhere,
+            Nowhere,
             "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1"));
     }
 
@@ -191,12 +208,17 @@ public sealed class ApiFixture : IAsyncLifetime
         await ApplyMigrationsAsync();
 
         _api = new ApiFactory(
-            SettingsFor(IdentityConnectionString, PortfolioConnectionString, _redis.GetConnectionString()),
+            SettingsFor(
+                IdentityConnectionString,
+                PortfolioConnectionString,
+                AlertsConnectionString,
+                _redis.GetConnectionString()),
             services =>
             {
                 // Both, or ParameterisationTests' assembly-wide proof silently stops covering holdings.
                 ModuleDbContextInterceptors.AddToIdentity(services, RecordedCommands);
                 ModuleDbContextInterceptors.AddToPortfolio(services, RecordedCommands);
+                ModuleDbContextInterceptors.AddToAlerts(services, RecordedCommands);
 
                 // ConfigureTestServices runs after the app's own registrations, so this is the whole
                 // collection - which is what makes it comparable with the Migrator's.
@@ -221,11 +243,16 @@ public sealed class ApiFixture : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    private static Dictionary<string, string?> SettingsFor(string identity, string portfolio, string redis) =>
+    private static Dictionary<string, string?> SettingsFor(
+        string identity,
+        string portfolio,
+        string alerts,
+        string redis) =>
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {
             ["ConnectionStrings:Identity"] = identity,
             ["ConnectionStrings:Portfolio"] = portfolio,
+            ["ConnectionStrings:Alerts"] = alerts,
             ["ConnectionStrings:Redis"] = redis,
             ["Jwt:SigningKey"] = SigningKey,
             ["Jwt:Issuer"] = "StockPortfolio",
