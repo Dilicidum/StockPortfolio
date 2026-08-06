@@ -8,9 +8,11 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 **Phases 1–4 are functionally complete.** 32 projects, `dotnet build` clean at 0 warnings, and `docker compose up` brings the whole stack up from a clean volume. Phase 4 shipped Alerts end to end — per-position thresholds, the quote poller and its trimmed Redis price window, evaluation with the sign-agreement rule, the ticket handshake, the server-sent-events stream with cross-replica fan-out, Simulate, the dashboard panel and the notifications screen.
 
-**Phase 3 is deployed and live**, since 2026-08-05. `/api/marketdata/health` on the public API returns `{"provider":"Finnhub"}`, so the deployed app serves genuine prices. The GitHub Pages SPA renders them against the Azure API, and `POST /api/holdings` with a symbol that does not exist returns `UnknownTicker`. That last one can only be checked against a real key, because `FakeQuoteProvider` accepts any well-shaped ticker by design.
+**Phase 4 is deployed and live**, since 2026-08-06 (PR #6, run 31087381000). `/api/marketdata/health` on the public API returns `{"provider":"Finnhub"}`, so the deployed app serves genuine prices, and `POST /api/holdings` with a symbol that does not exist returns `UnknownTicker` — checkable only against a real key, because `FakeQuoteProvider` accepts any well-shaped ticker by design. The migration job reports **three** contexts, so `alerts_svc` reaches a real database.
 
-**Phase 4 is built and not yet deployed.** It runs locally and the suite is green; alerts arriving on the public URL, and a stream that survives past four minutes there, are still unproven.
+**The stream survives the platform's four-minute idle close, measured rather than assumed**: 14 `ping` frames exactly 20 seconds apart over 4m40s against the deployed API, still open when the client cut it. That number is the only reason the heartbeat exists and it cannot be proven locally — nothing in compose closes an idle request.
+
+Two things were **not** verified at deploy time because `az` is not installed on the dev machine, and both are worth confirming before relying on them: the exact `deleteAfter` tag (expected 2026-08-20; the workflow step ran green but does not echo the value), and that the running revision really carries `minReplicas: 1`. A revision that silently stayed at 0 looks healthy and evaluates nothing between requests.
 
 **Four modules exist on disk**: `Identity`, `Portfolio`, `MarketData`, `Alerts`. `ModuleBoundaryTests.cs` pins the assembly count at 22 — four modules × five layers, plus `Shared.Kernel` and `Shared.Api`.
 
@@ -37,7 +39,7 @@ close it. Delete it on the day those pass, not before.
 
 A plan is short enough to read from start to finish in one sitting. When something changes, change it everywhere and leave only the new version. Do not write down what it used to say — git keeps that.
 
-**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. It is at eight today, for Phase 4.
+**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. **It is at seven today**: Phase 4 shipped and its implementation plan went with it. A phase ships when it runs in a browser and is deployed, not when its tests pass, so the plan outlives the last commit of code by however long verification takes.
 
 ## Reference documents
 
@@ -164,6 +166,8 @@ The constructor must contain no validation checks. EF matches constructor parame
 **No unit of work, and no `ConfigureAwait(false)`.** `DbContext` already *is* a unit of work, so a second one over it only adds a name; a repository write method saves before it returns, and because every repository in a module shares one scoped `DbContext`, one save carries whatever else the handler changed. Where two writes must land together, order them so the last repository call is the one that saves. `ConfigureAwait(false)` is for general-purpose libraries — ASP.NET Core has no `SynchronizationContext`, so it is noise here.
 
 **No defensive null checks where the compiler already answered.** `ArgumentNullException.ThrowIfNull(app)` in an endpoint-mapping extension, or `ThrowIfNull(command)` in a handler whose command the API just built, protects against a caller that cannot exist. Keep those checks on public entry points that take input from a user.
+
+**An abstraction returns a named type and takes the module's own value objects.** `IPriceWindowStore.ReadAsync` is the one exception — it returns `IReadOnlyList<(DateTimeOffset At, decimal Price)>` and takes a `string` ticker, and it is the only tuple-returning abstraction in the codebase. It was built that way deliberately and is recorded here rather than left to look like an oversight somebody should tidy. A second one is a convention change, not a precedent already set.
 
 **Validation has three layers, and only one uses result types.**
 
