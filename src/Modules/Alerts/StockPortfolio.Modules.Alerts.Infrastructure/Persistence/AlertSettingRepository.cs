@@ -25,11 +25,19 @@ internal sealed class AlertSettingRepository(AlertsDbContext context) : IAlertSe
             .OrderBy(setting => setting.Ticker)
             .ToListAsync(ct);
 
-    public async Task<IReadOnlyList<AlertSetting>> ListEnabledAsync(CancellationToken ct)
-        => await context.AlertSettings
-            .Where(setting => setting.Enabled)
-            .OrderBy(setting => setting.Ticker)
+    // Filtered in SQL on the ticker as well as the flag: an evaluation is told about one symbol, and
+    // reading every enabled setting in the database to keep a handful of them is the same query with
+    // the work moved to the wrong machine.
+    public async Task<IReadOnlyList<AlertSetting>> ListEnabledForTickerAsync(string ticker, CancellationToken ct)
+    {
+        var symbol = new Ticker(ticker);
+
+        return await context.AlertSettings
+            .AsNoTracking()
+            .Where(setting => setting.Enabled && setting.Ticker == symbol)
+            .OrderBy(setting => setting.UserId)
             .ToListAsync(ct);
+    }
 
     public async Task<IReadOnlyList<string>> ListEnabledTickersAsync(CancellationToken ct)
     {

@@ -39,7 +39,7 @@ public static class MoveAssessment
         from == 0m ? 0m : (to - from) / from * 100m;
 
     /// <summary>Names the comparison, because an alert that does not say what it measured gets turned off.</summary>
-    private static string Describe(AlertDirection direction, decimal extreme)
+    public static string Describe(AlertDirection direction, decimal extreme)
     {
         var size = Math.Abs(extreme).ToString("0.##", CultureInfo.InvariantCulture);
 

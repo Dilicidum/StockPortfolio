@@ -11,8 +11,8 @@ public interface IAlertSettingRepository
     /// <summary>Lists every threshold this user has set, enabled or not, ticker order.</summary>
     Task<IReadOnlyList<AlertSetting>> ListForUserAsync(Guid userId, CancellationToken ct);
 
-    /// <summary>Lists every enabled threshold across every user — what one evaluation cycle works through.</summary>
-    Task<IReadOnlyList<AlertSetting>> ListEnabledAsync(CancellationToken ct);
+    /// <summary>Lists every user's enabled threshold on one ticker — what one evaluation works through.</summary>
+    Task<IReadOnlyList<AlertSetting>> ListEnabledForTickerAsync(string ticker, CancellationToken ct);
 
     /// <summary>Lists the distinct tickers with at least one enabled threshold — the poll list, and nothing more.</summary>
     Task<IReadOnlyList<string>> ListEnabledTickersAsync(CancellationToken ct);
