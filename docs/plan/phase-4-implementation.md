@@ -1416,6 +1416,26 @@ against mocked requests, so until now nobody has opened the application and clic
 
 Nothing is committed by this task unless it finds a defect. What it produces is a yes or a no.
 
+**DONE — the answer is yes.** Run in a browser against a clean-volume `docker compose up`, defaults, fake
+provider. Registered through the UI, added a position (the company name resolved to "Apple Inc"), set a
+threshold from the per-row control, which uses a native `<select>` and `role="switch"` as required.
+
+| Check | Result |
+|---|---|
+| Simulate → panel | `AAPL FALL SIMULATED −2.00% · "fell 2% from the window high" · $208.16 from $212.41`, rendered before the next read could complete |
+| Reload | Same alert at "16s ago" — from history, not replay, and the session survived |
+| Notifications screen | Lists the same activity, newest first |
+| 375px | `scrollWidth == clientWidth == 375`; no horizontal overflow; panel fully readable |
+| Connection past five minutes | Badge still `Live (SSE)` after ~7 minutes, and it then delivered a push |
+| Evaluation-driven alert | `AAPL FALL −5.98%` at "0s ago" with no simulated badge, from a −6% nudge |
+| Cooldown | A −14% nudge inside the window produced **no** second alert across three further cycles; row count stayed at 2 |
+| Nothing polls when nothing is watched | Threshold disabled → no `marketdata:prices:*` key across three cycles. Claim keys still appear, which is correct: the poller wakes, claims the cycle, finds an empty list and does nothing |
+
+One cosmetic defect, not blocking and not fixed: **the relative timestamps do not tick.** "0s ago" stays
+"0s ago" until something else re-renders the panel, because the age is computed at render and nothing
+schedules a repaint. Every row does carry a time, which is what §6 requires, but a stale "0s ago" reads as
+"just now" for minutes. Phase 6 territory; recorded here so it is not rediscovered as new.
+
 ---
 
 ### Task 18 — Deploy, and verify the deployed thing
