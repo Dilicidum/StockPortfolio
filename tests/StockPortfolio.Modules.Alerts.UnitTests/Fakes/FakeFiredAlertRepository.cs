@@ -22,12 +22,22 @@ internal sealed class FakeFiredAlertRepository(List<string> journal) : IFiredAle
         return Task.CompletedTask;
     }
 
-    public Task<IReadOnlyList<FiredAlert>> ListRecentAsync(Guid userId, int limit, CancellationToken ct) =>
-        Task.FromResult<IReadOnlyList<FiredAlert>>(
+    public Task<IReadOnlyList<FiredAlertRow>> ListRecentAsync(Guid userId, int limit, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<FiredAlertRow>>(
         [
             .. _rows
                 .Where(row => row.UserId == userId)
                 .OrderByDescending(row => row.FiredAt)
-                .Take(limit),
+                .Take(limit)
+                .Select(row => new FiredAlertRow(
+                    row.Id.Value,
+                    row.Ticker.Value,
+                    row.Direction,
+                    row.ChangePercent,
+                    row.EndpointPercent,
+                    row.TriggerPrice,
+                    row.ReferencePrice,
+                    row.FiredAt,
+                    row.IsSimulated)),
         ]);
 }

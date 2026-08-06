@@ -9,5 +9,5 @@ public interface IFiredAlertRepository
     Task AddAsync(FiredAlert alert, CancellationToken ct);
 
     /// <summary>Reads this user's newest alerts first, capped at limit — the only way the table is read.</summary>
-    Task<IReadOnlyList<FiredAlert>> ListRecentAsync(Guid userId, int limit, CancellationToken ct);
+    Task<IReadOnlyList<FiredAlertRow>> ListRecentAsync(Guid userId, int limit, CancellationToken ct);
 }

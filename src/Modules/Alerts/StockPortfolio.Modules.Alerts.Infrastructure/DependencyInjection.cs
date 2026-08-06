@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 using OneOf;
 
+using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
 using StockPortfolio.Shared.Kernel;
@@ -23,6 +24,10 @@ internal static class DependencyInjection
         services.AddScoped<
             IQueryHandler<GetAlertSettingsQuery, IReadOnlyList<GetAlertSettingsResult>>,
             GetAlertSettingsQueryHandler>();
+
+        services.AddScoped<
+            IQueryHandler<GetFiredAlertsQuery, IReadOnlyList<GetFiredAlertsResult>>,
+            GetFiredAlertsQueryHandler>();
 
         return services;
     }

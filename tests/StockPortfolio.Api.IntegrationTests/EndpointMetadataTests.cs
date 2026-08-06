@@ -27,8 +27,8 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         // The two that ship in every environment; the dev nudge is not mapped in all.
         ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
 
-        // The settings pair; the rest of /api/alerts arrives with the stream and the history.
-        ["Alerts"] = ["GetAlertSettings", "SaveAlertSetting"],
+        // The settings pair plus history; the stream and its ticket arrive with Task 12.
+        ["Alerts"] = ["GetAlertSettings", "SaveAlertSetting", "GetAlerts"],
     };
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
@@ -167,6 +167,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("SaveAlertSetting", "bad-ticker", 400)]
     [InlineData("SaveAlertSetting", "wrong-content-type", 415)]
     [InlineData("SaveAlertSetting", "anonymous", 401)]
+    [InlineData("GetAlerts", "bearer", 200)]
+    [InlineData("GetAlerts", "silly-limit", 200)]
+    [InlineData("GetAlerts", "anonymous", 401)]
     public async Task AlertsRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
@@ -648,6 +651,40 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                     "AAPL",
                     5m,
                     30);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlerts", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-history");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.AlertHistoryPath + "?limit=50",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlerts", "silly-limit"):
+            {
+                var token = await SignedInAsync(client, "metadata-alert-history-limit");
+
+                // Clamped rather than refused, so this is a 200 and not the 400 a reader might expect.
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.AlertHistoryPath + "?limit=100000",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAlerts", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AlertHistoryPath);
 
                 return response.StatusCode;
             }

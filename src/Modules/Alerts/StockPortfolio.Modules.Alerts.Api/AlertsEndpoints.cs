@@ -12,6 +12,7 @@ using OneOf;
 
 using StockPortfolio.Modules.Alerts.Api.Requests;
 using StockPortfolio.Modules.Alerts.Api.Validators;
+using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
 using StockPortfolio.Shared.Api;
@@ -47,6 +48,12 @@ public static class AlertsEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        group.MapGet("/", GetFiredAlertsAsync)
+            .WithName("GetAlerts")
+            .WithSummary("Lists the caller's recent alerts, newest first.")
+            .WithDescription("The panel and the notifications screen read the same list; a limit outside the server's range is clamped rather than refused.")
+            .Produces<IReadOnlyList<GetFiredAlertsResult>>(StatusCodes.Status200OK);
+
         group.MapGet("/settings", GetAlertSettingsAsync)
             .WithName("GetAlertSettings")
             .WithSummary("Lists every threshold the caller has set.")
@@ -64,6 +71,24 @@ public static class AlertsEndpoints
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         return app;
+    }
+
+    /// <summary>Lists the caller's recent alerts.</summary>
+    private static async Task<IResult> GetFiredAlertsAsync(
+        ClaimsPrincipal principal,
+        IQueryHandler<GetFiredAlertsQuery, IReadOnlyList<GetFiredAlertsResult>> handler,
+        CancellationToken ct,
+        int? limit = null)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        // An absent ?limit= asks for as many as the server is willing to give, which is the same
+        // number the handler would clamp anything larger down to.
+        return TypedResults.Ok(
+            await handler.Handle(new GetFiredAlertsQuery(userId, limit ?? int.MaxValue), ct));
     }
 
     /// <summary>Lists the caller's thresholds.</summary>

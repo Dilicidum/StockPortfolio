@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -41,6 +42,19 @@ public sealed record AlertSettingPayload(
     decimal ThresholdPercent,
     int WindowMinutes,
     bool Enabled);
+
+/// <summary>One row of alert history. Direction arrives as "Fall" or "Rise", never 0 or 1.</summary>
+public sealed record FiredAlertPayload(
+    Guid Id,
+    string Ticker,
+    string Direction,
+    string ChangePercent,
+    string EndpointPercent,
+    MoneyPayload TriggerPrice,
+    MoneyPayload ReferencePrice,
+    DateTimeOffset FiredAt,
+    bool IsSimulated,
+    string Reason);
 
 /// <summary>One dashboard row. Every nullable member is nullable on the wire too — null means unknown.</summary>
 public sealed record DashboardPositionPayload(
@@ -87,6 +101,9 @@ internal static class Wire
 
     /// <summary>Thresholds: one GET for the lot, one PUT per position.</summary>
     public const string AlertSettingsPath = "/api/alerts/settings";
+
+    /// <summary>Fired-alert history, and the group root — the SPA calls it without a trailing slash.</summary>
+    public const string AlertHistoryPath = "/api/alerts";
 
     /// <summary>Media type the API must use for RFC 7807 errors.</summary>
     public const string ProblemJson = "application/problem+json";
@@ -210,6 +227,28 @@ internal static class Wire
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
 
         var payload = await response.Content.ReadFromJsonAsync<List<AlertSettingPayload>>(
+            JsonSerializerOptions.Web);
+
+        payload.ShouldNotBeNull();
+
+        return payload;
+    }
+
+    /// <summary>Reads /api/alerts, asserting the 200 on the way.</summary>
+    public static async Task<IReadOnlyList<FiredAlertPayload>> ListFiredAlertsAsync(
+        HttpClient client,
+        string accessToken,
+        int limit = 50)
+    {
+        using var response = await SendAsync(
+            client,
+            HttpMethod.Get,
+            $"{AlertHistoryPath}?limit={limit.ToString(CultureInfo.InvariantCulture)}",
+            accessToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+
+        var payload = await response.Content.ReadFromJsonAsync<List<FiredAlertPayload>>(
             JsonSerializerOptions.Web);
 
         payload.ShouldNotBeNull();
