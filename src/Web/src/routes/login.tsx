@@ -2,18 +2,25 @@ import { useState } from 'react'
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { Alert } from '../components/Alert'
 import { AuthLayout } from '../components/AuthLayout'
 import { Button } from '../components/Button'
 import { TextField } from '../components/TextField'
 import { useAuth } from '../auth/useAuth'
-import { applyServerErrors } from '../lib/formErrors'
+import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import { safeRedirect } from '../lib/safeRedirect'
 
+/**
+ * Message KEYS, not sentences — matching the convention `portfolio.tsx`'s `addHoldingSchema`
+ * comment names, which the other three forms already followed. `login.tsx` and `register.tsx`
+ * were the two holdouts; `translateFieldError` (lib/formErrors.ts) is what turns the key back
+ * into text at render time.
+ */
 const schema = z.object({
-  email: z.email('Enter a valid email address.'),
-  password: z.string().min(1, 'Enter your password.'),
+  email: z.email('errors.email.format'),
+  password: z.string().min(1, 'errors.password.required'),
 })
 
 type LoginForm = z.infer<typeof schema>
@@ -38,6 +45,7 @@ function LoginPage() {
   const { redirect: redirectParam } = Route.useSearch()
   const { login } = useAuth()
   const router = useRouter()
+  const { t } = useTranslation('auth')
   const [formError, setFormError] = useState('')
 
   const {
@@ -69,32 +77,28 @@ function LoginPage() {
 
         <div className="flex flex-col gap-3">
           <TextField
-            label="Email"
+            label={t('fields.emailLabel')}
             type="email"
             autoComplete="email"
-            placeholder="you@example.com"
-            error={errors.email?.message}
+            placeholder={t('fields.emailPlaceholder')}
+            error={translateFieldError(t, errors.email?.message)}
             {...register('email')}
           />
           <TextField
-            label="Password"
+            label={t('fields.passwordLabel')}
             type="password"
             autoComplete="current-password"
-            placeholder="••••••••"
-            error={errors.password?.message}
+            placeholder={t('fields.passwordPlaceholder')}
+            error={translateFieldError(t, errors.password?.message)}
             {...register('password')}
           />
         </div>
 
         <Button type="submit" size="lg" loading={isSubmitting}>
-          Sign in
+          {t('login.submit')}
         </Button>
 
-        <p className="text-mu text-xs leading-relaxed">
-          One session for this browser, shared by every tab. Signing out ends it
-          everywhere. On a shared computer, sign out rather than just closing
-          the window.
-        </p>
+        <p className="text-mu text-xs leading-relaxed">{t('login.sessionNote')}</p>
       </form>
     </AuthLayout>
   )

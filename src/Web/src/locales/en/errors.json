@@ -1,1 +1,31 @@
-{}
+{
+  "ticker": {
+    "format": "Enter a valid ticker (1–5 letters)."
+  },
+  "quantity": {
+    "positive": "Enter a quantity greater than zero."
+  },
+  "price": {
+    "positive": "Enter a price greater than zero."
+  },
+  "threshold": {
+    "positive": "Enter a move greater than zero.",
+    "max": "Enter a move of 100% or less."
+  },
+  "window": {
+    "positive": "Choose a window."
+  },
+  "email": {
+    "format": "Enter a valid email address."
+  },
+  "password": {
+    "required": "Enter your password.",
+    "tooShort": "Use at least 8 characters.",
+    "needsLetter": "Include at least one letter.",
+    "needsDigit": "Include at least one digit."
+  },
+  "confirmPassword": {
+    "required": "Repeat your password.",
+    "mismatch": "Passwords do not match."
+  }
+}
