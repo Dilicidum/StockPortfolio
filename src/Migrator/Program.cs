@@ -26,6 +26,7 @@ var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
     ["ConnectionStrings:Identity"] = migratorConnectionString,
     ["ConnectionStrings:Portfolio"] = migratorConnectionString,
     ["ConnectionStrings:MarketData"] = migratorConnectionString,
+    ["ConnectionStrings:Alerts"] = migratorConnectionString,
 };
 
 var migratorConfiguration = new ConfigurationBuilder()

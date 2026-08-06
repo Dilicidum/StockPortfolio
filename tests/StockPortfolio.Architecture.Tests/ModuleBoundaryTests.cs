@@ -52,6 +52,8 @@ public sealed class ModuleBoundaryTests
             // Phase 4 populates Alerts one layer at a time; this list grows with each.
             SolutionAssemblies.NameOf("Alerts", "Contracts"),
             SolutionAssemblies.NameOf("Alerts", "Domain"),
+            SolutionAssemblies.NameOf("Alerts", "Application"),
+            SolutionAssemblies.NameOf("Alerts", "Infrastructure"),
 
             SolutionAssemblies.NameOf("MarketData", "Domain"),
             SolutionAssemblies.NameOf("MarketData", "Contracts"),
@@ -81,8 +83,6 @@ public sealed class ModuleBoundaryTests
         [
             // Phase 4 builds Alerts one layer at a time; a name leaves this list the commit its layer lands.
             "StockPortfolio.Modules.Alerts.Api",
-            "StockPortfolio.Modules.Alerts.Application",
-            "StockPortfolio.Modules.Alerts.Infrastructure",
             "StockPortfolio.Modules.Identity.Contracts",
         ];
 

@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
 using StockPortfolio.Modules.Portfolio.Infrastructure;
 
@@ -20,6 +21,7 @@ public static class MigratedModules
         // self-contained - and must register persistence only, so nothing else needs configuring to migrate.
         services.AddIdentityPersistence(configuration);
         services.AddPortfolioModule(configuration);
+        services.AddAlertsModule(configuration);
 
         return services;
     }
