@@ -121,6 +121,9 @@ public sealed class ApiFixture : IAsyncLifetime
         })
         .Build();
 
+    /// <summary>Gets the Redis endpoint, so a test can open a SECOND connection and prove the fan-out.</summary>
+    public string RedisConnectionString => _redis.GetConnectionString();
+
     /// <summary>Gets the module DbContext types the API host registered, read off the host as it was built.</summary>
     public IReadOnlyList<Type> HostDbContextTypes { get; private set; } = [];
 

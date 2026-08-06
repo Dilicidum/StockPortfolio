@@ -27,8 +27,15 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         // The two that ship in every environment; the dev nudge is not mapped in all.
         ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
 
-        // The settings pair plus history; the stream and its ticket arrive with Task 12.
-        ["Alerts"] = ["GetAlertSettings", "SaveAlertSetting", "GetAlerts"],
+        // The settings pair, history, and the two-step handshake the stream needs.
+        ["Alerts"] =
+        [
+            "GetAlertSettings",
+            "SaveAlertSetting",
+            "GetAlerts",
+            "CreateStreamTicket",
+            "StreamAlerts",
+        ],
     };
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
@@ -170,6 +177,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("GetAlerts", "bearer", 200)]
     [InlineData("GetAlerts", "silly-limit", 200)]
     [InlineData("GetAlerts", "anonymous", 401)]
+    [InlineData("CreateStreamTicket", "bearer", 200)]
+    [InlineData("CreateStreamTicket", "anonymous", 401)]
+    [InlineData("StreamAlerts", "no-ticket", 401)]
     public async Task AlertsRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
@@ -685,6 +695,40 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("GetAlerts", "anonymous"):
             {
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AlertHistoryPath);
+
+                return response.StatusCode;
+            }
+
+            case ("CreateStreamTicket", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-ticket");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Post,
+                    "/api/alerts/stream-ticket",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("CreateStreamTicket", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Post,
+                    "/api/alerts/stream-ticket");
+
+                return response.StatusCode;
+            }
+
+            case ("StreamAlerts", "no-ticket"):
+            {
+                // Only the refusal is driven here. A ticket that IS accepted holds the response open
+                // forever by design, and TestServer does not hand a never-ending body back to a client
+                // — see StockPortfolio.Api.IntegrationTests.AlertStreamTests for where the accepted
+                // path is proven instead.
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/alerts/stream");
 
                 return response.StatusCode;
             }

@@ -12,9 +12,12 @@ using OneOf;
 
 using StockPortfolio.Modules.Alerts.Api.Requests;
 using StockPortfolio.Modules.Alerts.Api.Validators;
+using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
+using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.IssueStreamTicket;
+using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.RedeemStreamTicket;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
@@ -29,6 +32,9 @@ public static class AlertsEndpoints
 
     /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
+
+    /// <summary>What the stream answers with, and the reason UseResponseCompression must never be added.</summary>
+    private const string SseContentType = "text/event-stream";
 
     /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
     public static IServiceCollection AddAlertsApi(this IServiceCollection services)
@@ -60,6 +66,22 @@ public static class AlertsEndpoints
             .WithDescription("A user with no thresholds gets an empty list, never a 404 — the portfolio page reads this on every mount.")
             .Produces<IReadOnlyList<GetAlertSettingsResult>>(StatusCodes.Status200OK);
 
+        group.MapPost("/stream-ticket", CreateStreamTicketAsync)
+            .WithName("CreateStreamTicket")
+            .WithSummary("Mints a single-use, 30-second ticket for the alert stream.")
+            .WithDescription("Sent with no body, like logout. The ticket exists because the browser's event-source client cannot set an Authorization header.")
+            .Produces<IssueStreamTicketResult>(StatusCodes.Status200OK);
+
+        // AllowAnonymous, and it is the only route in the application that is: the ticket in the query
+        // string IS the authentication. EventSource cannot set a header, and the SPA and the API are on
+        // different origins in every deployment target, permanently.
+        group.MapGet("/stream", StreamAlertsAsync)
+            .AllowAnonymous()
+            .WithName("StreamAlerts")
+            .WithSummary("The alert feed, as server-sent events.")
+            .WithDescription("Named 'alert' events carry one notification each; a named 'ping' every 20 seconds keeps the connection under the platform's four-minute idle close.")
+            .Produces(StatusCodes.Status200OK, contentType: SseContentType);
+
         group.MapPut("/settings", SaveAlertSettingAsync)
             .AddEndpointFilter<ValidationFilter<SaveAlertSettingRequest>>()
             .WithName("SaveAlertSetting")
@@ -71,6 +93,41 @@ public static class AlertsEndpoints
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         return app;
+    }
+
+    /// <summary>Mints a ticket for the stream.</summary>
+    private static async Task<IResult> CreateStreamTicketAsync(
+        ClaimsPrincipal principal,
+        ICommandHandler<IssueStreamTicketCommand, IssueStreamTicketResult> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        return TypedResults.Ok(await handler.Handle(new IssueStreamTicketCommand(userId), ct));
+    }
+
+    /// <summary>Redeems the ticket and holds the connection open until the browser lets go.</summary>
+    private static async Task<IResult> StreamAlertsAsync(
+        string? ticket,
+        ICommandHandler<RedeemStreamTicketCommand, OneOf<Guid, TicketNotRecognised>> handler,
+        IAlertStreamSubscriber subscriber,
+        TimeProvider clock,
+        CancellationToken ct)
+    {
+        var redeemed = await handler.Handle(new RedeemStreamTicketCommand(ticket ?? string.Empty), ct);
+
+        return redeemed.Match<IResult>(
+            userId => TypedResults.ServerSentEvents(
+                AlertFeed.StreamAsync(userId, subscriber, clock, ct),
+                eventType: null),
+
+            // Expired, spent and never-issued get the same answer on purpose: a caller who can tell
+            // them apart can tell whether a ticket it did not mint ever existed.
+            unrecognised => ProblemDetailsExtensions.UnauthorizedProblem(
+                "That stream ticket is expired, already used, or was never issued. Ask for another."));
     }
 
     /// <summary>Lists the caller's recent alerts.</summary>

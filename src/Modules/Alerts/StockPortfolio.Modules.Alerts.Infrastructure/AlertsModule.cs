@@ -60,7 +60,14 @@ public static class AlertsModule
         // host and nothing in this file says. Delete that line from Program.cs and the first alert
         // fails rather than the startup.
         services.AddSingleton<IAlertCooldownStore, RedisAlertCooldownStore>();
-        services.AddSingleton<IAlertPublisher, RedisAlertPublisher>();
+        services.AddSingleton<IStreamTicketStore, RedisStreamTicketStore>();
+
+        // One instance behind two interfaces, because publishing and subscribing are the two halves of
+        // the same fan-out and must agree about the channel name without a constant travelling between
+        // two classes.
+        services.AddSingleton<RedisAlertPublisher>();
+        services.AddSingleton<IAlertPublisher>(sp => sp.GetRequiredService<RedisAlertPublisher>());
+        services.AddSingleton<IAlertStreamSubscriber>(sp => sp.GetRequiredService<RedisAlertPublisher>());
 
         services.AddScoped<IAlertEvaluator, AlertEvaluator>();
         services.AddScoped<IWatchedTickerReader, WatchedTickerReader>();

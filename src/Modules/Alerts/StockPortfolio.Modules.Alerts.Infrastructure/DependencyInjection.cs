@@ -5,6 +5,8 @@ using OneOf;
 using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
+using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.IssueStreamTicket;
+using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.RedeemStreamTicket;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
@@ -28,6 +30,14 @@ internal static class DependencyInjection
         services.AddScoped<
             IQueryHandler<GetFiredAlertsQuery, IReadOnlyList<GetFiredAlertsResult>>,
             GetFiredAlertsQueryHandler>();
+
+        services.AddScoped<
+            ICommandHandler<IssueStreamTicketCommand, IssueStreamTicketResult>,
+            IssueStreamTicketCommandHandler>();
+
+        services.AddScoped<
+            ICommandHandler<RedeemStreamTicketCommand, OneOf<Guid, TicketNotRecognised>>,
+            RedeemStreamTicketCommandHandler>();
 
         return services;
     }
