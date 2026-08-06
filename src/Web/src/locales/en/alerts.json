@@ -27,7 +27,7 @@
   },
   "liveBadge": {
     "connecting": "Connecting…",
-    "live": "Live (SSE)",
+    "live": "Live (WebSocket)",
     "reconnecting": "Reconnecting…",
     "offline": "Offline",
     "liveTitle": "Alerts are streaming from the server",

@@ -1,7 +1,7 @@
 import '@testing-library/jest-dom/vitest'
-import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
-import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
+import { FakeHubConnection } from './fakeHubConnection'
 import { __resetAlertStream } from '../src/alerts/useAlertStream'
 import { defaultAppearanceHandler } from './msw/appearance'
 import { server } from './msw/server'
@@ -24,10 +24,10 @@ if (!window.matchMedia) {
   })) as unknown as typeof window.matchMedia
 }
 
-// jsdom implements no EventSource either, and unlike scrollTo its absence is fatal:
-// the authenticated layout opens the alert stream, so every protected route would
-// throw on mount. See tests/fakeEventSource.ts.
-installFakeEventSource()
+// The authenticated layout opens the alert connection on mount, and jsdom's WebSocket reaches
+// nothing — so without this every protected-route test would hang rather than fail. Registered
+// here rather than per file, because it applies everywhere. See tests/fakeHubConnection.ts.
+vi.mock('@microsoft/signalr', async () => (await import('./fakeHubConnection')).signalRModuleMock)
 
 // `error` rather than the default `warn`: an unhandled request means a test is
 // hitting the network by accident, which is exactly the kind of thing that
@@ -49,7 +49,7 @@ afterEach(() => {
   // `cleanup()` unmounts the layout, which closes the connection; these two clear what it
   // left behind. The stream's "one connection" flag is a module singleton, so a test that
   // somehow skipped its own cleanup would otherwise stop the next file connecting at all.
-  FakeEventSource.reset()
+  FakeHubConnection.reset()
   __resetAlertStream()
 })
 

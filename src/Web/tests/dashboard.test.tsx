@@ -221,10 +221,10 @@ describe('dashboard', () => {
     const user = userEvent.setup()
     await renderDashboard()
 
-    // The documented default, and not free to change: §3's free-tier arithmetic assumes it.
     await waitFor(() => expect(refetchInterval()).toBe(60_000))
 
-    await user.selectOptions(screen.getByLabelText(/refresh/i), '15000')
+    // The option value is seconds — the unit the API takes — not the milliseconds the query wants.
+    await user.selectOptions(screen.getByLabelText(/refresh/i), '15')
 
     await waitFor(() => expect(refetchInterval()).toBe(15_000))
   })

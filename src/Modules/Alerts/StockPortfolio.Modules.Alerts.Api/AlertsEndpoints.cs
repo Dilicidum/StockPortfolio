@@ -6,20 +6,20 @@ using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
 using OneOf;
 using OneOf.Types;
 
 using StockPortfolio.Modules.Alerts.Api.Requests;
+using StockPortfolio.Modules.Alerts.Api.Streaming;
 using StockPortfolio.Modules.Alerts.Api.Validators;
 using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
 using StockPortfolio.Modules.Alerts.Application.Simulation.Commands.SimulateAlert;
-using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.IssueStreamTicket;
-using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.RedeemStreamTicket;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
@@ -35,13 +35,21 @@ public static class AlertsEndpoints
     /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
 
-    /// <summary>What the stream answers with, and the reason UseResponseCompression must never be added.</summary>
-    private const string SseContentType = "text/event-stream";
+    /// <summary>Where the hub lives. nginx matches this prefix and turns buffering off for it.</summary>
+    public const string HubPath = "/api/alerts/stream";
 
-    /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
+    /// <summary>Registers the module's presentation-layer services: validators, and the alert fan-out.</summary>
     public static IServiceCollection AddAlertsApi(this IServiceCollection services)
     {
         services.AddValidatorsFromAssemblyContaining<SaveAlertSettingRequestValidator>();
+
+        // The publisher lives in .Api rather than .Infrastructure because IHubContext is ASP.NET Core
+        // and that layer may not reference it. AddAlertsModule registers no IAlertPublisher at all now.
+        services.AddScoped<IAlertPublisher, SignalRAlertPublisher>();
+
+        // Without this, Clients.User matches on a claim these tokens do not carry, and every alert is
+        // delivered to nobody with no error anywhere.
+        services.AddSingleton<IUserIdProvider, SubjectClaimUserIdProvider>();
 
         return services;
     }
@@ -78,25 +86,6 @@ public static class AlertsEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
-        group.MapPost("/stream-ticket", CreateStreamTicketAsync)
-            .WithName("CreateStreamTicket")
-            .WithSummary("Mints a single-use, 30-second ticket for the alert stream.")
-            .WithDescription("Sent with no body, like logout. The ticket exists because the browser's event-source client cannot set an Authorization header.")
-            .Produces<IssueStreamTicketResult>(StatusCodes.Status200OK);
-
-        // AllowAnonymous, and it is the only route in the application that is: the ticket in the query
-        // string IS the authentication. EventSource cannot set a header, and the SPA and the API are on
-        // different origins in every deployment target, permanently.
-        group.MapGet("/stream", StreamAlertsAsync)
-            .AllowAnonymous()
-            .WithName("StreamAlerts")
-            .WithSummary("The alert feed, as server-sent events.")
-            .WithDescription("Named 'alert' events carry one notification each; a named 'ping' every 20 seconds keeps the connection under the platform's four-minute idle close.")
-            // Produces<string>, not Produces: with no response type the generator drops the content
-            // type as well, and /openapi/v1.json then says only "200 OK" for the one route whose media
-            // type is the whole contract. Read back from the document, not from this line.
-            .Produces<string>(StatusCodes.Status200OK, SseContentType);
-
         group.MapPut("/settings", SaveAlertSettingAsync)
             .AddEndpointFilter<ValidationFilter<SaveAlertSettingRequest>>()
             .WithName("SaveAlertSetting")
@@ -106,6 +95,11 @@ public static class AlertsEndpoints
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
+
+        // Outside the group: a hub is not a minimal-API endpoint, so the group's filters, its
+        // Produces metadata and its RequireAuthorization do not apply. The hub carries its own
+        // [Authorize], and its transport is negotiated rather than declared in OpenAPI.
+        app.MapHub<AlertsHub>(HubPath);
 
         return app;
     }
@@ -136,39 +130,6 @@ public static class AlertsEndpoints
     private static string Describe(NoPositionToSimulate nothing) => nothing.Ticker is null
         ? "You have no enabled threshold to simulate. Set one on a position first."
         : $"You have no enabled threshold on {nothing.Ticker}, so there is nothing to simulate for it.";
-
-    /// <summary>Mints a ticket for the stream.</summary>
-    private static async Task<IResult> CreateStreamTicketAsync(
-        ClaimsPrincipal principal,
-        ICommandHandler<IssueStreamTicketCommand, IssueStreamTicketResult> handler,
-        CancellationToken ct)
-    {
-        if (!TryReadUserId(principal, out var userId, out var rejection))
-        {
-            return rejection;
-        }
-
-        return TypedResults.Ok(await handler.Handle(new IssueStreamTicketCommand(userId), ct));
-    }
-
-    /// <summary>Redeems the ticket and holds the connection open until the browser lets go.</summary>
-    private static async Task<IResult> StreamAlertsAsync(
-        string? ticket,
-        ICommandHandler<RedeemStreamTicketCommand, OneOf<Guid, TicketNotRecognised>> handler,
-        IAlertStreamSubscriber subscriber,
-        TimeProvider clock,
-        CancellationToken ct)
-    {
-        var redeemed = await handler.Handle(new RedeemStreamTicketCommand(ticket ?? string.Empty), ct);
-
-        return redeemed.Match(
-            userId => AlertFeed.Result(userId, subscriber, clock, ct),
-
-            // Expired, spent and never-issued get the same answer on purpose: a caller who can tell
-            // them apart can tell whether a ticket it did not mint ever existed.
-            unrecognised => ProblemDetailsExtensions.UnauthorizedProblem(
-                "That stream ticket is expired, already used, or was never issued. Ask for another."));
-    }
 
     /// <summary>Lists the caller's recent alerts.</summary>
     private static async Task<IResult> GetFiredAlertsAsync(

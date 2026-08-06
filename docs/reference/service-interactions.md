@@ -26,8 +26,8 @@ flowchart TB
     UI -->|"every other request carries the token"| GATE
     GATE -->|"who am I, sign out"| ID
     GATE -->|"add holdings, load the dashboard — caller already verified"| PF
-    GATE -->|"set a threshold, read history, take a stream ticket, simulate"| AL
-    UI -->|"the live stream — no token, a single-use ticket instead"| AL
+    GATE -->|"set a threshold, read history, simulate"| AL
+    UI -->|"the live connection — the token travels in the URL, not a header"| AL
     PF -->|"a position needs today's price to be worth anything"| MD
     AL -->|"how has this moved over the window?"| MD
     AL -->|"does this user hold this ticker?"| PF
@@ -37,7 +37,7 @@ flowchart TB
     PF -->|"the positions themselves"| PG
     AL -->|"thresholds and what has fired"| PG
     MD -->|"the last price it saw, so the dashboard survives an outage;<br/>and a trimmed recent series per watched ticker"| RD
-    AL -->|"cooldowns, stream tickets, and the fan-out channel"| RD
+    AL -->|"cooldowns, and the channel that carries a push between copies"| RD
     MD -->|"fetches live quotes"| FH
     MIG -->|"creates the tables before the API is allowed to start"| PG
 
@@ -82,7 +82,7 @@ algorithm change, not a move of code.
 | **Identity** | its own schema — users, sign-in sessions | — | — |
 | **Portfolio** | its own schema — positions | — | — |
 | **MarketData** | **nothing** | the last price seen for each ticker, each ticker's company name, a trimmed recent series for each watched ticker, and the two poll locks | the price provider, over HTTP |
-| **Alerts** | its own schema — thresholds and fired alerts | cooldowns, stream tickets, and the channel that pushes an alert to the browser | — |
+| **Alerts** | its own schema — thresholds and fired alerts | cooldowns, and the channel that carries a pushed alert to whichever copy holds the browser's connection | — |
 
 **MarketData has no database at all**, and that is deliberate: everything it keeps is one value per
 ticker, which expires and can be re-fetched. Giving it a database would buy an empty migration and a row
@@ -105,6 +105,7 @@ Three things about it are load-bearing at runtime and easy to lose:
   copy that dies mid-cycle.
 - **The alert is written down before it is pushed.** Whether anyone is connected only decides whether it
   also arrives now. A failed push costs nothing, because the next history load finds the row.
-- **The stream is authenticated by a ticket, not a header**, and every copy of the app subscribes to the
-  channel so an alert produced on one copy still reaches a browser attached to another. Without that
-  fan-out, alerts stop arriving for some users the moment there is more than one copy.
+- **The live connection is authenticated from the URL, not a header**, and every copy of the app is joined
+  through Redis so an alert produced on one copy still reaches a browser attached to another. Without that
+  fan-out, alerts stop arriving for some users the moment there is more than one copy. Both are the
+  real-time library's own mechanisms rather than anything written here.

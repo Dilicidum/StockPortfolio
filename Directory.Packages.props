@@ -59,6 +59,10 @@
          database. That is strictly more than the hand-written check it replaces. -->
     <PackageVersion Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
+    <!-- The SignalR Redis backplane: what makes an alert raised on one replica reach a browser
+         connected to the other. Only the host needs it — SignalR itself is in the shared framework,
+         so a module's .Api can declare a hub with no package at all. -->
+    <PackageVersion Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup Label="Tests">

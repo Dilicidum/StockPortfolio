@@ -5,7 +5,7 @@ Stock-portfolio tracker: live quotes, profit/loss, and threshold alerts pushed i
 
 > **Status: Phase 4 of 6.** Authentication, routing and session persistence (Phase 1); portfolio CRUD
 > with create-or-merge (Phase 2); the live dashboard — real prices, totals, profit and loss, weights
-> and honest freshness stamps (Phase 3); and threshold alerts over SSE with the price poller behind
+> and honest freshness stamps (Phase 3); and threshold alerts pushed over SignalR with the price poller behind
 > them (Phase 4) are done and green. Phases 1 to 3 are deployed; Phase 4 runs locally and has not been
 > deployed yet. See [docs/plan/00-overview.md](docs/plan/00-overview.md).
 
@@ -121,20 +121,24 @@ handler interface, a publisher and a `SaveChanges` interceptor were never writte
 dependency graph is three edges — `Portfolio → MarketData`, `Alerts → MarketData`, `Alerts → Portfolio` —
 nothing depends on Alerts, and nothing depends on Identity.
 
-**SSE, not WebSockets.** The brief lists WebSockets; the task-giver also said to use whatever we
-judge appropriate. Alerts are strictly server→client, one-way, low-frequency.
+**SignalR over WebSockets, which is what the brief lists.** This was built twice. The first version
+was hand-written server-sent events, chosen because alerts are strictly one-way and a full-duplex
+protocol buys a direction nothing uses. That reasoning was sound and the conclusion was still wrong:
+one-way is an argument about the *protocol*, and what it cost was our own code.
 
-| | SSE | WebSockets |
+| | Hand-written SSE | SignalR over WebSockets |
 |---|---|---|
-| Direction needed | server→client only ✅ | full duplex, unused |
-| Reconnect | automatic, in the browser | hand-rolled |
-| Transport | plain HTTP; proxies, CDNs and ACA ingress just work | needs upgrade support end to end |
-| Auth | no header on `EventSource` → ticket handshake | same problem |
-| Cost | one `text/event-stream` response | a second protocol to operate |
+| Matches the brief | no — a stated technology, missed | yes |
+| Fan-out across replicas | our Redis pub/sub, ~75 lines | `AddStackExchangeRedis(...)`, one line |
+| Auth without a header | our ticket: mint, store, redeem, 86 lines | `accessTokenFactory`, one line |
+| Reconnect | our backoff, our state machine | `withAutomaticReconnect([...])` |
+| Keeping the connection open | our 20-second `ping` frame | built in, about every 15s |
+| Sticky sessions | not needed | not needed, given WebSockets-only + `skipNegotiation` |
+| Readable with `curl` | yes | no |
 
-We took the trade knowingly. A grader reading the brief literally may score it as a miss;
-real-time is a P1 item, so it cannot fail the P0 gate either way. What that choice then forces — the
-ticket handshake and the heartbeat — is under [Alerts](#alerts).
+About 450 lines of ours became about 60. The one thing genuinely lost is that the wire is no longer
+plain text you can read in a terminal. What the choice still forces — where the credential travels,
+and which claim decides who a message is for — is under [Alerts](#alerts).
 
 **No raw SQL.** The brief permits raw SQL or a query builder and asks only for parameterisation.
 EF Core makes parameterisation structural rather than a discipline — and the claim is *proved*, not
@@ -471,35 +475,37 @@ Friday-close-to-Monday-open gap is not a sharp move. And a stale feed suppresses
 because no new data must never read as "nothing moved". The cooldown is per user *and* ticker *and*
 direction, so a drawdown cooldown does not mask the run-up that follows it.
 
-### A one-way stream, not WebSockets
+### The push, and the two settings that make it work
 
-Alerts only ever travel server to browser, a few times an hour. The full comparison is in the table
-under [Decisions worth defending](#decisions-worth-defending); the short version is that a full-duplex
-protocol buys a direction nothing uses and costs a second protocol to operate, upgrade support in every
-proxy between here and the browser, and a hand-rolled reconnect. The shell badge says **"Live (SSE)"**,
-never "WS Live", because claiming a transport the code does not use is a self-inflicted wound.
+Alerts travel server to browser, a few times an hour, over a SignalR hub at `/api/alerts/stream`. The
+comparison with the hand-written version it replaced is under
+[Decisions worth defending](#decisions-worth-defending). The shell badge says **"Live (WebSocket)"**,
+because claiming a transport the code does not use is a self-inflicted wound.
 
-Two consequences follow from that choice and neither is optional.
+Three things about it are ours rather than the library's, and each fails silently if it is wrong.
 
-**A ticket handshake.** The browser's `EventSource` client cannot set an `Authorization` header, and the
-SPA and the API sit on different origins permanently, so a cross-origin cookie is not dependable either
-— Safari blocks third-party cookies outright. So the page asks an authenticated endpoint for a ticket,
-and opens the stream with it in the query string. The ticket is 32 random bytes, lives thirty seconds,
-and is read and deleted in a single Redis operation — a read followed by a delete would let two
-connections redeem the same one. A long-lived token in a URL ends up in access logs, browser history and
-proxy logs; a spent thirty-second ticket does not, meaningfully.
+**WebSockets only, and no negotiation.** These are one decision, not two. The Redis backplane normally
+requires a browser to keep reaching the replica it first connected to — sticky sessions. The documented
+exemption needs *both* WebSockets as the only transport *and* skipping SignalR's negotiate round trip.
+Allow a fallback transport and the requirement comes back without anything saying so: alerts then arrive
+for some users and not others, only with more than one replica, only in production.
 
-The price of header-less authentication is that the browser's free reconnect cannot be used: by the time
-it retries, the ticket in the URL is spent. So a dropped connection is closed deliberately, a fresh
-ticket fetched, and a new connection opened with backoff.
+**The credential travels in the URL.** A browser cannot put an `Authorization` header on this kind of
+connection, and the SPA and the API sit on different origins permanently, so a cross-origin cookie is
+not dependable either — Safari blocks third-party cookies outright. SignalR's answer is to send the
+access token as a query parameter, and the server reads it back from there. That read is scoped to the
+hub's path: without the check, every route in the app would accept a credential in its URL, and every
+access log would hold one. The browser refreshes the token inside the factory SignalR calls before each
+attempt, because a reconnect after a long outage would otherwise present an expired one for ever.
 
-**A twenty-second heartbeat.** Azure Container Apps closes an idle request after **four minutes**, and
-four minutes is both the default and the floor on Consumption — raising it means a plan that costs more
-than the rest of the stack put together. So the stream sends something every twenty seconds. The .NET
-SSE writer has no comment mechanism, so the heartbeat is a real named `ping` event that the client
-ignores; a named event with no listener is dropped by `EventSource` before it reaches any code, which is
-what makes it free. The alert frame is named too — an unnamed frame arrives as `message` and a client
-listening for `alert` never sees it.
+**One claim decides who a message is for.** `Clients.User(...)` asks a provider for the id, and the
+built-in provider reads a claim these tokens do not carry. With the wrong one, every alert is delivered
+to nobody — no exception, no log line, nothing on screen. A test pins both that our provider is
+registered and that it names the same claim the tokens are issued with.
+
+Staying connected is no longer our problem. Azure Container Apps closes an idle request after four
+minutes, and four is both the default and the floor on Consumption; SignalR's own keepalive runs about
+every fifteen seconds, so the hand-written heartbeat that used to exist here is gone.
 
 Fan-out across replicas is mandatory rather than an optimisation. An alert can be produced on one
 replica while the user's stream is held by another, so every replica subscribes to a Redis channel per
@@ -648,10 +654,11 @@ spending limit and a budget only emails, so the deploy stamps a `deleteAfter` ta
 group and a scheduled workflow deletes the whole group once that date passes. Deploying extends the
 window; not deploying lets it expire.
 
-The SPA and the API sit on different origins and always will, which drives three things, and all three
-are now built: an explicit CORS policy in exactly one layer, a ticket handshake for SSE (because
-`EventSource` cannot set headers), and a 20-second heartbeat, since ACA's `requestIdleTimeout` is 4
-minutes and 4 is also the floor on Consumption.
+The SPA and the API sit on different origins and always will, which drives two things, and both are
+now built: an explicit CORS policy in exactly one layer that allows credentials, and the alert hub
+authenticating from the query string, because no browser can put a header on that connection. ACA's
+`requestIdleTimeout` is 4 minutes and 4 is also the floor on Consumption; SignalR's keepalive covers it
+without anything of ours running.
 
 **The API no longer scales to zero.** `minReplicas` is 1, because the quote poller has to run between
 requests and a sleeping replica evaluates nothing. That removes the cold start on the first request of a

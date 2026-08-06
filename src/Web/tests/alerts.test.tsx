@@ -14,14 +14,9 @@ import { queryClient } from '../src/lib/queryClient'
 import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { holdingKeys, type Holding } from '../src/portfolio/holdingsApi'
 import type { AlertSetting, FiredAlert } from '../src/alerts/alertsApi'
-import { FakeEventSource } from './fakeEventSource'
-import {
-  alertHistoryHandler,
-  alertSettingsHandler,
-  firedAlert,
-  notificationOf,
-  streamTicketHandler,
-} from './msw/alerts'
+import { ALERT_METHOD_NAME } from '../src/alerts/alertsApi'
+import { FakeHubConnection } from './fakeHubConnection'
+import { alertHistoryHandler, alertSettingsHandler, firedAlert, notificationOf } from './msw/alerts'
 import { dashboardHandler, marketDataHealthHandler } from './msw/dashboard'
 import { emptyTickerSearchHandler } from './msw/tickerSearch'
 import { server } from './msw/server'
@@ -56,7 +51,6 @@ async function renderAt(path: string, heading: string, handlers: RequestHandler[
     ...handlers,
     alertHistoryHandler(),
     alertSettingsHandler(),
-    streamTicketHandler,
     dashboardHandler,
     marketDataHealthHandler,
     emptyTickerSearchHandler,
@@ -76,9 +70,9 @@ async function renderAt(path: string, heading: string, handlers: RequestHandler[
 }
 
 /** The one connection the authenticated layout opened, once it exists. */
-async function stream(): Promise<FakeEventSource> {
-  await waitFor(() => expect(FakeEventSource.latest()).toBeDefined())
-  return FakeEventSource.latest()!
+async function stream(): Promise<FakeHubConnection> {
+  await waitFor(() => expect(FakeHubConnection.latest()).not.toBeNull())
+  return FakeHubConnection.latest()!
 }
 
 const panelRows = () => within(screen.getByRole('list', { name: 'Recent alerts' })).getAllByRole('listitem')
@@ -95,7 +89,7 @@ const longHistory = (): FiredAlert[] =>
   Array.from({ length: 8 }, (_, index) => firedAlert({ ticker: `T${index}` }))
 
 describe('alerts in the browser', () => {
-  it('renders a burst of pushed alerts newest first, and nothing at all for a heartbeat', async () => {
+  it('renders a burst of pushed alerts newest first', async () => {
     await renderAt('/dashboard', 'Dashboard')
 
     // The history query has to have settled before anything is pushed: the stream prepends
@@ -103,13 +97,7 @@ describe('alerts in the browser', () => {
     // result, because seeding it would make the query look fresh and suppress the fetch.
     await screen.findByText(/nothing has crossed a threshold yet/i)
 
-    const source = await stream()
-
-    act(() => {
-      source.emitOpen()
-      // The 20-second heartbeat. Nothing about it is data.
-      source.emit('ping', { at: '2026-08-06T12:00:20+00:00' })
-    })
+    const connection = await stream()
 
     expect(screen.queryByRole('list', { name: 'Recent alerts' })).not.toBeInTheDocument()
     expect(screen.getByText(/nothing has crossed a threshold yet/i)).toBeInTheDocument()
@@ -118,8 +106,8 @@ describe('alerts in the browser', () => {
     const second = firedAlert({ ticker: 'TSLA', direction: 'Rise', changePercent: '6.43' })
 
     act(() => {
-      source.emit('alert', notificationOf(first))
-      source.emit('alert', notificationOf(second))
+      connection.push(ALERT_METHOD_NAME, notificationOf(first))
+      connection.push(ALERT_METHOD_NAME, notificationOf(second))
     })
 
     await waitFor(() => expect(panelRows()).toHaveLength(2))
@@ -135,23 +123,31 @@ describe('alerts in the browser', () => {
   })
 
   /*
-   * The badge says what was built. SSE is the transport; a badge reading "WS Live" would be
-   * the application describing itself wrongly on its own shell, and consistency between the
-   * claim and the implementation is graded.
+   * The badge says what was built. A WebSocket is the transport, and a badge naming a different
+   * one would be the application describing itself wrongly on its own shell — consistency
+   * between the claim and the implementation is graded.
    */
-  it('shows exactly "Live (SSE)" once the stream is up, and never claims a WebSocket', async () => {
+  it('shows exactly "Live (WebSocket)" once the connection is up, and never claims SSE', async () => {
     await renderAt('/dashboard', 'Dashboard')
 
-    const source = await stream()
+    await stream()
 
-    // Before the server accepts the ticket the badge does not claim to be live.
-    expect(screen.queryByText('Live (SSE)')).not.toBeInTheDocument()
+    expect(await screen.findByText('Live (WebSocket)')).toBeInTheDocument()
+    expect(screen.queryByText(/\bSSE\b/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/server-sent/i)).not.toBeInTheDocument()
+  })
 
-    act(() => source.emitOpen())
+  /* The connection dropping must not clear the panel — the rows are cache, not connection state. */
+  it('keeps the rows on screen while the connection is reconnecting', async () => {
+    await renderAt('/dashboard', 'Dashboard', [alertHistoryHandler([firedAlert({ ticker: 'MSFT' })])])
 
-    expect(await screen.findByText('Live (SSE)')).toBeInTheDocument()
-    expect(screen.queryByText(/websocket/i)).not.toBeInTheDocument()
-    expect(screen.queryByText(/\bWS\b/)).not.toBeInTheDocument()
+    const connection = await stream()
+
+    await waitFor(() => expect(panelRows()).toHaveLength(1))
+
+    act(() => connection.dropForGood())
+
+    expect(panelRows()[0]).toHaveTextContent('MSFT')
   })
 
   it('shows only the newest few on the dashboard panel, and says how many were left out', async () => {

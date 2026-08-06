@@ -220,6 +220,10 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
         // ASP.NET Core has listened on 8080 since .NET 8. It is NOT 80. Getting this wrong
         // produces a container that starts, passes nothing, and 502s at the ingress.
         targetPort: 8080
+        // 'auto' is what carries the alert hub's WebSocket upgrade. There is deliberately no
+        // stickySessions block: the browser is pinned to WebSockets and skips negotiation, which
+        // is the documented exemption from session affinity with a Redis backplane. Let the client
+        // fall back to another transport and this file becomes wrong without anything failing here.
         transport: 'auto'
         allowInsecure: false
         traffic: [
@@ -312,7 +316,7 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
             name: 'http-concurrency'
             http: {
               metadata: {
-                // 400, not the default 100. A held-open SSE stream may count as one in-flight
+                // 400, not the default 100. A held-open alert connection may count as one in-flight
                 // request for its whole life, so at 100 a few dozen connected browsers would
                 // scale on USER COUNT rather than on load - and maxReplicas is 2 regardless,
                 // because that is what the Postgres connection budget allows.

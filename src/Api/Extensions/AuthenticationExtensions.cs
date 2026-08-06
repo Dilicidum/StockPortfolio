@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Identity;
 
+using StockPortfolio.Modules.Alerts.Api;
 using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Api.Extensions;
@@ -59,8 +60,31 @@ internal static class AuthenticationExtensions
         // the whole of the residual risk after a logout.
         services.Configure<BearerTokenOptions>(
             IdentityConstants.BearerScheme,
-            options => options.BearerTokenExpiration = AccessTokenLifetime);
+            options =>
+            {
+                options.BearerTokenExpiration = AccessTokenLifetime;
+                options.Events = new BearerTokenEvents { OnMessageReceived = ReadTokenFromHubQuery };
+            });
 
         return services;
+    }
+
+    /// <summary>Lets the alert hub authenticate from the query string, which is the only place it can.</summary>
+    private static Task ReadTokenFromHubQuery(MessageReceivedContext context)
+    {
+        // A browser cannot put a header on a streaming connection, so SignalR's JavaScript client
+        // sends the token as ?access_token= instead. Without this the hub sees an anonymous request
+        // and rejects every connection.
+        var token = context.Request.Query["access_token"].ToString();
+
+        // Path-scoped deliberately: without the check, ANY route in the app could be authenticated by
+        // query string, which puts the token in every access log for the sake of one connection.
+        if (!string.IsNullOrEmpty(token)
+            && context.Request.Path.StartsWithSegments(AlertsEndpoints.HubPath))
+        {
+            context.Token = token;
+        }
+
+        return Task.CompletedTask;
     }
 }

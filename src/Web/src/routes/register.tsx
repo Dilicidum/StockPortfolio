@@ -12,18 +12,6 @@ import { useAuth } from '../auth/useAuth'
 import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import { safeRedirect } from '../lib/safeRedirect'
 
-/**
- * These rules mirror the server's `RegisterRequestValidator`. The client copy
- * exists to save a round trip, not to be the authority — the server validates
- * again regardless, and if the two ever disagree the server's 400 wins and
- * lands under the right field.
- *
- * `confirmPassword` is client-only. The API contract takes {email, password};
- * a confirmation field is a UI affordance and is stripped before submit.
- *
- * Message KEYS, not sentences — see `login.tsx`'s equivalent comment. This form was the
- * other holdout `portfolio.tsx`'s convention had not yet reached.
- */
 const schema = z
   .object({
     email: z.email('errors.email.format'),
@@ -75,9 +63,6 @@ function RegisterPage() {
       await signUp({ email: values.email, password: values.password })
       await router.navigate({ to: safeRedirect(redirectParam) })
     } catch (error) {
-      // 409 means the email is taken. It has no `errors` object, so it arrives
-      // as the banner message — which is where a duplicate-account message
-      // belongs anyway, since it is about the account and not the field shape.
       setFormError(applyServerErrors(error, setError, ['email', 'password']))
     }
   })

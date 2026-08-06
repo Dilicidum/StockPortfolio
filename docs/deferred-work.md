@@ -85,8 +85,8 @@ identically and also drives `CreateTimer`, which the Phase 4 poll loop needs.
 
 **Status: the trigger has happened.** Phase 2, Phase 3 and Phase 4 each added a test assembly; there are
 seven now. Not done. The clock half is now decided in practice rather than in principle: Phase 4's poll loop
-and heartbeat are driven by `FakeTimeProvider` throughout, including its `CreateTimer`, exactly as this item
-predicted — and `TestClock` is still sitting in the integration project doing the same job worse.
+is driven by `FakeTimeProvider` throughout, including its `CreateTimer`, exactly as this item predicted —
+and `TestClock` is still sitting in the integration project doing the same job worse.
 
 ### C2 — JWT configuration is read and validated twice
 

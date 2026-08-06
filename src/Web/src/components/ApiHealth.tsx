@@ -22,11 +22,6 @@ function Row({ label, value, note }: RowProps) {
   )
 }
 
-/**
- * The provider name comes from the API rather than from a build flag, so the string in
- * the startup log and the string on this page cannot drift. Latency and quota are the
- * Phase 6 half of the panel and are labelled as such rather than left blank.
- */
 export function ApiHealth() {
   const { t } = useTranslation('dashboard')
 

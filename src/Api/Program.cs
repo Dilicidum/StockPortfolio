@@ -26,6 +26,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 // MarketData injects IConnectionMultiplexer rather than depending on the health checks having registered it.
 builder.Services.AddStockPortfolioRedis(builder.Configuration);
 
+// After the multiplexer, because it reads the same connection string and that call is what proves
+// the string is there. The backplane is the whole of the cross-replica fan-out for alerts.
+builder.Services.AddStockPortfolioSignalR(builder.Configuration);
+
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
     // camelCase: the SPA reads accessToken / refreshToken / accessExpiresAt.

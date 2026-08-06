@@ -236,7 +236,7 @@ they inevitably run it with a bad API key.
 - **README complete.** The brief asks for a short description, so roughly a page plus a link to the
   architecture essay:
   - How to run it with one command, from a clean clone, with no API key.
-  - The server-sent-events versus WebSockets decision, with its comparison table.
+  - The real-time transport decision, with its comparison table.
   - **Evidence of parameterised database access** — state that everything goes through the ORM with no
     hand-written SQL, then show it rather than claim it: one generated statement with its placeholders beside
     the parameter values, and a description of the interceptor that watches every command in the test suite

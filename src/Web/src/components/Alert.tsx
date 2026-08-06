@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react'
 
-type Tone = 'error' | 'info' | 'success'
+type Tone = 'error' | 'info' | 'success' | 'warn'
 
 const tones: Record<Tone, string> = {
   error: 'border-dn/45 bg-dn/10 text-dn',
   info: 'border-bd bg-panel-2 text-mu',
   success: 'border-up/45 bg-up/10 text-up',
+  warn: 'border-warn/45 bg-warn/10 text-warn',
 }
 
 export interface AlertProps {
@@ -14,11 +15,6 @@ export interface AlertProps {
   children?: ReactNode
 }
 
-/**
- * `role="alert"` on errors (assertive — interrupt, the submit just failed) and
- * `role="status"` otherwise (polite). Getting this backwards means a failed
- * login is silent for anyone not looking at that corner of the screen.
- */
 export function Alert({ tone = 'error', title, children }: AlertProps) {
   return (
     <div

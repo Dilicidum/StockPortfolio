@@ -1,17 +1,14 @@
-import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
+import { Alert } from '../components/Alert'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { formatAge, formatMoney, formatPercent } from '../lib/format'
 import { alertHistoryQuery, alertKeys, simulateAlert, type FiredAlert } from './alertsApi'
 
-// "Recent activity", not "active alerts" — an alert is a past event, not a still-true condition.
 interface AlertPanelProps {
-  // The query always holds the server's full page; this only slices.
   limit?: number
-  // The dashboard panel offers Simulate and a link onward; the notifications screen is the full list.
   compact?: boolean
 }
 
@@ -30,7 +27,7 @@ function DirectionChip({ direction }: { direction: FiredAlert['direction'] }) {
   )
 }
 
-export function AlertRow({ alert }: { alert: FiredAlert }) {
+function AlertRow({ alert }: { alert: FiredAlert }) {
   const { t } = useTranslation('alerts')
   const falling = alert.direction === 'Fall'
   const firedAt = Date.parse(alert.firedAt)
@@ -41,7 +38,6 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
         <span className="text-tx font-mono text-[13px]">{alert.ticker}</span>
         <DirectionChip direction={alert.direction} />
 
-        {/* Badged: a simulated alert takes the real save-then-publish path, so it needs a marker to tell it apart from a genuine one. */}
         {alert.isSimulated ? (
           <span className="border-bd text-mu rounded-full border px-1.5 py-px text-[10.5px] tracking-[0.03em] uppercase">
             {t('simulatedBadge')}
@@ -53,7 +49,6 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
         </span>
       </div>
 
-      {/* Server-written text (AlertNotification.reason) — not localized client-side. */}
       <p className="text-mu text-[12px] leading-snug">{alert.reason}</p>
 
       <div className="text-mu flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[11.5px]">
@@ -77,21 +72,16 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
 export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
   const { t } = useTranslation('alerts')
   const queryClient = useQueryClient()
-  const [message, setMessage] = useState('')
 
   const { data, isPending, isError } = useQuery(alertHistoryQuery)
 
   const simulate = useMutation({
     mutationFn: () => simulateAlert(),
-    onSuccess: () => setMessage(''),
-    // 409 is the only expected failure: nothing to simulate against yet.
-    onError: () => setMessage(t('panel.simulateFailure')),
-    // The alert also arrives on the stream, but this covers Simulate working while the stream is down.
     onSettled: () => queryClient.invalidateQueries({ queryKey: alertKeys.history() }),
   })
 
   const alerts = data ?? []
-  const shown = limit === undefined ? alerts : alerts.slice(0, limit)
+  const shown = alerts.slice(0, limit)
 
   return (
     <Card
@@ -109,17 +99,13 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
         ) : null
       }
     >
-      {message ? (
-        <p role="status" className="text-warn mb-3 text-[12px]">
-          {message}
-        </p>
+      {simulate.isError ? (
+        <div className="mb-3">
+          <Alert tone="warn">{t('panel.simulateFailure')}</Alert>
+        </div>
       ) : null}
 
-      {isError ? (
-        <p role="status" className="text-mu text-[12.5px]">
-          {t('panel.loadFailure')}
-        </p>
-      ) : null}
+      {isError ? <Alert tone="info">{t('panel.loadFailure')}</Alert> : null}
 
       {shown.length === 0 && !isError ? (
         <p className="text-mu text-[12.5px]">{isPending ? t('panel.loading') : t('panel.empty')}</p>

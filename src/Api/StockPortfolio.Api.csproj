@@ -15,6 +15,7 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="StackExchange.Redis" />
     <PackageReference Include="AspNetCore.HealthChecks.Redis" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.StackExchangeRedis" />
   </ItemGroup>
 
   <ItemGroup>

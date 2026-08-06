@@ -12,12 +12,6 @@ import { useAuth } from '../auth/useAuth'
 import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import { safeRedirect } from '../lib/safeRedirect'
 
-/**
- * Message KEYS, not sentences — matching the convention `portfolio.tsx`'s `addHoldingSchema`
- * comment names, which the other three forms already followed. `login.tsx` and `register.tsx`
- * were the two holdouts; `translateFieldError` (lib/formErrors.ts) is what turns the key back
- * into text at render time.
- */
 const schema = z.object({
   email: z.email('errors.email.format'),
   password: z.string().min(1, 'errors.password.required'),
@@ -25,11 +19,6 @@ const schema = z.object({
 
 type LoginForm = z.infer<typeof schema>
 
-/**
- * `validateSearch` is hand-written rather than a zod resolver so the parse can
- * never throw on a malformed URL — a bad `?redirect=` should degrade to the
- * dashboard, not render a router error boundary over the login form.
- */
 export const Route = createFileRoute('/login')({
   validateSearch: (search: Record<string, unknown>): { redirect?: string } =>
     typeof search['redirect'] === 'string' ? { redirect: search['redirect'] } : {},
@@ -64,8 +53,6 @@ function LoginPage() {
       await login(values)
       await router.navigate({ to: safeRedirect(redirectParam) })
     } catch (error) {
-      // A 401 is an expected outcome of this form, not a crash. It lands in the
-      // banner; a 400's field errors land under their fields.
       setFormError(applyServerErrors(error, setError, ['email', 'password']))
     }
   })

@@ -42,7 +42,7 @@ HTTP dependency.
 ## What Identity does not have
 
 It is a misleading teacher precisely because it is clean. It has **no** domain events, **no** background
-service, **no** outbound HTTP, **no** Redis, **no** SSE, **no** cross-module dependency, and an **empty**
+service, **no** outbound HTTP, **no** Redis, **no** pushed messages, **no** cross-module dependency, and an **empty**
 `.Contracts` — deliberately, because nothing calls Identity at runtime. The JWT carries the user id, which
 is the argument for extracting Identity first.
 

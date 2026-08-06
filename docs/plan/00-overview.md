@@ -18,8 +18,7 @@ read / update / delete on holdings, a dashboard with totals and profit-and-loss,
 parameterised, and one command — `docker compose up` — bringing the whole stack up from a clean clone. Extras
 add points. A missing gate item makes the extras worthless.
 
-The brief left the technology choice open, which is what allows server-sent events instead of WebSockets,
-and the module split below.
+The brief left most technology choices open, which is what allows the module split below.
 
 ## The six phases
 
@@ -139,9 +138,8 @@ one.
 4. The browser keeps the dashboard fresh by refetching on an interval and when the window regains focus.
    These queries are cached client-side, which is also what keeps the deployed API warm during a session.
 5. They set a percentage threshold on a position. A background poller samples the prices that thresholds care
-   about, and when one breaches, the alert is written down and pushed to any open browser over a
-   server-sent-events stream. A simulate button forces one so the mechanism is demonstrable without waiting
-   for the market.
+   about, and when one breaches, the alert is written down and pushed to any open browser over a WebSocket.
+   A simulate button forces one so the mechanism is demonstrable without waiting for the market.
 
 ## Where it runs, and what it costs
 
@@ -155,9 +153,10 @@ Three consequences, designed for from Phase 1:
 
 - **The browser and the API are on different origins, permanently.** The API names the Pages origin
   explicitly in its cross-origin policy.
-- **The live stream cannot use an authorization header**, because the browser's event-source client cannot
-  set one and cross-origin cookies are being phased out. So the client exchanges its token for a single-use,
-  short-lived ticket and puts that in the stream URL.
+- **The live connection cannot use an authorization header**, because no browser can set one on this kind of
+  connection and cross-origin cookies are being phased out. So the token travels in the query string, which
+  is the real-time library's own answer to the same problem, and the server only reads it there for the one
+  path that needs it.
 - **Static hosting needs a fallback page** so that deep links into client-side routes resolve, and the app's
   base path has to come from the environment rather than being baked in, because the local compose build
   serves it from the root and the Pages build does not.
@@ -201,7 +200,9 @@ Cut on purpose. Don't reintroduce without asking.
   would add two event handlers, a reconciliation pass and a way for the two to disagree.
 - **Trading-hours gating.** It existed to stop pointless polling out of hours. The poller now only runs for
   tickers with an active alert and the dashboard fetches on demand, so there is nothing left to gate.
-- **WebSockets.** Server-sent events are the transport; the readme carries the comparison.
+- **A hand-written live stream.** Built once and deleted: the framework's own real-time library does the
+  reconnection, the keep-alive, the cross-replica delivery and the header-less authentication that were all
+  written by hand first. The readme carries the comparison.
 - **Any third-party UI component library.** The brief bans UI kits. Everything is hand-built on Tailwind with
   native form controls.
 
