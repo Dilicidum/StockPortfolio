@@ -2,6 +2,8 @@ using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
+using Microsoft.AspNetCore.Http;
+
 using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Application.Streaming;
 
@@ -18,6 +20,18 @@ public static class AlertFeed
 
     /// <summary>20s against the platform's 4-minute idle close, where 4 minutes is the default AND the floor.</summary>
     public static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(20);
+
+    /// <summary>The stream as a result. Kept here so the overload choice below is assertable.</summary>
+    public static IResult Result(
+        Guid userId,
+        IAlertStreamSubscriber subscriber,
+        TimeProvider clock,
+        CancellationToken ct) =>
+        // NO eventType argument. ServerSentEvents has two overloads and IAsyncEnumerable<SseItem<T>>
+        // satisfies both, so passing one selects the IAsyncEnumerable<T> overload with T = SseItem<object>:
+        // every frame then arrives unnamed, carrying the wrapper as its data, and a client listening for
+        // "alert" sees nothing at all.
+        TypedResults.ServerSentEvents(StreamAsync(userId, subscriber, clock, ct));
 
     /// <summary>Yields alerts as they arrive and a heartbeat whenever they do not.</summary>
     public static async IAsyncEnumerable<SseItem<object>> StreamAsync(

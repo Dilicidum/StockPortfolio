@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Time.Testing;
 
 using Shouldly;
@@ -128,6 +129,21 @@ public sealed class AlertFeedTests
         _subscriber.Unsubscribed.ShouldBeTrue(
             "a subscription left behind is a Redis channel this replica keeps listening to for a "
                 + "connection that is gone.");
+    }
+
+    /// <summary>The overload that shipped broken once. Typed on the wrapper, every frame arrives unnamed.</summary>
+    [Fact]
+    public void TheResult_IsTypedOnThePayload_NotOnTheFrameWrapper()
+    {
+        using var cts = new CancellationTokenSource();
+
+        AlertFeed.Result(UserId, _subscriber, _clock, cts.Token)
+            .ShouldBeOfType<ServerSentEventsResult<object>>(
+                "TypedResults.ServerSentEvents has two overloads and IAsyncEnumerable<SseItem<T>> "
+                    + "satisfies both. Selecting the IAsyncEnumerable<T> one gives "
+                    + "ServerSentEventsResult<SseItem<object>>, which writes the wrapper as the frame's "
+                    + "data and no event name at all — so a client listening for 'alert' receives "
+                    + "nothing, and every assertion about the enumerable still passes.");
     }
 
     private static AlertNotification Notification(string ticker) => new(

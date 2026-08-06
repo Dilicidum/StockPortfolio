@@ -92,7 +92,10 @@ public static class AlertsEndpoints
             .WithName("StreamAlerts")
             .WithSummary("The alert feed, as server-sent events.")
             .WithDescription("Named 'alert' events carry one notification each; a named 'ping' every 20 seconds keeps the connection under the platform's four-minute idle close.")
-            .Produces(StatusCodes.Status200OK, contentType: SseContentType);
+            // Produces<string>, not Produces: with no response type the generator drops the content
+            // type as well, and /openapi/v1.json then says only "200 OK" for the one route whose media
+            // type is the whole contract. Read back from the document, not from this line.
+            .Produces<string>(StatusCodes.Status200OK, SseContentType);
 
         group.MapPut("/settings", SaveAlertSettingAsync)
             .AddEndpointFilter<ValidationFilter<SaveAlertSettingRequest>>()
@@ -159,9 +162,7 @@ public static class AlertsEndpoints
         var redeemed = await handler.Handle(new RedeemStreamTicketCommand(ticket ?? string.Empty), ct);
 
         return redeemed.Match<IResult>(
-            userId => TypedResults.ServerSentEvents(
-                AlertFeed.StreamAsync(userId, subscriber, clock, ct),
-                eventType: null),
+            userId => AlertFeed.Result(userId, subscriber, clock, ct),
 
             // Expired, spent and never-issued get the same answer on purpose: a caller who can tell
             // them apart can tell whether a ticket it did not mint ever existed.
