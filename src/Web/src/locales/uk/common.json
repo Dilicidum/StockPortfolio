@@ -1,1 +1,9 @@
-{}
+{
+  "time": {
+    "secondsShort": "{{count}}с",
+    "minutesShort": "{{count}}хв",
+    "hoursShort": "{{count}}год"
+  },
+  "fallbackError": "Щось пішло не так. Спробуйте ще раз.",
+  "requestFailed": "Запит не вдався."
+}

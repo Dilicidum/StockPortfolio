@@ -1,8 +1,9 @@
 import '@testing-library/jest-dom/vitest'
-import { afterAll, afterEach, beforeAll } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { FakeEventSource, installFakeEventSource } from './fakeEventSource'
 import { __resetAlertStream } from '../src/alerts/useAlertStream'
+import { defaultAppearanceHandler } from './msw/appearance'
 import { server } from './msw/server'
 
 // jsdom has no layout, so it logs "Not implemented: Window's scrollTo()" every
@@ -18,6 +19,14 @@ installFakeEventSource()
 // hitting the network by accident, which is exactly the kind of thing that
 // passes locally and hangs in CI.
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
+
+// `_authenticated.tsx` now calls `useSyncServerLanguage`, which fires GET
+// /api/settings/appearance on mount alongside the alert stream's requests — so, like those,
+// every test that merely mounts a protected route needs a handler for it. Registered here
+// rather than added to every test file's own `server.use(...)`, exactly because it applies
+// everywhere; a test that cares about a specific language overrides it with its own
+// `server.use`, which wins because MSW resolves the most recently added matching handler.
+beforeEach(() => server.use(defaultAppearanceHandler))
 
 afterEach(() => {
   cleanup()

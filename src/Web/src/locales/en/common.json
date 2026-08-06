@@ -1,1 +1,9 @@
-{}
+{
+  "time": {
+    "secondsShort": "{{count}}s",
+    "minutesShort": "{{count}}m",
+    "hoursShort": "{{count}}h"
+  },
+  "fallbackError": "Something went wrong. Please try again.",
+  "requestFailed": "Request failed."
+}
