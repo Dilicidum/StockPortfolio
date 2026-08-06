@@ -97,7 +97,7 @@ const dashboardJson = (data: GetDashboardResult) =>
 
 /** The fourth inline copy of the memory-router boilerplate, which is the convention here. */
 async function renderDashboard(handlers: RequestHandler[] = [dashboardJson(freshCopy())]) {
-  authStore.setUser({ email: 'holder@example.com' })
+  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   // The alert panel and the layout's stream fetch on mount too, and the refresh interval
   // now reads and writes `/api/settings/dashboard` (see dashboard.tsx) — MSW errors on
   // anything unhandled, so a dashboard mount needs all three stubs, not only its own.

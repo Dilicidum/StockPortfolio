@@ -77,7 +77,7 @@ beforeEach(() => {
  * `server.use(...)`, which wins because MSW resolves the most recently added match.
  */
 async function renderSettings(holdings: Holding[] = [AAPL, TSLA]) {
-  authStore.setUser({ email: 'holder@example.com' })
+  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), holdings)
 
   server.use(...alertsHandlers, ...defaultSettingsHandlers)
@@ -189,7 +189,7 @@ describe('settings', () => {
    * usual — the user only learned the feature was off after typing a key and pressing Save.
    */
   it('apiKeySection_WhenTheFeatureIsDisabled_DoesNotRenderAWorkingForm', async () => {
-    authStore.setUser({ email: 'holder@example.com' })
+    authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
     queryClient.setQueryData(holdingKeys.list(), [AAPL, TSLA])
 
     server.use(

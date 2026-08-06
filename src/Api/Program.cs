@@ -119,7 +119,6 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.MapStockPortfolioAuthentication();
 app.MapIdentityEndpoints();
 app.MapPortfolioEndpoints();
 app.MapMarketDataEndpoints();

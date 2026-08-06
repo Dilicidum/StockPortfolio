@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
+using StockPortfolio.Modules.Identity.Application;
 using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Configurations;
@@ -20,7 +20,7 @@ internal sealed class UserPreferencesConfiguration : IEntityTypeConfiguration<Us
         builder.Property(p => p.Theme).HasColumnName("theme").HasMaxLength(16).IsRequired();
         builder.Property(p => p.Language).HasColumnName("language").HasMaxLength(16).IsRequired();
 
-        builder.HasOne<IdentityUser>()
+        builder.HasOne<AppUser>()
             .WithOne()
             .HasForeignKey<UserPreferences>(p => p.UserId)
             .OnDelete(DeleteBehavior.Cascade);

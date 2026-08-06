@@ -2,35 +2,12 @@ import { queryOptions } from '@tanstack/react-query'
 import { API_BASE_URL, apiFetch } from '../lib/apiClient'
 import type { Money } from '../lib/format'
 
-/**
- * The API contract, verbatim:
- *
- *   GET  /api/alerts/settings       bearer                    -> 200 AlertSetting[]
- *   PUT  /api/alerts/settings       SaveAlertSettingBody      -> 200 AlertSetting
- *                                                             -> 409 TickerNotHeld
- *                                                             -> 409 WindowExceedsRetention
- *   GET  /api/alerts?limit=50       bearer                    -> 200 FiredAlert[]
- *   POST /api/alerts/stream-ticket  bearer, no body           -> 200 StreamTicket
- *   GET  /api/alerts/stream?ticket= the ticket IS the auth    -> text/event-stream
- *   POST /api/alerts/simulate       {ticker?}                 -> 202 | 409
- *
- * TWO SHAPES FOR ONE ROW, and the difference is not cosmetic. `GET /api/alerts` answers
- * with `FiredAlert`, whose prices are `Money` objects like every other price in the app.
- * The stream pushes `AlertNotification`, whose prices are bare strings beside a single
- * shared `currency`. Both are written down in the phase plan and they are not the same
- * record, so `toFiredAlert` converts one into the other in exactly one place — the stream
- * prepends into the history cache, and a cache holding two shapes renders two ways.
- */
+// FiredAlert (GET /api/alerts) and AlertNotification (the stream) are different shapes — toFiredAlert() converts between them in one place.
 
-/** Serialised by `JsonStringEnumConverter`, so it arrives as the enum's name. */
+// Serialised by JsonStringEnumConverter — arrives as the enum's name.
 export type AlertDirection = 'Fall' | 'Rise'
 
-/**
- * A threshold on one position. `thresholdPercent` is a NUMBER, not a string: it is a
- * value the user typed rather than a figure the server computed, the plan declares it
- * `decimal` with no converter, and `NumberHandling.Strict` on the host would reject a
- * quoted one on the way back in. Every *computed* percentage below is still a string.
- */
+// thresholdPercent is a number (user-typed), not a string like the computed percentages below.
 export interface AlertSetting {
   ticker: string
   thresholdPercent: number
@@ -45,28 +22,28 @@ export interface SaveAlertSettingBody {
   enabled: boolean
 }
 
-/** One row of history, and what the panel and the notifications screen both render. */
+// One row of alert history — rendered by both the panel and the notifications screen.
 export interface FiredAlert {
   id: string
   ticker: string
   direction: AlertDirection
-  /** The extreme move, signed and pre-formatted, e.g. "-5.33". The client appends the `%`. */
+  // Signed and pre-formatted, e.g. "-5.33"; the client appends the %.
   changePercent: string
-  /** The endpoint move it was checked against — the sign-agreement rule's other half. */
+  // The endpoint move it was checked against — the sign-agreement rule's other half.
   endpointPercent: string
   triggerPrice: Money
-  /** The window extreme the move was measured from. */
+  // The window extreme the move was measured from.
   referencePrice: Money
   firedAt: string
   isSimulated: boolean
-  /** Server-written, e.g. "fell 5.33% from the window high". Names the comparison. */
+  // Server-written, e.g. "fell 5.33% from the window high".
   reason: string
 }
 
-/** The `alert` event's payload. Money travels as strings here too, one currency for both prices. */
+// The alert event's payload; money travels as strings here, one currency for both prices.
 export interface AlertNotification {
   id: string
-  /** Present on the pub/sub payload; the stream is already per-user, so nothing reads it. */
+  // Present on the pub/sub payload; the stream is already per-user, so nothing reads it.
   userId?: string
   ticker: string
   direction: AlertDirection
@@ -102,22 +79,17 @@ export function toFiredAlert(notification: AlertNotification): FiredAlert {
   }
 }
 
-/** Query keys live beside the fetchers for their feature, exactly as `holdingKeys` does. */
+// Query keys live beside the fetchers for their feature, exactly as holdingKeys does.
 export const alertKeys = {
   all: ['alerts'] as const,
   history: () => [...alertKeys.all, 'history'] as const,
   settings: () => [...alertKeys.all, 'settings'] as const,
 }
 
-/**
- * The server's own `Alerts:HistoryLimit` ceiling, and it is fetched ONCE for both views.
- * The panel shows the newest few and the notifications screen shows the lot, off one key —
- * so the stream has one cache to prepend into. Two keys would mean a pushed alert appearing
- * in whichever view happened to be mounted and missing from the other.
- */
+// Server's Alerts:HistoryLimit ceiling, fetched once so panel and notifications share one cache for the stream to prepend into.
 export const ALERT_HISTORY_LIMIT = 50
 
-/** How many of them the dashboard panel shows before "See all". */
+// How many of them the dashboard panel shows before "See all".
 export const PANEL_ROWS = 6
 
 export const alertHistoryQuery = queryOptions({

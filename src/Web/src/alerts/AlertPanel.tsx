@@ -7,18 +7,11 @@ import { Card } from '../components/Card'
 import { formatAge, formatMoney, formatPercent } from '../lib/format'
 import { alertHistoryQuery, alertKeys, simulateAlert, type FiredAlert } from './alertsApi'
 
-/**
- * RECENT ACTIVITY, not "active alerts", and the wording is the point. A price alert is a
- * moment that passed — a threshold was crossed at 14:32 — not a condition that is still
- * true now. Titling this "Active alerts" would promise a live list of breached thresholds,
- * which is a different feature nobody built, and every row carries a timestamp so the
- * reading is unambiguous either way.
- */
-
+// "Recent activity", not "active alerts" — an alert is a past event, not a still-true condition.
 interface AlertPanelProps {
-  /** How many rows to show. The query always holds the server's full page; this only slices. */
+  // The query always holds the server's full page; this only slices.
   limit?: number
-  /** The dashboard's panel offers Simulate and a link onward; the notifications screen is the list. */
+  // The dashboard panel offers Simulate and a link onward; the notifications screen is the full list.
   compact?: boolean
 }
 
@@ -48,11 +41,7 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
         <span className="text-tx font-mono text-[13px]">{alert.ticker}</span>
         <DirectionChip direction={alert.direction} />
 
-        {/*
-         * Badged, because a simulated alert went through the real path — saved and
-         * published like any other — and is therefore indistinguishable from a genuine
-         * one unless it says so. That is the whole reason Simulate is worth having.
-         */}
+        {/* Badged: a simulated alert takes the real save-then-publish path, so it needs a marker to tell it apart from a genuine one. */}
         {alert.isSimulated ? (
           <span className="border-bd text-mu rounded-full border px-1.5 py-px text-[10.5px] tracking-[0.03em] uppercase">
             {t('simulatedBadge')}
@@ -64,8 +53,7 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
         </span>
       </div>
 
-      {/* Server-written (see AlertNotification.reason), so it renders in whatever
-          language the server produced it in — the API does not localize this text.  */}
+      {/* Server-written text (AlertNotification.reason) — not localized client-side. */}
       <p className="text-mu text-[12px] leading-snug">{alert.reason}</p>
 
       <div className="text-mu flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[11.5px]">
@@ -76,7 +64,6 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
           </span>
         </span>
 
-        {/* Every row is stamped. `title` carries the exact instant for anyone who needs it. */}
         <time dateTime={alert.firedAt} title={alert.firedAt}>
           {Number.isNaN(firedAt)
             ? alert.firedAt
@@ -99,8 +86,7 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
     onSuccess: () => setMessage(''),
     // 409 is the only expected failure: nothing to simulate against yet.
     onError: () => setMessage(t('panel.simulateFailure')),
-    // The alert also arrives on the stream. This is what makes Simulate work with the
-    // stream down, which is exactly the case the persist-then-publish rule exists for.
+    // The alert also arrives on the stream, but this covers Simulate working while the stream is down.
     onSettled: () => queryClient.invalidateQueries({ queryKey: alertKeys.history() }),
   })
 

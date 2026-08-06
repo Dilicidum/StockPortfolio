@@ -44,7 +44,7 @@ it('keeps a refreshable session on a hard load of /dashboard', async () => {
         expiresIn: 900,
       }),
     ),
-    http.get('*/api/auth/manage/info', () =>
+    http.get('*/api/auth/me', () =>
       HttpResponse.json({ id: 'u-1', email: 'holder@example.com' }),
     ),
     // The route this test lands on fetches since Phase 3, and since Phase 4 its layout

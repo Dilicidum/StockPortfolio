@@ -28,7 +28,7 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
   let meCalls = 0
 
   server.use(
-    http.get('*/api/auth/manage/info', ({ request }) => {
+    http.get('*/api/auth/me', ({ request }) => {
       meCalls += 1
       if (request.headers.get('authorization') !== 'Bearer fresh-token') {
         return HttpResponse.json(
@@ -61,7 +61,7 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
 
   const CONCURRENCY = 10
   const results = await Promise.all(
-    Array.from({ length: CONCURRENCY }, () => apiFetch<{ email: string }>('/api/auth/manage/info')),
+    Array.from({ length: CONCURRENCY }, () => apiFetch<{ email: string }>('/api/auth/me')),
   )
 
   expect(refreshCalls).toBe(1)
@@ -78,7 +78,7 @@ it('starts a new refresh once the previous one has settled', async () => {
   let refreshCalls = 0
 
   server.use(
-    http.get('*/api/auth/manage/info', ({ request }) =>
+    http.get('*/api/auth/me', ({ request }) =>
       request.headers.get('authorization') === 'Bearer fresh-token'
         ? HttpResponse.json({ id: 'u-1', email: 'holder@example.com' })
         : HttpResponse.json({ status: 401 }, { status: 401 }),
@@ -94,12 +94,12 @@ it('starts a new refresh once the previous one has settled', async () => {
   )
 
   setTokens({ accessToken: 'stale-token', refreshToken: 'r', expiresIn: 0 })
-  await apiFetch('/api/auth/manage/info')
+  await apiFetch('/api/auth/me')
   expect(refreshCalls).toBe(1)
 
   // The slot must be released when the promise settles, or the second expiry
   // would reuse a resolved promise holding a token that is now stale too.
   setTokens({ accessToken: 'stale-token', refreshToken: 'r', expiresIn: 0 })
-  await apiFetch('/api/auth/manage/info')
+  await apiFetch('/api/auth/me')
   expect(refreshCalls).toBe(2)
 })

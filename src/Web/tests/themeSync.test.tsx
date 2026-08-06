@@ -72,7 +72,7 @@ afterEach(() => {
 
 /** Same boilerplate as `i18n.test.tsx`'s `renderPortfolio` — any authenticated route does, since the theme sync lives in the layout, not the Settings screen. */
 async function renderPortfolio() {
-  authStore.setUser({ email: 'holder@example.com' })
+  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), [AAPL])
   server.use(emptyTickerSearchHandler, ...alertsHandlers)
 

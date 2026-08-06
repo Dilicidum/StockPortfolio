@@ -1,8 +1,8 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
+using StockPortfolio.Modules.Identity.Application;
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
@@ -53,9 +53,9 @@ public static class IdentityModule
 
         services.AddIdentityPersistence(config);
 
-        // The EF half of Identity only. AddIdentityApiEndpoints and the bearer scheme live in the host,
-        // because both are ASP.NET Core and this assembly may not reference the web stack.
-        services.AddIdentityCore<IdentityUser>()
+        // The EF half of Identity only. The bearer scheme, SignInManager and the option overrides live in
+        // the host, because all three are ASP.NET Core and this assembly may not reference the web stack.
+        services.AddIdentityCore<AppUser>()
             .AddEntityFrameworkStores<IdentityDbContext>();
 
         services.AddScoped<IUserPreferencesRepository, UserPreferencesRepository>();

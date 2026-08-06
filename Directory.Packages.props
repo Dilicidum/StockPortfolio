@@ -11,6 +11,10 @@
     <PackageVersion Include="OneOf" Version="3.0.271" />
     <PackageVersion Include="FluentValidation" Version="12.1.1" />
     <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
+    <!-- IdentityUser<TKey> lives here. Application needs it directly because AppUser is declared there:
+         it is the one type both .Api (UserManager<AppUser>) and .Infrastructure (the store) must see,
+         and Application is the only layer they share. Not an AspNetCore assembly, so rule 4 is unaffected. -->
+    <PackageVersion Include="Microsoft.Extensions.Identity.Stores" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup Label="Api layer">

@@ -74,7 +74,7 @@ it('puts the refresh token where every tab can see it, not just this one', () =>
 
 it('signs this tab out the moment another tab signs out', async () => {
   setTokens({ accessToken: 'a', refreshToken: 'shared-refresh', expiresIn: 900 })
-  authStore.setUser({ email: 'holder@example.com' })
+  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
 
   expect(authStore.getState().isAuthenticated).toBe(true)
 
@@ -94,7 +94,7 @@ it('signs this tab in when a session appears in another tab', async () => {
         expiresIn: 900,
       }),
     ),
-    http.get('*/api/auth/manage/info', () => HttpResponse.json({ email: 'holder@example.com', isEmailConfirmed: false })),
+    http.get('*/api/auth/me', () => HttpResponse.json({ id: 'u-1', email: 'holder@example.com' })),
   )
 
   expect(authStore.getState().isAuthenticated).toBe(false)
@@ -133,7 +133,7 @@ it('ignores a rotation in another tab rather than racing it for the token', asyn
   )
 
   setTokens({ accessToken: 'a', refreshToken: 'first-token', expiresIn: 900 })
-  authStore.setUser({ email: 'holder@example.com' })
+  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
 
   otherTabWrote('rotated-by-the-other-tab')
   await settle()

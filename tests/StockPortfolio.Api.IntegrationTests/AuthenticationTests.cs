@@ -21,11 +21,12 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         using var client = _fixture.CreateClient();
         var email = Wire.UniqueEmail("register-then-login");
 
-        // Registering creates the account and issues nothing: 200, empty body, no Location. The route
-        // this replaced answered 201 with a token pair, so signing in is now a separate call.
+        // Registering signs the caller straight in: one call, and the pair comes back with it.
         using var registered = await Wire.RegisterAsync(client, email, Wire.ValidPassword);
         registered.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(registered));
-        registered.Headers.Location.ShouldBeNull();
+
+        var fromRegister = await Wire.ReadTokensAsync(registered);
+        fromRegister.AccessToken.ShouldNotBeNullOrWhiteSpace();
 
         using var loggedIn = await Wire.LoginAsync(client, email, Wire.ValidPassword);
         loggedIn.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedIn));
@@ -165,10 +166,9 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         var tokens = await Wire.RegisterSucceedsAsync(client, email);
 
-        // manage/info replaced the hand-written /api/auth/me. It carries the email and no id, which is
-        // why anything needing the id now asks UserManager rather than the wire.
+        // /me is this app's own route, over UserManager. It carries the id as well as the email.
         using var response = await Wire.SendAsync(
-            client, HttpMethod.Get, "/api/auth/manage/info", tokens.AccessToken);
+            client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -179,12 +179,12 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         user.ShouldNotBeNull();
         user.Email.ShouldBe(email);
 
-        (await Wire.UserIdAsync(_fixture.Services, email)).ShouldNotBeNullOrWhiteSpace();
+        user.Id.ShouldNotBe(Guid.Empty);
     }
 
     /// <summary>Signing out answers 204 and does not require a body.</summary>
     [Fact]
-    public async Task Logout_Returns200_AndIsIdempotent()
+    public async Task Logout_Returns204_AndIsIdempotent()
     {
         using var client = _fixture.CreateClient();
 
@@ -192,12 +192,12 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         using var withToken = await Wire.LogoutAsync(client, tokens.AccessToken);
 
-        withToken.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(withToken));
+        withToken.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(withToken));
 
         // Idempotent: the access token outlives the logout by design, so a second call still lands.
         using var repeated = await Wire.LogoutAsync(client, tokens.AccessToken);
 
-        repeated.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(repeated));
+        repeated.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(repeated));
     }
 
     /// <summary>Logout actually revokes: the refresh token stops working immediately.</summary>
@@ -224,7 +224,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         using (var loggedOut = await Wire.LogoutAsync(client, current.AccessToken))
         {
-            loggedOut.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedOut));
+            loggedOut.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(loggedOut));
         }
 
         using var after = await Wire.RefreshAsync(client, current.RefreshToken);

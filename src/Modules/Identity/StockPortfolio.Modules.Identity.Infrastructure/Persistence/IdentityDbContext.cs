@@ -1,20 +1,21 @@
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
+using StockPortfolio.Modules.Identity.Application;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence.Converters;
 
-// The framework's base class has the same short name as this one. Aliasing it is the only way to write
-// the base list without a fully-qualified type on the declaration line.
-using AspNetIdentityDbContext =
-    Microsoft.AspNetCore.Identity.EntityFrameworkCore.IdentityDbContext<Microsoft.AspNetCore.Identity.IdentityUser>;
-
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
-/// <summary>The Identity module's only DbContext: the framework's seven tables plus this module's one.</summary>
+/// <summary>The Identity module's only DbContext: the framework's four user tables plus this module's one.</summary>
+/// <remarks>
+/// IdentityUserContext, not IdentityDbContext. The difference is roles: IdentityDbContext would also map
+/// AspNetRoles, AspNetUserRoles and AspNetRoleClaims, and this app has no concept of a role. Three tables
+/// that can only ever be empty are three tables someone will eventually try to use.
+/// </remarks>
 internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> options)
-    : AspNetIdentityDbContext(options)
+    : IdentityUserContext<AppUser, Guid>(options)
 {
     /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "identity";
@@ -26,7 +27,7 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // First, and not optional: this is what maps AspNetUsers and its six siblings. Skip it and the
+        // First, and not optional: this is what maps AspNetUsers and its three siblings. Skip it and the
         // model builds with only user_preferences in it, and UserManager fails on the first query.
         base.OnModelCreating(modelBuilder);
 

@@ -124,15 +124,14 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         using var client = _fixture.CreateClient();
         var token = await SignedInAsync(client, "appearance-no-write");
 
-        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/manage/info", token);
+        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", token);
         me.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(me));
 
         var user = await me.Content.ReadFromJsonAsync<UserPayload>(
             JsonSerializerOptions.Web, TestContext.Current.CancellationToken);
         user.ShouldNotBeNull();
 
-        // A string: user_preferences.user_id is a foreign key onto AspNetUsers.Id, which is text.
-        var userId = await Wire.UserIdAsync(_fixture.Services, user.Email);
+        var userId = user.Id;
 
         using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath, token);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));

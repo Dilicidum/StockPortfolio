@@ -520,9 +520,9 @@ public sealed class DashboardTests(ApiFixture fixture)
             + $"[{string.Join(", ", dashboard.Positions.Select(position => position.Ticker))}].");
 
     /// <summary>Reads the caller's own id off the running host, the way HoldingsTests does.</summary>
-    private async Task<Guid> SubjectOfAsync(HttpClient client, string accessToken)
+    private static async Task<Guid> SubjectOfAsync(HttpClient client, string accessToken)
     {
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/manage/info", accessToken);
+        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", accessToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -530,7 +530,7 @@ public sealed class DashboardTests(ApiFixture fixture)
 
         user.ShouldNotBeNull();
 
-        return Guid.Parse(await Wire.UserIdAsync(_fixture.Services, user.Email));
+        return user.Id;
     }
 
     private static async Task AddSucceedsAsync(
