@@ -184,38 +184,55 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
     /// <summary>Signing out answers 204 and does not require a body.</summary>
     [Fact]
-    public async Task Logout_Returns204()
+    public async Task Logout_Returns200_AndIsIdempotent()
     {
         using var client = _fixture.CreateClient();
 
         var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("logout"));
 
-        using var withToken = await Wire.SendAsync(
-            client,
-            HttpMethod.Post,
-            "/api/auth/logout",
-            tokens.AccessToken,
-            new { refreshToken = tokens.RefreshToken });
+        using var withToken = await Wire.LogoutAsync(client, tokens.AccessToken);
 
-        withToken.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(withToken));
+        withToken.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(withToken));
 
-        // Idempotent: the same token again, and no body at all, are both still 204.
-        using var repeated = await Wire.SendAsync(
-            client,
-            HttpMethod.Post,
-            "/api/auth/logout",
-            tokens.AccessToken,
-            new { refreshToken = tokens.RefreshToken });
+        // Idempotent: the access token outlives the logout by design, so a second call still lands.
+        using var repeated = await Wire.LogoutAsync(client, tokens.AccessToken);
 
-        repeated.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(repeated));
+        repeated.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(repeated));
+    }
 
-        using var withoutBody = await Wire.SendAsync(
-            client,
-            HttpMethod.Post,
-            "/api/auth/logout",
-            tokens.AccessToken);
+    /// <summary>Logout actually revokes: the refresh token stops working immediately.</summary>
+    /// <remarks>
+    /// This is the assertion the migration nearly lost. MapIdentityApi ships no logout, and the version
+    /// Microsoft documents only calls SignOutAsync — which for a bearer caller revokes nothing and leaves
+    /// the refresh token good for its full lifetime. Rolling the security stamp is what closes it, and
+    /// /refresh checking that stamp is the only reason this test can go red.
+    /// </remarks>
+    [Fact]
+    public async Task Refresh_AfterLogout_IsRejected()
+    {
+        using var client = _fixture.CreateClient();
 
-        withoutBody.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(withoutBody));
+        var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("logout-revokes"));
+
+        // Refreshing works before the logout, so the rejection below is the logout and not a bad token.
+        using (var before = await Wire.RefreshAsync(client, tokens.RefreshToken))
+        {
+            before.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(before));
+        }
+
+        var current = await Wire.ReadTokensAsync(await Wire.RefreshAsync(client, tokens.RefreshToken));
+
+        using (var loggedOut = await Wire.LogoutAsync(client, current.AccessToken))
+        {
+            loggedOut.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedOut));
+        }
+
+        using var after = await Wire.RefreshAsync(client, current.RefreshToken);
+
+        after.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized,
+            "Logout must roll the security stamp, which /refresh validates. Without that the token "
+                + "stays good for its whole lifetime and logout is cosmetic: " + await Wire.Describe(after));
     }
 
     /// <summary>Sign-out still needs a bearer token — it is not an anonymous route.</summary>

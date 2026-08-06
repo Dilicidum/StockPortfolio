@@ -1,3 +1,6 @@
+using System.Security.Claims;
+
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
 
@@ -18,6 +21,9 @@ internal static class AuthenticationExtensions
     /// </summary>
     public const string UserIdClaimType = "sub";
 
+    /// <summary>How long an access token stays usable, and so how long a logout takes to fully bite.</summary>
+    public static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(15);
+
     /// <summary>Registers Identity's bearer tokens and the services behind MapIdentityApi.</summary>
     public static IServiceCollection AddStockPortfolioAuthentication(this IServiceCollection services)
     {
@@ -25,6 +31,14 @@ internal static class AuthenticationExtensions
         // The EF store itself is registered by AddIdentityModule, which may not reference this assembly.
         services.AddIdentityApiEndpoints<IdentityUser>(options =>
             options.ClaimsIdentity.UserIdClaimType = UserIdClaimType);
+
+        // The access token is the one window logout cannot close: it is a self-contained payload,
+        // validated by decrypting it and never by asking the database, so nothing can retire it early.
+        // The default is one hour. Fifteen minutes is what this app issued before the migration, and it
+        // is the whole of the residual risk after logout — see MapStockPortfolioAuthentication.
+        services.Configure<BearerTokenOptions>(
+            IdentityConstants.BearerScheme,
+            options => options.BearerTokenExpiration = AccessTokenLifetime);
 
         return services;
     }
@@ -36,21 +50,44 @@ internal static class AuthenticationExtensions
 
         group.MapIdentityApi<IdentityUser>();
 
-        // MapIdentityApi ships no logout route — verified against the endpoint list in Microsoft's own
-        // "Identity to secure a Web API backend for SPAs". This is the version those docs give.
+        // MapIdentityApi ships no logout route, so this one is hand-written. Microsoft's SPA guidance
+        // gives a version that only calls SignOutAsync; that clears the cookie schemes and leaves a
+        // bearer caller's refresh token working for its full fourteen days, which is not a logout.
         //
-        // With bearer tokens rather than cookies it clears the cookie schemes and nothing else: the
-        // access and refresh tokens the caller holds stay valid until they expire. Ending a session
-        // early is now the client discarding its tokens, not the server retiring them.
-        group.MapPost("/logout", async (SignInManager<IdentityUser> signInManager) =>
+        // Rolling the security stamp is what actually revokes. MapIdentityApi's /refresh calls
+        // ValidateSecurityStampAsync before issuing anything, so every refresh token this user holds
+        // stops working on its next use — no blocklist, no session table, no per-request database read.
+        //
+        // What it does NOT close is the access token, which is validated by decryption alone and never
+        // against the database. That window is BearerTokenExpiration, held at 15 minutes above.
+        //
+        // Known and deliberate: the stamp is per USER, so this is log-out-everywhere. The model it
+        // replaced could retire one session and leave a second device signed in. Per-device logout
+        // needs the session table this migration deleted; getting it back means Option B or C, not a
+        // setting. Say so before anyone reads this route as equivalent to the old one.
+        group.MapPost("/logout", async (
+                SignInManager<IdentityUser> signInManager,
+                UserManager<IdentityUser> userManager,
+                ClaimsPrincipal principal) =>
             {
+                // Reads the same UserIdClaimType configured above, so it follows the `sub` override.
+                var user = await userManager.GetUserAsync(principal);
+
+                if (user is not null)
+                {
+                    await userManager.UpdateSecurityStampAsync(user);
+                }
+
                 await signInManager.SignOutAsync();
 
                 return TypedResults.Ok();
             })
             .RequireAuthorization()
             .WithName("Logout")
-            .WithSummary("Signs the caller out of the cookie schemes.")
+            .WithSummary("Ends the session: revokes every refresh token this user holds.")
+            .WithDescription(
+                "The access token already issued stays usable for up to 15 minutes; refresh stops "
+                + "immediately. Logs the user out on every device, not only this one.")
             .Produces(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
