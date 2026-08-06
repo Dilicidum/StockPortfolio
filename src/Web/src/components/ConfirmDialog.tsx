@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import { Button } from './Button'
 
 export interface ConfirmDialogProps {
@@ -25,6 +26,7 @@ export function ConfirmDialog({
   onCancel,
   busy,
 }: ConfirmDialogProps) {
+  const { t } = useTranslation('common')
   const id = useId()
   const titleId = `${id}-title`
   const bodyId = `${id}-body`
@@ -117,7 +119,7 @@ export function ConfirmDialog({
 
         <div className="mt-5 flex justify-end gap-2">
           <Button ref={cancelRef} type="button" variant="secondary" onClick={onCancel}>
-            Cancel
+            {t('actions.cancel')}
           </Button>
           <Button type="button" onClick={onConfirm} loading={busy === true}>
             {confirmLabel}

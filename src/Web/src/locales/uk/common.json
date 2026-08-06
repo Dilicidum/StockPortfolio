@@ -10,6 +10,22 @@
     "saving": "Збереження…",
     "tryAgain": "Спробувати ще раз"
   },
+  "nav": {
+    "dashboard": "Панель приладів",
+    "portfolio": "Портфель",
+    "notifications": "Сповіщення"
+  },
+  "signOut": "Вийти",
+  "notFound": {
+    "heading": "Такої сторінки не існує.",
+    "backLink": "Повернутися до застосунку"
+  },
+  "search": {
+    "matchesCount": "Знайдено: {{count}}",
+    "suggestionsFor": "Підказки для поля «{{label}}»"
+  },
+  "loading": "Завантаження",
+  "splashLabel": "Відновлення сеансу",
   "fallbackError": "Щось пішло не так. Спробуйте ще раз.",
   "requestFailed": "Запит не вдався."
 }

@@ -10,6 +10,22 @@
     "saving": "Saving…",
     "tryAgain": "Try again"
   },
+  "nav": {
+    "dashboard": "Dashboard",
+    "portfolio": "Portfolio",
+    "notifications": "Notifications"
+  },
+  "signOut": "Sign out",
+  "notFound": {
+    "heading": "That page does not exist.",
+    "backLink": "Back to the app"
+  },
+  "search": {
+    "matchesCount": "{{count}} matches",
+    "suggestionsFor": "{{label}} suggestions"
+  },
+  "loading": "Loading",
+  "splashLabel": "Restoring session",
   "fallbackError": "Something went wrong. Please try again.",
   "requestFailed": "Request failed."
 }
