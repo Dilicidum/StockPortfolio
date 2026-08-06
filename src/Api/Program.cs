@@ -1,11 +1,13 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
+using StockPortfolio.Api.Adapters;
 using StockPortfolio.Api.Extensions;
 using StockPortfolio.Api.Middleware;
 using StockPortfolio.Modules.Alerts.Api;
 using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
 using StockPortfolio.Modules.Identity.Api;
+using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Infrastructure;
 using StockPortfolio.Modules.MarketData.Api;
 using StockPortfolio.Modules.Portfolio.Infrastructure;
@@ -73,6 +75,20 @@ builder.Services.AddMarketDataApi();
 
 builder.Services.AddAlertsModule(builder.Configuration);
 builder.Services.AddAlertsApi();
+
+// The two halves of the poll cycle. MarketData states both needs in its own words and depends on
+// nothing; these are the only place the two modules are named together.
+//
+// Both MUST be plain Add, and MUST come after AddMarketDataModule. That module registers a no-op
+// observer with TryAdd, which skips only when the service type is ALREADY there - so it always wins
+// the race and these two lines win by being last. Write TryAddScoped here and the no-op survives:
+// the poller fetches prices, stores windows, and evaluates nothing, with no error anywhere.
+builder.Services.AddScoped<IPollTargetSource, AlertsPollTargetSource>();
+builder.Services.AddScoped<IPriceSampleObserver, AlertsPriceSampleObserver>();
+
+// Retention belongs to MarketData and the window cap to Alerts, so this is the only place both are
+// visible. A window longer than retention stops alerts firing and reports nothing.
+builder.Services.ValidateAlertWindowFitsRetention(builder.Configuration);
 
 // Must come AFTER the modules: a decorator only applies to descriptors that already exist.
 // Not load-bearing for MarketData, which registers no ICommandHandler or IQueryHandler at all -
