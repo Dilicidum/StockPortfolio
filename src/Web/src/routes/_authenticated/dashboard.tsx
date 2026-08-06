@@ -1,6 +1,5 @@
-import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { AlertPanel } from '../../alerts/AlertPanel'
 import { PANEL_ROWS } from '../../alerts/alertsApi'
@@ -15,6 +14,7 @@ import { TickerCell } from '../../components/TickerCell'
 import { useAuth } from '../../auth/useAuth'
 import { formatAge, formatMoney, formatPercent, isNegative, NO_VALUE, type Money } from '../../lib/format'
 import { dashboardKeys, fetchDashboard, type DashboardPosition } from '../../marketdata/dashboardApi'
+import { dashboardSettingsQuery, saveDashboardSettings, settingsKeys, type DashboardSettings } from '../../settings/settingsApi'
 
 /**
  * NO LOADER AND NO ERROR COMPONENT, unlike `portfolio.tsx` — whose own comment says so.
@@ -57,7 +57,28 @@ function isTrailing(position: DashboardPosition, newestObservedAt: number, stale
 function DashboardPage() {
   const { user } = useAuth()
   const { t } = useTranslation('dashboard')
-  const [intervalMs, setIntervalMs] = useState(DEFAULT_INTERVAL_MS)
+  const queryClient = useQueryClient()
+
+  // Sourced from the settings screen's own query, not local state — a value changed here and
+  // a value changed on /settings write through the SAME mutation below, so the two screens
+  // can never disagree about how often a refresh actually happens.
+  const { data: settings } = useQuery(dashboardSettingsQuery)
+  const intervalMs = (settings?.refreshIntervalSeconds ?? DEFAULT_INTERVAL_MS / 1000) * 1000
+
+  const saveInterval = useMutation({
+    mutationFn: saveDashboardSettings,
+    // Optimistic: the select is the only control here, so its own change has to show up
+    // immediately rather than waiting on the round trip, exactly as the visibility toggle does.
+    onMutate: (body) => {
+      const previous = queryClient.getQueryData<DashboardSettings>(settingsKeys.dashboard())
+      queryClient.setQueryData(settingsKeys.dashboard(), body)
+      return { previous }
+    },
+    onSuccess: (result) => queryClient.setQueryData(settingsKeys.dashboard(), result),
+    onError: (_error, _body, onMutateResult) => {
+      if (onMutateResult?.previous) queryClient.setQueryData(settingsKeys.dashboard(), onMutateResult.previous)
+    },
+  })
 
   // The app's first `useQuery` — every other query is a `useSuspenseQuery` behind a
   // loader. All three options below override a global default deliberately.
@@ -186,7 +207,9 @@ function DashboardPage() {
                   <select
                     className="border-bd bg-panel-2 text-tx rounded-lg border px-2 py-1 text-[12.5px]"
                     value={intervalMs}
-                    onChange={(event) => setIntervalMs(Number(event.target.value))}
+                    onChange={(event) =>
+                      saveInterval.mutate({ refreshIntervalSeconds: Number(event.target.value) / 1000 })
+                    }
                   >
                     {INTERVALS.map((option) => (
                       <option key={option.value} value={option.value}>

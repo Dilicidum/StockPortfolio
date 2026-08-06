@@ -15,6 +15,7 @@ import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { dashboardKeys, type GetDashboardResult } from '../src/marketdata/dashboardApi'
 import { alertsHandlers } from './msw/alerts'
 import { marketDataHealthHandler } from './msw/dashboard'
+import { dashboardSettingsHandler, saveDashboardSettingsHandler } from './msw/settings'
 import { server } from './msw/server'
 
 /**
@@ -97,9 +98,16 @@ const dashboardJson = (data: GetDashboardResult) =>
 /** The fourth inline copy of the memory-router boilerplate, which is the convention here. */
 async function renderDashboard(handlers: RequestHandler[] = [dashboardJson(freshCopy())]) {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
-  // The alert panel and the layout's stream fetch on mount too, and MSW errors on
-  // anything unhandled — so a dashboard mount needs the alert stubs as much as its own.
-  server.use(marketDataHealthHandler, ...alertsHandlers, ...handlers)
+  // The alert panel and the layout's stream fetch on mount too, and the refresh interval
+  // now reads and writes `/api/settings/dashboard` (see dashboard.tsx) — MSW errors on
+  // anything unhandled, so a dashboard mount needs all three stubs, not only its own.
+  server.use(
+    marketDataHealthHandler,
+    dashboardSettingsHandler(),
+    saveDashboardSettingsHandler,
+    ...alertsHandlers,
+    ...handlers,
+  )
 
   const router = createRouter({
     routeTree,
