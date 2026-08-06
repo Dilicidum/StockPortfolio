@@ -206,7 +206,7 @@ public static class IdentityEndpoints
             gone => ProblemDetailsExtensions.UnauthorizedProblem("This session no longer refers to a valid account."));
     }
 
-    /// <summary>Reads the caller's appearance settings, creating the default row on first read.</summary>
+    // Reads the caller's appearance settings, creating the default row on first read.
     private static async Task<IResult> GetAppearanceAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetAppearanceQuery, GetAppearanceResult> handler,
@@ -222,7 +222,7 @@ public static class IdentityEndpoints
         return TypedResults.Ok(result);
     }
 
-    /// <summary>Saves the caller's appearance settings.</summary>
+    // Saves the caller's appearance settings.
     private static async Task<IResult> SaveAppearanceAsync(
         SaveAppearanceRequest request,
         ClaimsPrincipal principal,

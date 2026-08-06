@@ -4,7 +4,7 @@ using StockPortfolio.Modules.Identity.Api.Validators;
 
 namespace StockPortfolio.Modules.Identity.UnitTests;
 
-/// <summary>The shape layer of saving appearance settings.</summary>
+// The shape layer of saving appearance settings.
 public sealed class SaveAppearanceRequestValidatorTests
 {
     private readonly SaveAppearanceRequestValidator _validator = new();

@@ -1,5 +1,5 @@
 using StockPortfolio.Modules.Identity.Application.Abstractions;
-using StockPortfolio.Modules.Identity.Application.Preferences.Commands.SaveAppearance;
+using StockPortfolio.Modules.Identity.Application.Preferences;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 

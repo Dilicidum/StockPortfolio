@@ -124,6 +124,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("Logout", "anonymous", 401)]
     [InlineData("GetCurrentUser", "bearer", 200)]
     [InlineData("GetCurrentUser", "anonymous", 401)]
+    [InlineData("GetAppearance", "bearer", 200)]
+    [InlineData("GetAppearance", "anonymous", 401)]
+    [InlineData("SaveAppearance", "valid", 200)]
+    [InlineData("SaveAppearance", "bad-theme", 400)]
+    [InlineData("SaveAppearance", "wrong-content-type", 415)]
+    [InlineData("SaveAppearance", "anonymous", 401)]
     public async Task AuthRoute_DeclaresTheStatusItReturned(string routeName, string scenario, int expectedStatus)
     {
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
@@ -420,6 +426,81 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("GetCurrentUser", "anonymous"):
             {
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me");
+
+                return response.StatusCode;
+            }
+
+            case ("GetAppearance", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-get");
+
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath, token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAppearance", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "valid"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-save");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.AppearancePath,
+                    token,
+                    new { theme = "dark", language = "uk" });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "bad-theme"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-bad-theme");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.AppearancePath,
+                    token,
+                    new { theme = "purple", language = "en" });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-415");
+
+                using var request = new HttpRequestMessage(HttpMethod.Put, Wire.AppearancePath)
+                {
+                    Content = new StringContent(
+                        """{"theme":"dark","language":"uk"}""",
+                        Encoding.UTF8,
+                        "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.AppearancePath,
+                    accessToken: null,
+                    new { theme = "dark", language = "uk" });
 
                 return response.StatusCode;
             }

@@ -4,17 +4,19 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 
+using Npgsql;
+
 using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The appearance settings pair under /api/settings, driven end to end over HTTP against a real Postgres.</summary>
+// The appearance settings pair under /api/settings, driven end to end over HTTP against a real Postgres.
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AppearanceSettingsTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>A user who has never touched settings gets the default row, without anything being written.</summary>
+    // A user who has never touched settings gets the default row, without anything being written.
     [Fact]
     public async Task Get_ForANewUser_ReturnsSystemAndEnglish()
     {
@@ -33,7 +35,7 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         payload.Language.ShouldBe("en");
     }
 
-    /// <summary>What was saved is what a following read returns.</summary>
+    // What was saved is what a following read returns.
     [Fact]
     public async Task Put_ThenGet_ReturnsWhatWasSaved()
     {
@@ -66,7 +68,7 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         fetchedPayload.Language.ShouldBe("uk");
     }
 
-    /// <summary>Shape validation rejects a theme outside the allowed set before any handler runs.</summary>
+    // Shape validation rejects a theme outside the allowed set before any handler runs.
     [Fact]
     public async Task Put_WithAnUnknownTheme_Returns400()
     {
@@ -86,7 +88,7 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         (await Wire.FailingFieldsAsync(response)).ShouldContain("theme");
     }
 
-    /// <summary>No token, no settings — the group's RequireAuthorization applies to both routes.</summary>
+    // No token, no settings — the group's RequireAuthorization applies to both routes.
     [Fact]
     public async Task Get_Anonymous_Is401()
     {
@@ -97,8 +99,7 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>A media type the route cannot read is what actually produces a 415 — checked against the
-    /// running host rather than assumed, and mirrored below in the endpoint's .Produces list.</summary>
+    // A media type the route cannot read is what actually produces a 415 — checked against the running host.
     [Fact]
     public async Task Put_WithWrongContentType_ReturnsWhateverItReallyReturns()
     {
@@ -114,6 +115,36 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType, await Wire.Describe(response));
+    }
+
+    // The default row is built in memory and never persisted, so no row exists after the first read.
+    [Fact]
+    public async Task Get_ForANewUser_WritesNothing()
+    {
+        using var client = _fixture.CreateClient();
+        var token = await SignedInAsync(client, "appearance-no-write");
+
+        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", token);
+        me.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(me));
+
+        var user = await me.Content.ReadFromJsonAsync<UserPayload>(
+            JsonSerializerOptions.Web, TestContext.Current.CancellationToken);
+        user.ShouldNotBeNull();
+
+        using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath, token);
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
+
+        await using var connection = new NpgsqlConnection(_fixture.IdentityConnectionString);
+        await connection.OpenAsync(TestContext.Current.CancellationToken);
+
+        await using var command = new NpgsqlCommand(
+            "SELECT count(*) FROM identity.user_preferences WHERE user_id = @userId",
+            connection);
+        command.Parameters.AddWithValue("userId", user.Id);
+
+        var count = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
+
+        count.ShouldBeOfType<long>().ShouldBe(0L);
     }
 
     private static async Task<string> SignedInAsync(HttpClient client, string prefix) =>

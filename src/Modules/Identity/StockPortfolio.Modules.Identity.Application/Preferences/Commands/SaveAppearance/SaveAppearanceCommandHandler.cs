@@ -1,6 +1,7 @@
 using OneOf;
 
 using StockPortfolio.Modules.Identity.Application.Abstractions;
+using StockPortfolio.Modules.Identity.Application.Preferences;
 using StockPortfolio.Modules.Identity.Application.Preferences.Queries.GetAppearance;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel;

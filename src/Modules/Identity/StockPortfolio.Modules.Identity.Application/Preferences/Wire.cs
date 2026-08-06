@@ -1,9 +1,8 @@
 using StockPortfolio.Modules.Identity.Domain;
 
-namespace StockPortfolio.Modules.Identity.Application.Preferences.Commands.SaveAppearance;
+namespace StockPortfolio.Modules.Identity.Application.Preferences;
 
-// Maps ThemeChoice and LanguageChoice to and from their wire spellings. Shared by the read and the
-// write side of appearance settings, both of which live in this feature area.
+// Maps ThemeChoice and LanguageChoice to and from their wire spellings, shared by the read and write sides.
 internal static class Wire
 {
     public static string Theme(ThemeChoice theme) => theme switch
