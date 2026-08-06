@@ -111,9 +111,6 @@ public sealed class ApiFixture : IAsyncLifetime
             // Every module on the migrator role: it owns every schema, and no _svc role has DDL rights.
             ["ConnectionStrings:Identity"] = MigratorConnectionString,
             ["ConnectionStrings:Portfolio"] = MigratorConnectionString,
-
-            // AddIdentityModule validates the Jwt section eagerly; the migrator never signs anything.
-            ["Jwt:SigningKey"] = SigningKey,
         })
         .Build();
 
