@@ -48,6 +48,11 @@ Every task inherits these. They come from `CLAUDE.md` and are not restated per t
 - **`Maximum Pool Size=2`** on every connection string.
 - **No third-party UI component library** in the SPA. Native `<select>`, `<input type="checkbox">`.
 - **Never add `UseResponseCompression()`.** It kills the alert stream.
+- **Comments are one line, plain `//`, and carry no tags.** No `///`, no `<summary>`, no `<param>`,
+  `<returns>`, `<remarks>` or `<b>`, no banner rules, no multi-line blocks. If the reasoning needs more than
+  one line it belongs in `CLAUDE.md`, `docs/plan/` or a commit message. Task 13 applies this to the existing
+  code; every task before it writes new code that already obeys it. `CS1591` is already suppressed in
+  `Directory.Build.props:24`, so dropping doc comments does not break the build.
 - Tests are named `Method_Scenario_Expectation`. `CA1707` is suppressed in `tests/Directory.Build.props`.
 - `dotnet test` on this machine fails under Smart App Control; run it in a Linux SDK container.
 
@@ -159,6 +164,9 @@ replace, not a partial update. It also matches `PUT /api/alerts/settings`, which
 | `scripts/check-locale-parity.mjs` | build check that both languages have the same keys |
 | `tests/settings.test.tsx`, `tests/theme.test.tsx`, `tests/msw/settings.ts` | coverage |
 
+**Task 13 touches almost every file listed above and many that are not.** It is a comment sweep, it runs last,
+and it is its own commit.
+
 ---
 
 ## Task 1 — Identity: theme and language
@@ -249,7 +257,7 @@ public sealed class UserPreferences
 
     public LanguageChoice Language { get; private set; }
 
-    /// <summary>The row a user gets the first time anything reads their preferences.</summary>
+    // The row a user gets the first time anything reads their preferences.
     public static UserPreferences CreateDefault(UserId userId) =>
         new(userId, ThemeChoice.System, LanguageChoice.English);
 
@@ -330,7 +338,7 @@ public interface IUserPreferencesRepository
 {
     Task<UserPreferences?> FindAsync(UserId userId, CancellationToken ct);
 
-    /// <summary>Inserts or updates the row and <b>commits</b>.</summary>
+    // Inserts or updates the row and commits.
     Task SaveAsync(UserPreferences preferences, CancellationToken ct);
 }
 ```
@@ -686,7 +694,7 @@ rather than adding a second.
 - [ ] **Step 2: run, fail. Step 3: add the method**
 
 ```csharp
-/// <summary>Hiding is a display filter: it changes no figure and no alert.</summary>
+// Hiding is a display filter: it changes no figure and no alert.
 public void SetVisibility(bool isVisible)
 {
     IsVisible = isVisible;
@@ -814,14 +822,14 @@ public sealed class UserProviderKey
 
     public Guid UserId { get; private set; }
 
-    /// <summary>The user's provider key, already protected. Never leaves the server.</summary>
+    // The user's provider key, already protected. Never leaves the server.
     public string Ciphertext { get; private set; }
 
     public string LastFour { get; private set; }
 
     public DateTimeOffset SavedAt { get; private set; }
 
-    /// <summary>Set when the provider refused this key on a real fetch, so the screen can say so.</summary>
+    // Set when the provider refused this key on a real fetch, so the screen can say so.
     public DateTimeOffset? LastRejectedAt { get; private set; }
 
     public static UserProviderKey Create(Guid userId, string ciphertext, string lastFour, TimeProvider clock)
@@ -1009,16 +1017,16 @@ reference is needed anywhere**. Only the EF and Redis key-store packages are sep
 ```csharp
 namespace StockPortfolio.Modules.MarketData.Application.Abstractions;
 
-/// <summary>Scrambles a secret before it is stored. The host decides how.</summary>
+// Scrambles a secret before it is stored. The host decides how.
 public interface ISecretProtector
 {
     string Protect(string plaintext);
 
-    /// <summary>Null when the stored value cannot be read back — a lost key ring, or tampering.</summary>
+    // Null when the stored value cannot be read back: a lost key ring, or tampering.
     string? Unprotect(string ciphertext);
 }
 
-/// <summary>Where the protector's own keys are kept. Synchronous: read once at startup, written on rotation.</summary>
+// Where the protector's own keys are kept. Synchronous, because IXmlRepository is.
 public interface IKeyRingStore
 {
     IReadOnlyList<string> GetAll();
@@ -1139,8 +1147,12 @@ MarketData's key-ring store, and **before** `DecorateHandlers()`.
 has finished. Do not add an eager warm-up: on a clean `docker compose down -v && docker compose up` the
 `api` container can start before `marketdata.data_protection_keys` exists, and an eager read would turn that
 race into a startup crash on the acceptance-gate path. `deferred-work.md` D10 records that compose's
-ordering is already imperfect here. Write this reasoning into a comment above the call, because "add a
-warm-up so the first request is fast" is an obvious-looking change that breaks the gate.
+ordering is already imperfect here.
+
+"Add a warm-up so the first request is fast" is an obvious-looking change that breaks the gate, so it needs
+a guard — but the guard is **not** a comment, because the comment rule allows one line. Put the reasoning in
+`CLAUDE.md`'s Traps section and leave `// No eager warm-up: see CLAUDE.md, key ring vs migration job.` above
+the call.
 
 - [ ] **Step 6: the startup check**
 
@@ -1237,7 +1249,7 @@ valid key. So this needs its own narrow method rather than reuse:
 Add to `IQuoteProvider`:
 
 ```csharp
-/// <summary>Answers whether the provider accepts this key. Unlike every other method here, it does not fail open.</summary>
+// Unlike every other method here, this does not fail open.
 Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct);
 ```
 
@@ -1258,8 +1270,9 @@ fake nobody can reason about. The `Unknown` arm is reached in tests through `Scr
 (`tests/…/Infrastructure/ScriptedQuoteProvider.cs`), which must gain the new `VerifyKeyAsync` member and a
 way to script each of the three verdicts.
 
-State this rule in the fake's own doc comment. It is invented behaviour, and invented behaviour that nothing
-explains gets "simplified" back to always-true.
+The rule is invented behaviour, and invented behaviour that nothing explains gets "simplified" back to
+always-true. One line above the method — `// Sixteen characters or more is accepted; the fake needs a rule
+that can say no.` — and the reasoning in `CLAUDE.md`.
 
 The handler maps `Unknown` to a distinct failure record, not to success and not to `ProviderRejectedTheKey`:
 telling someone their key is bad when the provider was merely down is the same class of mistake as the
@@ -1829,7 +1842,102 @@ Also fix the stale comment at `src/Api/Program.cs:93-95`, which claims MarketDat
 `SearchTickersQueryHandler` — and Task 6 adds three more.
 
 - [ ] **Step 9: delete this file.** An implementation plan is written when a phase starts and deleted when it
-  ships. `docs/plan/` goes back to seven files.
+  ships. `docs/plan/` goes back to seven files. Task 13 runs before this — it is the last code change, and its
+  Step 1 may have moved reasoning into `CLAUDE.md` that this file was the temporary home for.
+
+---
+
+## Task 13 — Strip the comments
+
+Every comment in the codebase becomes a single plain `//` line or disappears. No `///`, no `<summary>`, no
+tags of any kind, no multi-line blocks, no banner rules.
+
+Run this **last**, as its own commit. It touches almost every file, and mixing it into a feature commit
+makes the feature unreviewable.
+
+**Scale, measured rather than guessed:** 307 `.cs` files under `src/` and `tests/` excluding generated
+migrations, carrying **1,045 `///` lines and 747 `//` lines**. Re-measure before starting; Tasks 1 to 12 add
+to both.
+
+`CS1591` (missing XML comment on a public member) is already in `NoWarn` at `Directory.Build.props:24`, so
+removing doc comments cannot break the build. `GenerateDocumentationFile` stays `true` — it is what emits the
+`.xml` alongside each assembly, and nothing here consumes it, but turning it off is a separate decision.
+
+**Files:** every `.cs` under `src/` and `tests/`. Also `src/Web/**/*.{ts,tsx,css}` and `index.html`, which
+carry the same habit. **Not** generated migration files, and **not** `.csproj` / `.props` / `.bicep` /
+workflow YAML — those are configuration, and the XML and YAML comment styles are the only documentation those
+formats have.
+
+- [ ] **Step 1: move the reasoning out before deleting it**
+
+Some multi-line comments are the **only** written record of a trap. Deleting them loses the reasoning, not
+just the words. Named examples, all verified present:
+
+| Location | What it records |
+|---|---|
+| `HoldingQueries.cs:24-25` | a hidden position is still held, so `HoldsAsync` deliberately does not filter on visibility |
+| `Program.cs:79-85` | the adapter registrations must come after `AddMarketDataModule`, or the module's `TryAdd` no-op wins |
+| `MarketDataModule.cs:61-62` | the rate limiter is a singleton because the typed client is transient |
+| `Holding.cs` (the `AveragePrice` block) | efcore#31621 — a complex type cannot be a constructor parameter |
+| `main.tsx:39-67` | session restore must finish before `RouterProvider` mounts, because `beforeLoad` is synchronous |
+| `portfolio.tsx:73-79` | zod messages are keys so they can be translated |
+| `index.css:3-13` | the dark-mode variant strategy |
+| `Directory.Build.props:10-12` | do not relax `TreatWarningsAsErrors` to soften CS8509 |
+
+Work through them one at a time. For each: is this reasoning already in `CLAUDE.md`, `docs/plan/` or
+`docs/reference/`? If yes, delete the comment. If no, **add it there first**, in the same commit, then
+delete. A reasoning trap that exists in neither place after this task is a regression, and it is invisible —
+nothing fails.
+
+Note that most of the table above is already in `CLAUDE.md`'s Traps or Conventions sections, so the majority
+are straight deletions. Check rather than assume; the ones that are not there are the whole point of this
+step.
+
+- [ ] **Step 2: the `///` sweep**
+
+For each `/// <summary>X</summary>`: if `X` restates the member name — `/// <summary>Gets the user id.</summary>`
+on `UserId` — delete it. If it carries something the signature cannot say, rewrite it as `// X` on one line.
+Delete every `<param>`, `<returns>`, `<exception>`, `<remarks>`, `<inheritdoc>`, `<see>` and `<b>` outright.
+
+Watch for `<see cref="…"/>`: a `cref` is compiler-checked, so deleting one can silently orphan a reference
+that was keeping a name honest. That is a real loss and an accepted one — it is why the rule exists, since a
+`cref` is also what broke the build two steps from its cause during a Phase 1 rename.
+
+- [ ] **Step 3: the `//` sweep**
+
+Collapse every multi-line `//` block to one line or delete it. Delete banner rules
+(`// ─────────`), commented-out code, and anything narrating what the next line plainly does.
+
+- [ ] **Step 4: the SPA**
+
+Same rules for `.ts`, `.tsx` and `.css`. `/** … */` blocks go the same way as `///`. The blocking inline
+script in `index.html` from Task 8 keeps its one line, because a reader finding an unexplained script in
+`<head>` will delete it.
+
+- [ ] **Step 5: update the rule in `CLAUDE.md`**
+
+The Conventions section currently reads "A doc comment is a single `/// <summary>…</summary>`". That is now
+wrong. Replace it with the rule above: one line, plain `//`, no tags. Do this in the same commit, or the
+first person to add a file reintroduces the old style from a document that still endorses it.
+
+- [ ] **Step 6: verify**
+
+```bash
+dotnet build && dotnet test
+npm --prefix src/Web test
+```
+
+Then count what is left, and expect the `///` count to be zero:
+
+```bash
+git diff --stat HEAD~1
+```
+
+- [ ] **Step 7: commit**
+
+```bash
+git commit -m "Comments are one line and carry no tags"
+```
 
 ---
 
