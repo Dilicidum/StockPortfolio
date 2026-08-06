@@ -1,21 +1,23 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
-import { holdingsQuery, type Holding } from '../portfolio/holdingsApi'
+import { dashboardKeys } from '../marketdata/dashboardApi'
+import { holdingKeys, holdingsQuery, setHoldingVisibility, type Holding } from '../portfolio/holdingsApi'
 import { useSetHoldingVisibility } from '../portfolio/useHoldingMutations'
 
 /**
  * Requirement 8's "list of stocks" — a checkbox per position that controls whether it shows
  * on the dashboard. `useSetHoldingVisibility` already carries the optimistic
- * snapshot-and-rollback pattern `useHoldingMutations.ts` uses everywhere else, so a toggle
- * updates the counter immediately and un-does itself if the `PATCH` fails.
+ * snapshot-and-rollback pattern `useHoldingMutations.ts` uses everywhere else, so a single
+ * toggle updates the counter immediately and un-does itself if the `PATCH` fails.
  */
 export function VisibilitySection() {
   const { t } = useTranslation(['settings', 'common'])
   const { data } = useQuery(holdingsQuery)
+  const queryClient = useQueryClient()
   const holdings = data ?? []
   const setVisibility = useSetHoldingVisibility()
   const [error, setError] = useState('')
@@ -31,11 +33,45 @@ export function VisibilitySection() {
     )
   }
 
-  function showAll() {
+  /**
+   * Deliberately NOT a loop of `setVisibility.mutate(...)` calls. That hook's `onMutate`
+   * snapshots the whole list before applying one optimistic update; fired several times
+   * without awaiting, every call's `cancelQueries` races the others, so more than one
+   * snapshot ends up holding the SAME pre-loop list. One PATCH failing then rolled the
+   * entire list back through that hook — undoing siblings that had already succeeded.
+   *
+   * Applying every optimistic update in one `setQueryData` call sidesteps the race outright:
+   * there is only one snapshot, taken once, and a failure reverts only the positions whose
+   * request actually failed.
+   */
+  async function showAll() {
     setError('')
-    for (const holding of hidden) {
-      setVisibility.mutate({ id: holding.id, isVisible: true })
+    const targets = hidden
+    if (targets.length === 0) return
+
+    const targetIds = new Set(targets.map((holding) => holding.id))
+    const previous = queryClient.getQueryData<Holding[]>(holdingKeys.list())
+
+    queryClient.setQueryData<Holding[]>(holdingKeys.list(), (old) =>
+      (old ?? []).map((holding) => (targetIds.has(holding.id) ? { ...holding, isVisible: true } : holding)),
+    )
+
+    const outcomes = await Promise.allSettled(targets.map((holding) => setHoldingVisibility(holding.id, true)))
+    const failed = targets.filter((_holding, index) => outcomes[index]?.status === 'rejected')
+
+    if (failed.length > 0) {
+      const failedIds = new Set(failed.map((holding) => holding.id))
+      queryClient.setQueryData<Holding[]>(holdingKeys.list(), (old) =>
+        (old ?? []).map((holding) =>
+          failedIds.has(holding.id)
+            ? { ...holding, isVisible: previous?.find((p) => p.id === holding.id)?.isVisible ?? false }
+            : holding,
+        ),
+      )
+      setError(t('visibility.showAllFailure', { tickers: failed.map((holding) => holding.ticker).join(', ') }))
     }
+
+    queryClient.invalidateQueries({ queryKey: dashboardKeys.view() })
   }
 
   return (

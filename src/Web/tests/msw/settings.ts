@@ -27,6 +27,14 @@ export const apiKeyStatusHandler = (
   status: ApiKeyStatus = { configured: false, lastFour: null, rejected: false },
 ) => http.get('*/api/settings/api-key', () => HttpResponse.json(status))
 
+/** A 404: bring-your-own-key is switched off on this deployment. */
+export const apiKeyStatusUnavailableHandler = http.get('*/api/settings/api-key', () =>
+  HttpResponse.json(
+    { title: 'Not found', status: 404 },
+    { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
+  ),
+)
+
 export const saveApiKeyAcceptedHandler = (lastFour = 'a1b2') =>
   http.post('*/api/settings/api-key', () =>
     HttpResponse.json({ configured: true, lastFour, rejected: false } satisfies ApiKeyStatus),
@@ -56,6 +64,12 @@ export const setHoldingVisibilityHandler = (onSave?: (id: string, isVisible: boo
     onSave?.(String(params.id), body.isVisible)
     return new HttpResponse(null, { status: 204 })
   })
+
+/** Every PATCH succeeds except the one named holding, which 404s — for proving a partial `showAll` failure reverts only that one. */
+export const setHoldingVisibilityFailingFor = (failingId: string) =>
+  http.patch('*/api/holdings/:id/visibility', ({ params }) =>
+    String(params.id) === failingId ? new HttpResponse(null, { status: 404 }) : new HttpResponse(null, { status: 204 }),
+  )
 
 /** The quiet default: nothing configured, the default interval, and every write echoes back. */
 export const defaultSettingsHandlers = [

@@ -7,7 +7,7 @@ import type { AppearanceSettings } from '../../src/settings/appearanceApi'
  * A test that cares about a particular language calls `server.use(appearanceHandler(...))`
  * with its own value; that handler wins because MSW resolves the most recently added match.
  */
-export const appearanceHandler = (settings: AppearanceSettings = { theme: 'System', language: 'en' }) =>
+export const appearanceHandler = (settings: AppearanceSettings = { theme: 'system', language: 'en' }) =>
   http.get('*/api/settings/appearance', () => HttpResponse.json(settings))
 
 export const defaultAppearanceHandler = appearanceHandler()

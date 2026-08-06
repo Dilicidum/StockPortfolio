@@ -1,14 +1,13 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
-import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { applyTheme, cacheTheme, type ThemeChoice } from '../lib/theme'
+import { fallbackMessage, useSaveState, useSyncWhileIdle } from '../lib/useSaveState'
 import { appearanceKeys, appearanceQuery } from './appearanceApi'
 import { saveAppearance } from './settingsApi'
-
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+import { SaveButton } from './SaveButton'
 
 const THEMES: ThemeChoice[] = ['light', 'dark', 'system']
 
@@ -16,6 +15,10 @@ const THEMES: ThemeChoice[] = ['light', 'dark', 'system']
  * Saves on its own — a rejected API key elsewhere on this screen must not carry a theme
  * change down with it. `PUT` replaces both fields at once, so only `theme` changes here and
  * only `language` changes in `LanguageSection`; each reads the other's value off the same cache.
+ *
+ * This is a LOCAL, immediate apply for the person editing the control right now — see
+ * `useSyncServerTheme` for the app-wide sync that also runs the moment the server answers,
+ * whether or not this screen is even open.
  */
 export function AppearanceSection() {
   const { t } = useTranslation(['settings', 'common'])
@@ -24,27 +27,18 @@ export function AppearanceSection() {
   const themeId = useId()
 
   const [theme, setTheme] = useState<ThemeChoice>('system')
-  const [state, setState] = useState<SaveState>('idle')
-  const [error, setError] = useState('')
+  const save = useSaveState()
+  useSyncWhileIdle(data?.theme as ThemeChoice | undefined, save.state, setTheme)
 
-  // Synced once the server answers, only while nothing is mid-edit — a background refetch
-  // overwriting an unsaved choice would look like the page ignoring a click.
-  useEffect(() => {
-    if (data && state === 'idle') setTheme(data.theme as ThemeChoice)
-  }, [data, state])
-
-  const save = useMutation({
+  const mutation = useMutation({
     mutationFn: () => saveAppearance({ theme, language: data?.language ?? 'en' }),
     onSuccess: (result) => {
       queryClient.setQueryData(appearanceKeys.view(), result)
       applyTheme(theme)
       cacheTheme(theme)
-      setState('saved')
+      save.succeed()
     },
-    onError: (mutationError) => {
-      setState('error')
-      setError(mutationError instanceof Error && mutationError.message ? mutationError.message : t('common:fallbackError'))
-    },
+    onError: (mutationError) => save.fail(fallbackMessage(mutationError, t('common:fallbackError'))),
   })
 
   return (
@@ -60,7 +54,7 @@ export function AppearanceSection() {
             value={theme}
             onChange={(event) => {
               setTheme(event.target.value as ThemeChoice)
-              setState('idle')
+              save.markDirty()
             }}
           >
             {THEMES.map((choice) => (
@@ -71,23 +65,15 @@ export function AppearanceSection() {
           </select>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            className="sm:max-w-[140px]"
-            onClick={() => {
-              setState('saving')
-              save.mutate()
-            }}
-            disabled={state === 'saving'}
-            loading={state === 'saving'}
-          >
-            {state === 'saving' ? t('common:actions.saving') : t('common:actions.save')}
-          </Button>
-          {state === 'saved' ? <span role="status" className="text-up text-[12.5px]">{t('common:actions.saved')}</span> : null}
-        </div>
+        <SaveButton
+          state={save.state}
+          onClick={() => {
+            save.begin()
+            mutation.mutate()
+          }}
+        />
 
-        {state === 'error' ? <Alert tone="error">{error}</Alert> : null}
+        {save.state === 'error' ? <Alert tone="error">{save.error}</Alert> : null}
       </div>
     </Card>
   )

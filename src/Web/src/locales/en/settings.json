@@ -48,6 +48,7 @@
     "showAll": "Show all",
     "empty": "Add a position on the Portfolio page to control its visibility here.",
     "toggleAria": "Toggle {{ticker}} on the dashboard",
-    "toggleFailure": "Could not update {{ticker}}. Try again."
+    "toggleFailure": "Could not update {{ticker}}. Try again.",
+    "showAllFailure": "Could not show: {{tickers}}. Try again."
   }
 }

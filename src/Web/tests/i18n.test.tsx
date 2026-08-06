@@ -81,7 +81,7 @@ describe('i18n', () => {
     // Matches the language about to be applied, so `useSyncServerLanguage`'s own request —
     // still in flight when the switch below happens — cannot resolve a moment later and
     // silently flip this back to English out from under the assertion.
-    server.use(appearanceHandler({ theme: 'System', language: 'uk' }))
+    server.use(appearanceHandler({ theme: 'system', language: 'uk' }))
     await renderPortfolio()
 
     // English by default — nothing in this file has switched languages yet.
@@ -105,7 +105,7 @@ describe('i18n', () => {
    * proves `translateFieldError` actually closed that gap rather than just moving it.
    */
   it('switchingLanguage_ToUkrainian_TranslatesAValidationMessage', async () => {
-    server.use(appearanceHandler({ theme: 'System', language: 'uk' }))
+    server.use(appearanceHandler({ theme: 'system', language: 'uk' }))
     await applyServerLanguage('uk')
     const user = userEvent.setup()
     await renderPortfolio()
@@ -144,7 +144,7 @@ describe('i18n', () => {
   it('serverLanguage_DisagreeingWithTheCache_Wins', async () => {
     // No cache write here — `readCachedLanguage()` falls back to 'en', so this starts
     // exactly like a first-time visitor. The server disagrees.
-    server.use(appearanceHandler({ theme: 'System', language: 'uk' }))
+    server.use(appearanceHandler({ theme: 'system', language: 'uk' }))
 
     await renderPortfolio()
 

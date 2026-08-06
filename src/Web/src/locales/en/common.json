@@ -24,7 +24,10 @@
     "backLink": "Back to the app"
   },
   "search": {
-    "matchesCount": "{{count}} matches",
+    "matchesCount_one": "{{count}} match",
+    "matchesCount_few": "{{count}} matches",
+    "matchesCount_many": "{{count}} matches",
+    "matchesCount_other": "{{count}} matches",
     "suggestionsFor": "{{label}} suggestions"
   },
   "loading": "Loading",

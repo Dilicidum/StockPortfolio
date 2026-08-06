@@ -24,7 +24,10 @@
     "backLink": "Повернутися до застосунку"
   },
   "search": {
-    "matchesCount": "Знайдено: {{count}}",
+    "matchesCount_one": "Знайдено {{count}} збіг",
+    "matchesCount_few": "Знайдено {{count}} збіги",
+    "matchesCount_many": "Знайдено {{count}} збігів",
+    "matchesCount_other": "Знайдено {{count}} збігів",
     "suggestionsFor": "Підказки для поля «{{label}}»"
   },
   "loading": "Завантаження",

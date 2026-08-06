@@ -1,12 +1,11 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
-import { Button } from '../components/Button'
 import { Card } from '../components/Card'
+import { fallbackMessage, useSaveState, useSyncWhileIdle } from '../lib/useSaveState'
 import { dashboardSettingsQuery, saveDashboardSettings, settingsKeys } from './settingsApi'
-
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+import { SaveButton } from './SaveButton'
 
 /** The server's own range (`RefreshInterval.Minimum`/`Maximum`) — 10 to 300 seconds. */
 const INTERVAL_OPTIONS = [15, 30, 60, 120, 300] as const
@@ -26,23 +25,16 @@ export function QuotesSection() {
   const intervalId = useId()
 
   const [seconds, setSeconds] = useState(DEFAULT_SECONDS)
-  const [state, setState] = useState<SaveState>('idle')
-  const [error, setError] = useState('')
+  const save = useSaveState()
+  useSyncWhileIdle(data?.refreshIntervalSeconds, save.state, setSeconds)
 
-  useEffect(() => {
-    if (data && state === 'idle') setSeconds(data.refreshIntervalSeconds)
-  }, [data, state])
-
-  const save = useMutation({
+  const mutation = useMutation({
     mutationFn: () => saveDashboardSettings({ refreshIntervalSeconds: seconds }),
     onSuccess: (result) => {
       queryClient.setQueryData(settingsKeys.dashboard(), result)
-      setState('saved')
+      save.succeed()
     },
-    onError: (mutationError) => {
-      setState('error')
-      setError(mutationError instanceof Error && mutationError.message ? mutationError.message : t('common:fallbackError'))
-    },
+    onError: (mutationError) => save.fail(fallbackMessage(mutationError, t('common:fallbackError'))),
   })
 
   return (
@@ -58,7 +50,7 @@ export function QuotesSection() {
             value={seconds}
             onChange={(event) => {
               setSeconds(Number(event.target.value))
-              setState('idle')
+              save.markDirty()
             }}
           >
             {INTERVAL_OPTIONS.map((option) => (
@@ -75,23 +67,15 @@ export function QuotesSection() {
          */}
         <p className="text-mu text-[11.5px] leading-relaxed">{t('quotes.costNote')}</p>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            className="sm:max-w-[140px]"
-            onClick={() => {
-              setState('saving')
-              save.mutate()
-            }}
-            disabled={state === 'saving'}
-            loading={state === 'saving'}
-          >
-            {state === 'saving' ? t('common:actions.saving') : t('common:actions.save')}
-          </Button>
-          {state === 'saved' ? <span role="status" className="text-up text-[12.5px]">{t('common:actions.saved')}</span> : null}
-        </div>
+        <SaveButton
+          state={save.state}
+          onClick={() => {
+            save.begin()
+            mutation.mutate()
+          }}
+        />
 
-        {state === 'error' ? <Alert tone="error">{error}</Alert> : null}
+        {save.state === 'error' ? <Alert tone="error">{save.error}</Alert> : null}
       </div>
     </Card>
   )

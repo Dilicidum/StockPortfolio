@@ -703,3 +703,11 @@ Stated plainly rather than left for you to find.
   language. Everything the SPA itself renders does.
 - **Npgsql logs `Cannot load library libgssapi_krb5.so.2`** in the container at startup. It is
   probing for Kerberos, falls back to password auth, and is harmless.
+- **The Data Protection key ring is stored unencrypted.** Persisting it to Postgres (see "Your
+  own API key" above) is correct and is what keeps a stored key readable across an Azure
+  redeploy — but no certificate or key-vault protector is configured, so the master key
+  material sits in plain form in the same schema as the ciphertext it protects, readable by
+  the same database role. That protects a leaked dump of `user_provider_keys` **alone**, not
+  a leak of the whole `marketdata` schema — anyone who can read the schema can read the key
+  ring and decrypt every stored key with it. The fix is a certificate or key-vault protector
+  on the key ring; neither is configured today.

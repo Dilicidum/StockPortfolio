@@ -7,7 +7,8 @@ export type ThemeChoice = 'light' | 'dark' | 'system'
 const THEME_STORAGE_KEY = 'stockportfolio.theme'
 const DARK_MEDIA_QUERY = '(prefers-color-scheme: dark)'
 
-function isThemeChoice(value: string | null): value is ThemeChoice {
+/** Exported so a caller reading an untrusted string — the appearance API's response, notably — can guard it the same way `readCachedTheme` does. */
+export function isThemeChoice(value: string | null | undefined): value is ThemeChoice {
   return value === 'light' || value === 'dark' || value === 'system'
 }
 

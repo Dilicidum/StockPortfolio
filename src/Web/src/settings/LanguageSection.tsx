@@ -1,14 +1,13 @@
-import { useEffect, useId, useState } from 'react'
+import { useId, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
-import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { applyServerLanguage, SUPPORTED_LANGUAGES, type Language } from '../lib/i18n'
+import { fallbackMessage, useSaveState, useSyncWhileIdle } from '../lib/useSaveState'
 import { appearanceKeys, appearanceQuery } from './appearanceApi'
 import { saveAppearance } from './settingsApi'
-
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+import { SaveButton } from './SaveButton'
 
 /**
  * `appearanceQuery` again, not a second GET — the wire shape bundles theme and language
@@ -22,26 +21,19 @@ export function LanguageSection() {
   const languageId = useId()
 
   const [language, setLanguage] = useState<Language>('en')
-  const [state, setState] = useState<SaveState>('idle')
-  const [error, setError] = useState('')
+  const save = useSaveState()
+  useSyncWhileIdle(data?.language as Language | undefined, save.state, setLanguage)
 
-  useEffect(() => {
-    if (data && state === 'idle') setLanguage(data.language as Language)
-  }, [data, state])
-
-  const save = useMutation({
+  const mutation = useMutation({
     mutationFn: () => saveAppearance({ theme: data?.theme ?? 'system', language }),
     onSuccess: (result) => {
       queryClient.setQueryData(appearanceKeys.view(), result)
       // Applies the choice immediately rather than waiting for `useSyncServerLanguage` to
       // notice on its next mount — this IS the screen that lets someone change it.
       void applyServerLanguage(language)
-      setState('saved')
+      save.succeed()
     },
-    onError: (mutationError) => {
-      setState('error')
-      setError(mutationError instanceof Error && mutationError.message ? mutationError.message : t('common:fallbackError'))
-    },
+    onError: (mutationError) => save.fail(fallbackMessage(mutationError, t('common:fallbackError'))),
   })
 
   return (
@@ -57,7 +49,7 @@ export function LanguageSection() {
             value={language}
             onChange={(event) => {
               setLanguage(event.target.value as Language)
-              setState('idle')
+              save.markDirty()
             }}
           >
             {SUPPORTED_LANGUAGES.map((choice) => (
@@ -68,23 +60,15 @@ export function LanguageSection() {
           </select>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            className="sm:max-w-[140px]"
-            onClick={() => {
-              setState('saving')
-              save.mutate()
-            }}
-            disabled={state === 'saving'}
-            loading={state === 'saving'}
-          >
-            {state === 'saving' ? t('common:actions.saving') : t('common:actions.save')}
-          </Button>
-          {state === 'saved' ? <span role="status" className="text-up text-[12.5px]">{t('common:actions.saved')}</span> : null}
-        </div>
+        <SaveButton
+          state={save.state}
+          onClick={() => {
+            save.begin()
+            mutation.mutate()
+          }}
+        />
 
-        {state === 'error' ? <Alert tone="error">{error}</Alert> : null}
+        {save.state === 'error' ? <Alert tone="error">{save.error}</Alert> : null}
       </div>
     </Card>
   )
