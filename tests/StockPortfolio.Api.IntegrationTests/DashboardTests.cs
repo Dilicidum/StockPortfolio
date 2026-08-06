@@ -257,9 +257,9 @@ public sealed class DashboardTests(ApiFixture fixture)
             + "against the fake provider that CreateHostWithQuoteProvider removed");
     }
 
-    /// <summary>Some symbols rate-limited is the common failure, and it is a 200 with a gap, not an error.</summary>
+    /// <summary>Some symbols refused is the common failure, and it is a 200 with a gap, not an error.</summary>
     [Fact]
-    public async Task Dashboard_ProviderReturns429_Returns200NotError()
+    public async Task Dashboard_ProviderOmitsSomeSymbols_Returns200NotError()
     {
         // The double omits the refused symbol rather than emitting a literal 429: IQuoteProvider's
         // contract is "fetches what it can", so the status code never leaves FinnhubQuoteProvider's own

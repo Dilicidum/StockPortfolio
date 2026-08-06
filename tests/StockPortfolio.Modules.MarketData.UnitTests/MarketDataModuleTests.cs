@@ -105,15 +105,6 @@ public sealed class MarketDataModuleTests
     }
 
     [Fact]
-    public void Module_TokenBucket_IsOneInstanceForTheProcess()
-    {
-        using var provider = Build(Config());
-
-        provider.GetRequiredService<System.Threading.RateLimiting.RateLimiter>()
-            .ShouldBeSameAs(provider.GetRequiredService<System.Threading.RateLimiting.RateLimiter>());
-    }
-
-    [Fact]
     public async Task Finnhub401_IsNotRetriedByTheResiliencePipeline()
     {
         var handler = new CountingHandler(HttpStatusCode.Unauthorized);
@@ -132,6 +123,25 @@ public sealed class MarketDataModuleTests
 
         quotes.ShouldBeEmpty();
         handler.Calls.ShouldBe(1);
+    }
+
+    /// <summary>The provider's own signal is the only pacing left once the client-side bucket is gone.</summary>
+    [Fact]
+    public async Task GetQuotes_WhenTheProviderReturns429_RetriesRatherThanFailing()
+    {
+        var handler = new CountingHandler(HttpStatusCode.TooManyRequests, thenOk: true);
+
+        using var services = Build(
+            Config(("Finnhub:ApiKey", "a-real-looking-key")),
+            extra => extra
+                .AddHttpClient<IQuoteProvider, StockPortfolio.Modules.MarketData.Infrastructure.Quotes.FinnhubQuoteProvider>()
+                .ConfigurePrimaryHttpMessageHandler(() => handler));
+
+        await services.GetRequiredService<IQuoteProvider>().GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            TestContext.Current.CancellationToken);
+
+        handler.Calls.ShouldBeGreaterThan(1);
     }
 
     [Fact]

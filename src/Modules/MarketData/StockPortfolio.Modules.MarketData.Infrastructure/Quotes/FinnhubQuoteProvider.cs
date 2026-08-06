@@ -2,12 +2,8 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
-using System.Threading.RateLimiting;
 
 using Microsoft.Extensions.Logging;
-
-using Polly.CircuitBreaker;
-using Polly.Timeout;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Domain;
@@ -17,11 +13,10 @@ namespace StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 /// <summary>The live provider. Fetches and returns; recording what was fetched belongs to QuoteReader.</summary>
 internal sealed partial class FinnhubQuoteProvider(
     HttpClient client,
-    RateLimiter budget,
     TimeProvider clock,
     ILogger<FinnhubQuoteProvider> logger) : IQuoteProvider
 {
-    /// <summary>Four in flight: the shared bucket serialises the excess anyway, so more only holds sockets.</summary>
+    /// <summary>Four in flight, to bound sockets rather than to pace requests — that is Finnhub's job now.</summary>
     private const int MaxDegreeOfParallelism = 4;
 
     public string Name => "Finnhub";
@@ -40,22 +35,15 @@ internal sealed partial class FinnhubQuoteProvider(
             {
                 try
                 {
-                    using var lease = await budget.AcquireAsync(1, token);
-
-                    if (!lease.IsAcquired)
-                    {
-                        LogBudgetExhausted(logger, ticker.Value);
-                        return;
-                    }
-
                     if (await FetchOneAsync(ticker, token) is { } quote)
                     {
                         quotes.Add(quote);
                     }
                 }
-                catch (HttpRequestException ex) { LogQuoteFailed(logger, ex, ticker.Value); }
-                catch (TimeoutRejectedException ex) { LogQuoteFailed(logger, ex, ticker.Value); }
-                catch (BrokenCircuitException ex) { LogQuoteFailed(logger, ex, ticker.Value); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogQuoteFailed(logger, ex, ticker.Value);
+                }
             });
 
         return [.. quotes];
@@ -66,21 +54,16 @@ internal sealed partial class FinnhubQuoteProvider(
     {
         try
         {
-            using var lease = await budget.AcquireAsync(1, ct);
-
-            if (!lease.IsAcquired)
-            {
-                return true;
-            }
-
             // /quote answers c:0 for a symbol that does not exist AND for a healthy one Finnhub blipped
             // on, so it cannot tell the two apart and would answer "known" to everything. /search can,
             // and null still means the provider could not answer, so an outage never rejects a purchase.
             return await SearchAsync(ticker.Value, ct) is not { } matches || matches.Contains(ticker.Value);
         }
-        catch (HttpRequestException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
-        catch (TimeoutRejectedException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
-        catch (BrokenCircuitException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSymbolCheckFailed(logger, ex, ticker.Value);
+            return true;
+        }
     }
 
     /// <summary>The same /search call the existence check makes, keeping the names instead of discarding them.</summary>
@@ -88,21 +71,15 @@ internal sealed partial class FinnhubQuoteProvider(
     {
         try
         {
-            using var lease = await budget.AcquireAsync(1, ct);
-
-            if (!lease.IsAcquired)
-            {
-                LogSearchBudgetExhausted(logger, query);
-                return [];
-            }
-
             // Empty rather than a throw on every failure below: search is a convenience over a field that
             // still accepts a typed symbol, so an outage must degrade to no suggestions and nothing else.
             return await SearchAsync(query, ct) is { } response ? response.Suggestions() : [];
         }
-        catch (HttpRequestException ex) { LogSearchFailed(logger, ex, query); return []; }
-        catch (TimeoutRejectedException ex) { LogSearchFailed(logger, ex, query); return []; }
-        catch (BrokenCircuitException ex) { LogSearchFailed(logger, ex, query); return []; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSearchFailed(logger, ex, query);
+            return [];
+        }
     }
 
     /// <summary>401 and 403 carry the same body and mean the same thing here; neither is ever retried.</summary>
@@ -159,12 +136,6 @@ internal sealed partial class FinnhubQuoteProvider(
     private static partial void LogQuoteFailed(ILogger logger, Exception exception, string ticker);
 
     [LoggerMessage(
-        EventId = 5101,
-        Level = LogLevel.Warning,
-        Message = "Finnhub call budget exhausted before {Ticker} could be fetched")]
-    private static partial void LogBudgetExhausted(ILogger logger, string ticker);
-
-    [LoggerMessage(
         EventId = 5102,
         Level = LogLevel.Error,
         Message = "Finnhub rejected the API key with {StatusCode} while fetching {Ticker}; not retried")]
@@ -181,10 +152,4 @@ internal sealed partial class FinnhubQuoteProvider(
         Level = LogLevel.Warning,
         Message = "Finnhub search failed for '{Query}'; the field falls back to being a plain text box")]
     private static partial void LogSearchFailed(ILogger logger, Exception exception, string query);
-
-    [LoggerMessage(
-        EventId = 5105,
-        Level = LogLevel.Warning,
-        Message = "Finnhub call budget exhausted before '{Query}' could be searched")]
-    private static partial void LogSearchBudgetExhausted(ILogger logger, string query);
 }

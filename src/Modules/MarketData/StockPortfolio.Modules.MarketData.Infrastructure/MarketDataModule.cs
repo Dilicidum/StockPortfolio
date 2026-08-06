@@ -1,5 +1,3 @@
-using System.Threading.RateLimiting;
-
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -24,7 +22,7 @@ public static class MarketDataModule
     // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>Registers MarketData: a provider, the token budget, the Redis stores, the contracts and the poller.</summary>
+    /// <summary>Registers MarketData: a provider, the Redis stores, the contracts and the poller.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -57,10 +55,6 @@ public static class MarketDataModule
             services.AddSingleton<IQuoteProvider>(sp => sp.GetRequiredService<FakeQuoteProvider>());
             services.AddSingleton<IQuoteNudge>(sp => sp.GetRequiredService<FakeQuoteProvider>());
         }
-
-        // One bucket for the process: the typed client is transient, so a limiter held as a field on the
-        // provider would be a fresh bucket per resolution, enforcing nothing across concurrent requests.
-        services.AddSingleton<RateLimiter>(_ => BuildTokenBucket());
 
         services.AddSingleton<ILastKnownPriceStore, RedisLastKnownPriceStore>();
         services.AddSingleton<ICompanyNameStore, RedisCompanyNameStore>();
@@ -110,17 +104,7 @@ public static class MarketDataModule
         o.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
 
         // NEVER assign o.Retry.DelayGenerator - ShouldRetryAfterHeader's setter *is* that assignment, and
-        // setting a generator silently overwrites Retry-After handling. MaxDelay is ignored for it too.
+        // setting a generator silently overwrites Retry-After handling. With no client-side rate limiter,
+        // this header is the provider's only way to tell this client to slow down.
     }
-
-    private static TokenBucketRateLimiter BuildTokenBucket() =>
-        new(new TokenBucketRateLimiterOptions
-        {
-            TokenLimit = 25,
-            TokensPerPeriod = 1,
-            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-            AutoReplenishment = true,
-            QueueLimit = 256,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-        });
 }

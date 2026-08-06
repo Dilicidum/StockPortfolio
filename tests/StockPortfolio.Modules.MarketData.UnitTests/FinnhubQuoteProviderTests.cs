@@ -1,5 +1,4 @@
 using System.Net;
-using System.Threading.RateLimiting;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
@@ -14,22 +13,9 @@ public sealed class FinnhubQuoteProviderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
 
-    // AutoReplenishment off: its timer takes no TimeProvider, so FakeTimeProvider cannot advance it.
-    private static TokenBucketRateLimiter FullBucket() =>
-        new(new TokenBucketRateLimiterOptions
-        {
-            TokenLimit = 25,
-            TokensPerPeriod = 1,
-            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-            AutoReplenishment = false,
-            QueueLimit = 256,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-        });
-
-    private static FinnhubQuoteProvider Build(CountingHandler handler, TokenBucketRateLimiter bucket) =>
+    private static FinnhubQuoteProvider Build(CountingHandler handler) =>
         new(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
             new FakeTimeProvider(Now),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
@@ -39,8 +25,7 @@ public sealed class FinnhubQuoteProviderTests
     public async Task Finnhub401And403_AreNotRetried(HttpStatusCode status)
     {
         var handler = new CountingHandler(status, """{"error":"You don't have access to this resource."}""");
-        using var bucket = FullBucket();
-        var provider = Build(handler, bucket);
+        var provider = Build(handler);
 
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
@@ -55,8 +40,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task SymbolExists_WhenTheKeyIsRejected_FailsOpen(HttpStatusCode status)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(status), bucket);
+        var provider = Build(new CountingHandler(status));
 
         var exists = await provider.SymbolExistsAsync(
             Ticker.Create("AAPL").AsT0,
@@ -73,8 +57,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData("""{"count":0,"result":[]}""", false)]
     public async Task SymbolExists_IsAnExactMatchOnSymbol_NeverACountOfFuzzyHits(string body, bool expected)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, body));
 
         var exists = await provider.SymbolExistsAsync(
             Ticker.Create("AAPL").AsT0,
@@ -86,11 +69,8 @@ public sealed class FinnhubQuoteProviderTests
     [Fact]
     public async Task SymbolExists_WhenTheSearchTransportFails_FailsOpen()
     {
-        using var bucket = FullBucket();
-
         var provider = new FinnhubQuoteProvider(
             new HttpClient(new FlakyHandler("AAPL")) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
             new FakeTimeProvider(Now),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
@@ -112,8 +92,7 @@ public sealed class FinnhubQuoteProviderTests
               {"symbol":"APLE","description":"APPLE HOSPITALITY REIT INC"}]}
             """;
 
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body));
 
         var matches = await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken);
 
@@ -136,8 +115,7 @@ public sealed class FinnhubQuoteProviderTests
               {"symbol":"NONAME","description":"   "}]}
             """;
 
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body));
 
         var matches = await provider.SearchSymbolsAsync("aapl", TestContext.Current.CancellationToken);
 
@@ -152,8 +130,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task Search_WhenTheKeyIsRejected_IsEmptyNotAThrow(HttpStatusCode status)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(status), bucket);
+        var provider = Build(new CountingHandler(status));
 
         (await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
@@ -161,11 +138,8 @@ public sealed class FinnhubQuoteProviderTests
     [Fact]
     public async Task Search_WhenTheTransportFails_IsEmptyNotAThrow()
     {
-        using var bucket = FullBucket();
-
         var provider = new FinnhubQuoteProvider(
             new HttpClient(new FlakyHandler("appl")) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
             new FakeTimeProvider(Now),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
@@ -179,8 +153,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData("{}")]
     public async Task Search_EmptyOrShapelessBody_IsAnEmptyList(string body)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, body));
 
         (await provider.SearchSymbolsAsync("zzzz", TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
@@ -189,8 +162,7 @@ public sealed class FinnhubQuoteProviderTests
     public async Task Fetch_StampsObservedAtWithOurClock_NotFinnhubsTradeTime()
     {
         var handler = new CountingHandler(HttpStatusCode.OK, """{"c":187.42,"t":1000000000}""");
-        using var bucket = FullBucket();
-        var provider = Build(handler, bucket);
+        var provider = Build(handler);
 
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
@@ -204,10 +176,8 @@ public sealed class FinnhubQuoteProviderTests
     public async Task Fetch_OneTickerFailing_DoesNotDiscardTheOthers()
     {
         var handler = new FlakyHandler("MSFT");
-        using var bucket = FullBucket();
         var provider = new FinnhubQuoteProvider(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
             new FakeTimeProvider(Now),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
@@ -221,6 +191,33 @@ public sealed class FinnhubQuoteProviderTests
             TestContext.Current.CancellationToken);
 
         quotes.Select(quote => quote.Ticker.Value).Order(StringComparer.Ordinal).ShouldBe(["AAPL", "TSLA"]);
+    }
+
+    /// <summary>Requirement 10's second gap: a WAF/CDN page must degrade the ticker, not crash the request.</summary>
+    [Fact]
+    public async Task GetQuotes_WhenTheProviderReturnsHtmlWithA200_OmitsTheTickerRatherThanThrowing()
+    {
+        var handler = new CountingHandler(HttpStatusCode.OK, body: "<html>Access denied</html>", contentType: "text/html");
+        var provider = Build(handler);
+
+        var quotes = await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            TestContext.Current.CancellationToken);
+
+        quotes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetQuotes_WhenTheProviderReturnsMalformedJson_OmitsTheTickerRatherThanThrowing()
+    {
+        var handler = new CountingHandler(HttpStatusCode.OK, body: "{ not json", contentType: "application/json");
+        var provider = Build(handler);
+
+        var quotes = await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            TestContext.Current.CancellationToken);
+
+        quotes.ShouldBeEmpty();
     }
 
     private sealed class FlakyHandler(string failingSymbol) : HttpMessageHandler
