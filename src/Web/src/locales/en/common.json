@@ -11,6 +11,7 @@
     "tryAgain": "Try again"
   },
   "nav": {
+    "mainLabel": "Main",
     "dashboard": "Dashboard",
     "portfolio": "Portfolio",
     "notifications": "Notifications"

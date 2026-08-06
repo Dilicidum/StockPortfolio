@@ -11,6 +11,7 @@
     "tryAgain": "Спробувати ще раз"
   },
   "nav": {
+    "mainLabel": "Основна",
     "dashboard": "Панель приладів",
     "portfolio": "Портфель",
     "notifications": "Сповіщення"

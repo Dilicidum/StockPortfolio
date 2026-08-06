@@ -32,7 +32,7 @@ export function AuthLayout({ mode, redirectTo, children }: AuthLayoutProps) {
       <div className="flex w-full max-w-[344px] flex-col gap-5">
         <div
           role="tablist"
-          aria-label="Authentication"
+          aria-label={t('tabs.listLabel')}
           className="flex gap-1 rounded-[10px] border border-bd bg-panel-2 p-1"
         >
           <Link

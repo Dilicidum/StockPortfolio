@@ -62,7 +62,7 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           </div>
         </div>
 
-        <nav aria-label="Main" className="-mx-1 flex gap-1 overflow-x-auto px-1 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0">
+        <nav aria-label={t('nav.mainLabel')} className="-mx-1 flex gap-1 overflow-x-auto px-1 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0">
           {NAV.map((item) => (
             <Link
               key={item.to}
