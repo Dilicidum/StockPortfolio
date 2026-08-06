@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { AlertPanel } from '../../alerts/AlertPanel'
+import { PANEL_ROWS } from '../../alerts/alertsApi'
 import { Alert } from '../../components/Alert'
 import { ApiHealth } from '../../components/ApiHealth'
 import { AppShell } from '../../components/AppShell'
@@ -154,50 +156,62 @@ function DashboardPage() {
         />
       </div>
 
-      <Card
-        title="Holdings"
-        action={
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <Freshness
-              asOf={data?.asOf}
-              stalestObservedAt={data?.stalestObservedAt}
-              // Two cycles: one missed refresh is a blip, two is a story worth telling.
-              staleAfterMs={intervalMs * 2}
+      {/*
+       * The mockup's right-hand column, and it stacks under the table below `xl` — at 375px
+       * the panel is a full-width list of rows, which is the layout it was designed as.
+       * `min-w-0` on the left column is what stops a wide table from pushing the panel off
+       * the grid instead of scrolling inside its own cell.
+       */}
+      <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-[minmax(0,1fr)_minmax(0,330px)]">
+        <div className="flex min-w-0 flex-col gap-3.5">
+          <Card
+            title="Holdings"
+            action={
+              <div className="flex flex-wrap items-center justify-end gap-3">
+                <Freshness
+                  asOf={data?.asOf}
+                  stalestObservedAt={data?.stalestObservedAt}
+                  // Two cycles: one missed refresh is a blip, two is a story worth telling.
+                  staleAfterMs={intervalMs * 2}
+                />
+                <label className="text-mu flex items-center gap-2 text-[12.5px]">
+                  Refresh
+                  <select
+                    className="border-bd bg-panel-2 text-tx rounded-lg border px-2 py-1 text-[12.5px]"
+                    value={intervalMs}
+                    onChange={(event) => setIntervalMs(Number(event.target.value))}
+                  >
+                    {INTERVALS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            }
+          >
+            <Table
+              caption="Your positions, priced"
+              columns={columns}
+              rows={positions}
+              rowKey={(position) => position.id}
+              empty={isPending ? 'Fetching prices…' : 'No positions yet. Add one on the Portfolio page.'}
             />
-            <label className="text-mu flex items-center gap-2 text-[12.5px]">
-              Refresh
-              <select
-                className="border-bd bg-panel-2 text-tx rounded-lg border px-2 py-1 text-[12.5px]"
-                value={intervalMs}
-                onChange={(event) => setIntervalMs(Number(event.target.value))}
-              >
-                {INTERVALS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        }
-      >
-        <Table
-          caption="Your positions, priced"
-          columns={columns}
-          rows={positions}
-          rowKey={(position) => position.id}
-          empty={isPending ? 'Fetching prices…' : 'No positions yet. Add one on the Portfolio page.'}
-        />
 
-        {unpriced > 0 ? (
-          <p className="text-mu mt-3 text-[11.5px]">
-            {unpriced} of {totals?.positionCount} positions have no price yet and are excluded from the
-            totals above.
-          </p>
-        ) : null}
-      </Card>
+            {unpriced > 0 ? (
+              <p className="text-mu mt-3 text-[11.5px]">
+                {unpriced} of {totals?.positionCount} positions have no price yet and are excluded
+                from the totals above.
+              </p>
+            ) : null}
+          </Card>
 
-      <ApiHealth />
+          <ApiHealth />
+        </div>
+
+        <AlertPanel limit={PANEL_ROWS} compact />
+      </div>
     </AppShell>
   )
 }

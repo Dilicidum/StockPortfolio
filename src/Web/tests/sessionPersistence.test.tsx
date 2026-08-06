@@ -13,6 +13,7 @@ import { bootstrapSession } from '../src/auth/bootstrapSession'
 import { queryClient } from '../src/lib/queryClient'
 import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { clearTokens } from '../src/lib/tokenStore'
+import { alertsHandlers } from './msw/alerts'
 import { dashboardHandlers } from './msw/dashboard'
 import { server } from './msw/server'
 
@@ -46,9 +47,11 @@ it('keeps a refreshable session on a hard load of /dashboard', async () => {
     http.get('*/api/auth/me', () =>
       HttpResponse.json({ id: 'u-1', email: 'holder@example.com' }),
     ),
-    // The route this test lands on fetches since Phase 3, and MSW errors on anything
-    // unhandled — without these the session assertion would fail for an unrelated reason.
+    // The route this test lands on fetches since Phase 3, and since Phase 4 its layout
+    // also opens the alert stream. MSW errors on anything unhandled — without these the
+    // session assertion would fail for an unrelated reason.
     ...dashboardHandlers,
+    ...alertsHandlers,
   )
 
   await bootstrapSession()
