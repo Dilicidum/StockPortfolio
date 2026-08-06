@@ -9,6 +9,7 @@ using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboar
 using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboardSettings;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.SetHoldingVisibility;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Queries.GetHoldings;
 using StockPortfolio.Shared.Kernel;
@@ -32,6 +33,10 @@ internal static class DependencyInjection
         services.AddScoped<
             ICommandHandler<RemoveHoldingCommand, OneOf<Success, NotFound>>,
             RemoveHoldingCommandHandler>();
+
+        services.AddScoped<
+            ICommandHandler<SetHoldingVisibilityCommand, OneOf<Success, NotFound>>,
+            SetHoldingVisibilityCommandHandler>();
 
         services.AddScoped<
             IQueryHandler<GetHoldingsQuery, IReadOnlyList<HoldingSummary>>,

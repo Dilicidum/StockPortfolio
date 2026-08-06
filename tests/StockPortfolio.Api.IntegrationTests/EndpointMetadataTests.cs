@@ -21,13 +21,14 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         // The /api/auth five, plus the /api/settings pair.
         ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser", "GetAppearance", "SaveAppearance"],
 
-        // Four under /api/holdings, the dashboard, plus the /api/settings/dashboard pair.
+        // Five under /api/holdings, the dashboard, plus the /api/settings/dashboard pair.
         ["Portfolio"] =
         [
             "GetHoldings",
             "AddHolding",
             "UpdateHolding",
             "RemoveHolding",
+            "SetHoldingVisibility",
             "GetDashboard",
             "GetDashboardSettings",
             "SaveDashboardSettings",
@@ -65,7 +66,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>The Identity routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
-    /// <summary>The seven Portfolio routes, as theory data.</summary>
+    /// <summary>The eight Portfolio routes, as theory data.</summary>
     public static TheoryData<string> PortfolioRoutes => [.. PortfolioRouteNames];
 
     /// <summary>The MarketData routes, as theory data.</summary>
@@ -80,7 +81,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheSevenPortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
+    public void EndpointDataSource_ExposesTheEightPortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
 
     /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]

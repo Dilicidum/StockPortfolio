@@ -226,4 +226,27 @@ public sealed class HoldingTests
         holding.CreatedAt.ShouldBe(created);
         holding.UpdatedAt.ShouldBe(created.AddMinutes(5));
     }
+
+    [Fact]
+    public void SetVisibility_ToFalse_HidesTheHolding()
+    {
+        var holding = At(10m, 100m);
+
+        holding.SetVisibility(false, Clock);
+
+        holding.IsVisible.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SetVisibility_ToFalse_LeavesQuantityAndAveragePriceAlone()
+    {
+        var holding = At(10m, 100m);
+        var quantity = holding.Quantity;
+        var average = holding.AveragePrice;
+
+        holding.SetVisibility(false, Clock);
+
+        holding.Quantity.ShouldBe(quantity);
+        holding.AveragePrice.ShouldBe(average);
+    }
 }

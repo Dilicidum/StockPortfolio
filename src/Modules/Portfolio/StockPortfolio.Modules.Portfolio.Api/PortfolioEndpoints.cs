@@ -14,6 +14,7 @@ using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboar
 using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboardSettings;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
+using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.SetHoldingVisibility;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Queries.GetHoldings;
 using StockPortfolio.Shared.Api;
@@ -22,7 +23,7 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Api;
 
-/// <summary>The Portfolio module's entire inbound HTTP surface: four routes under /api/holdings, the dashboard, two under /api/settings, and the one DI seam.</summary>
+/// <summary>The Portfolio module's entire inbound HTTP surface: five routes under /api/holdings, the dashboard, two under /api/settings, and the one DI seam.</summary>
 public static class PortfolioEndpoints
 {
     /// <summary>Where a position is addressable.</summary>
@@ -42,7 +43,7 @@ public static class PortfolioEndpoints
         return services;
     }
 
-    /// <summary>Maps the four holdings routes onto /api/holdings, the dashboard, and the /api/settings/dashboard pair.</summary>
+    /// <summary>Maps the five holdings routes onto /api/holdings, the dashboard, and the /api/settings/dashboard pair.</summary>
     public static IEndpointRouteBuilder MapPortfolioEndpoints(this IEndpointRouteBuilder app)
     {
         // Every route needs a bearer token and every route can 500, so both are declared once here.
@@ -78,6 +79,15 @@ public static class PortfolioEndpoints
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
+
+        // PATCH here and PUT on the settings sections is deliberate: this changes one field of a larger
+        // resource, the settings routes replace the whole of a small one.
+        group.MapPatch("/{id:guid}/visibility", SetVisibilityAsync)
+            .WithName("SetHoldingVisibility")
+            .WithSummary("Shows or hides a position on the dashboard.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapDelete("/{id:guid}", RemoveHoldingAsync)
             .WithName("RemoveHolding")
@@ -204,6 +214,26 @@ public static class PortfolioEndpoints
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."),
 
             invalid => invalid.ToValidationProblem());
+    }
+
+    /// <summary>Shows or hides a position on the dashboard.</summary>
+    private static async Task<IResult> SetVisibilityAsync(
+        Guid id,
+        SetHoldingVisibilityRequest request,
+        ClaimsPrincipal principal,
+        ICommandHandler<SetHoldingVisibilityCommand, OneOf<Success, NotFound>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        var result = await handler.Handle(new SetHoldingVisibilityCommand(userId, id, request.IsVisible), ct);
+
+        return result.Match<IResult>(
+            hidden => TypedResults.NoContent(),
+            missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
     }
 
     /// <summary>Closes a position.</summary>
