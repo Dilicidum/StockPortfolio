@@ -1,10 +1,11 @@
 import { useId } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { Button } from '../components/Button'
 import { TextField } from '../components/TextField'
-import { applyServerErrors } from '../lib/formErrors'
+import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import type { AlertSetting } from './alertsApi'
 
 /**
@@ -63,6 +64,7 @@ export function AlertSettingsForm({
   onError,
   onCancel,
 }: AlertSettingsFormProps) {
+  const { t } = useTranslation(['alerts', 'common'])
   const headingId = useId()
   const windowId = useId()
   const switchId = useId()
@@ -103,28 +105,27 @@ export function AlertSettingsForm({
     >
       <div className="flex flex-col gap-1">
         <h3 id={headingId} className="text-tx text-[13px] font-semibold">
-          Alert on {ticker}
+          {t('settingsForm.heading', { ticker })}
         </h3>
         <p className="text-mu text-[11.5px] leading-relaxed">
-          Tell me when {ticker} moves by more than this much, either way, inside the window.
-          Repeat alerts on the same move are held back for a few minutes.
+          {t('settingsForm.description', { ticker })}
         </p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <TextField
-          label="Move of at least (%)"
+          label={t('settingsForm.thresholdLabel')}
           type="number"
           step="any"
           inputMode="decimal"
           autoFocus
-          error={errors.thresholdPercent?.message}
+          error={translateFieldError(t, errors.thresholdPercent?.message)}
           {...register('thresholdPercent')}
         />
 
         <div className="flex flex-col gap-[7px]">
           <label htmlFor={windowId} className="text-mu text-xs">
-            Within
+            {t('settingsForm.windowLabel')}
           </label>
           <select
             id={windowId}
@@ -133,13 +134,13 @@ export function AlertSettingsForm({
           >
             {WINDOWS.map((minutes) => (
               <option key={minutes} value={minutes}>
-                {minutes} minutes
+                {t('settingsForm.windowOption', { minutes })}
               </option>
             ))}
           </select>
           {errors.windowMinutes?.message ? (
             <span role="alert" className="text-dn text-[11.5px]">
-              {errors.windowMinutes.message}
+              {translateFieldError(t, errors.windowMinutes.message)}
             </span>
           ) : null}
         </div>
@@ -158,15 +159,15 @@ export function AlertSettingsForm({
           className="accent-ac h-4 w-4"
           {...register('enabled')}
         />
-        Alerting on
+        {t('settingsForm.enabledLabel')}
       </label>
 
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? 'Saving…' : 'Save alert'}
+          {pending ? t('common:actions.saving') : t('settingsForm.submit')}
         </Button>
         <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
-          Cancel
+          {t('common:actions.cancel')}
         </Button>
       </div>
     </form>

@@ -1,4 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
 import { AlertPanel } from '../../alerts/AlertPanel'
 import { AppShell } from '../../components/AppShell'
 
@@ -16,11 +17,10 @@ export const Route = createFileRoute('/_authenticated/notifications')({
 })
 
 function NotificationsPage() {
+  const { t } = useTranslation('alerts')
+
   return (
-    <AppShell
-      title="Notifications"
-      subtitle="Thresholds that have been crossed recently, newest first"
-    >
+    <AppShell title={t('notificationsPage.title')} subtitle={t('notificationsPage.subtitle')}>
       <AlertPanel />
     </AppShell>
   )
