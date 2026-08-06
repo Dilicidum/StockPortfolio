@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
@@ -10,6 +11,7 @@ using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
 using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Infrastructure.Names;
+using StockPortfolio.Modules.MarketData.Infrastructure.Polling;
 using StockPortfolio.Modules.MarketData.Infrastructure.Prices;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 using StockPortfolio.Shared.Kernel.Cqrs;
@@ -22,7 +24,7 @@ public static class MarketDataModule
     // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>Registers MarketData: a provider, the token budget, the three Redis stores and the four contracts.</summary>
+    /// <summary>Registers MarketData: a provider, the token budget, the Redis stores, the contracts and the poller.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -74,7 +76,24 @@ public static class MarketDataModule
             IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>>,
             SearchTickersQueryHandler>();
 
+        AddPolling(services, config);
+
         return services;
+    }
+
+    /// <summary>The poller, its two locks, and the observer the host is expected to replace.</summary>
+    private static void AddPolling(IServiceCollection services, IConfiguration config)
+    {
+        services.AddSingleton(PollingOptions.FromConfiguration(config));
+        services.AddSingleton<IPollLease, RedisPollLease>();
+
+        // TryAdd, so a host that registers its adapter BEFORE this call still keeps it. A host registering
+        // after wins on last-one-wins instead; either order leaves exactly one observer resolved.
+        services.TryAddSingleton<IPriceSampleObserver, NoOpPriceSampleObserver>();
+
+        // No default IPollTargetSource on purpose: "nobody told me what to poll" must be a visible failure
+        // in the log, not an empty list that reads the same as "nobody has an alert".
+        services.AddHostedService<QuotePoller>();
     }
 
     private static void ConfigureResilience(HttpStandardResilienceOptions o)

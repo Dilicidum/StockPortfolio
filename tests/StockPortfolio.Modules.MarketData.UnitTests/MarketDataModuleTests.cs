@@ -67,6 +67,44 @@ public sealed class MarketDataModuleTests
     }
 
     [Fact]
+    public void Module_Polling_RegistersThePollerAndADefaultObserver()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddMarketDataModule(Config());
+
+        services.Any(descriptor =>
+                descriptor.ServiceType == typeof(Microsoft.Extensions.Hosting.IHostedService)
+                && descriptor.ImplementationType?.Name == "QuotePoller")
+            .ShouldBeTrue();
+
+        // A no-op default, so MarketData needs no stub of its own. Nothing registers IPollTargetSource:
+        // "the host never told me what to poll" has to be a loud failure, not an empty list.
+        Lifetime<IPriceSampleObserver>(services).ShouldBe(ServiceLifetime.Singleton);
+        services.Any(descriptor => descriptor.ServiceType == typeof(IPollTargetSource)).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Module_HostRegistersAnObserverAfterwards_TheHostsWins()
+    {
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddMarketDataModule(Config());
+        services.AddScoped<IPriceSampleObserver, SpyObserver>();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        // Last registration wins, which is the only reason the host's adapter is the one resolved. TryAdd
+        // in the module protects the reverse order; it is not what makes this case work.
+        scope.ServiceProvider.GetRequiredService<IPriceSampleObserver>().ShouldBeOfType<SpyObserver>();
+    }
+
+    [Fact]
     public void Module_TokenBucket_IsOneInstanceForTheProcess()
     {
         using var provider = Build(Config());
@@ -102,5 +140,10 @@ public sealed class MarketDataModuleTests
         using var services = Build(Config(("Finnhub:ApiKey", "a-real-looking-key")));
 
         services.GetRequiredService<IQuoteProvider>().Name.ShouldBe("Finnhub");
+    }
+
+    private sealed class SpyObserver : IPriceSampleObserver
+    {
+        public Task OnSampleStoredAsync(string ticker, CancellationToken ct) => Task.CompletedTask;
     }
 }

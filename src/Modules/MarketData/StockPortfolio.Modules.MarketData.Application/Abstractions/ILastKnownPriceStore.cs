@@ -10,6 +10,7 @@ public interface ILastKnownPriceStore
         IReadOnlyCollection<Ticker> tickers,
         CancellationToken ct);
 
-    /// <summary>Records every quote. The caller is QuoteReader, so both provider paths record identically.</summary>
+    /// <summary>Records every quote. Both callers, the dashboard read and the poller, come through here, so
+    /// the fake and the live provider paths record identically.</summary>
     Task WriteAsync(IReadOnlyCollection<Quote> quotes, CancellationToken ct);
 }
