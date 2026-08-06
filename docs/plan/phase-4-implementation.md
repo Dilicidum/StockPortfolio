@@ -99,7 +99,7 @@ two stay deferred and their status lines are updated in Task 16 rather than left
 
 **Counts that change.** Projects 26 → **32** (five Alerts projects plus `Alerts.UnitTests`). Architecture
 assemblies 17 → **22**. Registered `DbContext`s 2 → **3**, so the connection ceiling goes 8 → **12** of the
-tier's 35. Architecture skips stay at **2** — see §2.6.
+tier's 35. Architecture skips go 2 → 9 → 7 → back to 2 as each Alerts layer fills — see §2.6.
 
 ---
 
@@ -219,10 +219,25 @@ retention, and alerts stop firing with no error anywhere.
 to 22 in **Task 1**, together with all five `.csproj` files, so the suite is green from the first commit
 rather than red for the whole phase.
 
-**`EmptyShells_AreExactlyThePhasesNotYetBuilt` does not change, and the skip count stays at 2.**
-`Alerts.Contracts` is *not* empty: the host reads `IWatchedTickerReader` and `IAlertEvaluator` from it. The
-expected list stays exactly `["StockPortfolio.Modules.Identity.Contracts"]`. If a run reports four skips
-instead of two, `Alerts.Contracts` was left empty and the two rules over it are silently enforcing nothing.
+**`EmptyShells_AreExactlyThePhasesNotYetBuilt` changes on almost every commit of this phase, and the skip
+count rises before it falls.** An earlier draft of this section claimed the list and the count of 2 both
+stayed put. That was wrong, and wrong in the direction that matters: it reasoned only about
+`Alerts.Contracts`, forgetting that Task 1 creates **four other** assemblies carrying no type at all.
+Measured on the tree:
+
+| After | Empty Alerts assemblies | Skips |
+|---|---|---|
+| Task 1 | `Domain`, `Application`, `Infrastructure`, `Api` | **9** |
+| Task 3 | `Application`, `Infrastructure`, `Api` | **7** |
+| Task 12 | none | back to **2** |
+
+This is the test working as designed, not a regression: the expected list is hard-coded precisely so that
+each assembly coming off it is a deliberate edit on the commit that fills it. Keep it in ordinal order — the
+assertion compares in order, not as a set.
+
+**The check worth running is not the number.** It is that `Alerts.Contracts` never appears on the list at
+all. If it does, `IWatchedTickerReader` did not land, and the two rules over that assembly are silently
+enforcing nothing while reporting green.
 
 ### 2.7 DECISION — Redis keys, exactly as the data model names them
 
@@ -406,6 +421,12 @@ for the frontend ones. Commit at the end of each.
 
 > **Windows note.** `dotnet test` on the host fails with `0x800711C7` under Application Control. Run the
 > suite in a Linux SDK container — see the memory note `dotnet-test-blocked-by-smart-app-control`.
+>
+> **Pass `-p:ArtifactsPath=<repo>/artifacts-linux` to container *builds* as well as container test runs.**
+> A bare `dotnet build` inside the container writes Linux output into the host's `artifacts/`, mixing two
+> platforms' binaries in one directory. The next host build then fails in ways that look like a code fault
+> and are not. If it happens, delete `artifacts/` and rebuild — deleting is the point, since an incremental
+> rebuild leaves a DLL whose inputs have not changed exactly where it is.
 
 ---
 
@@ -605,6 +626,30 @@ public sealed class FiredAlert
    constructor and that every parameter name matches a property name, case-insensitively. This is the trap
    that takes the host down at startup rather than on the first query.
 8. Commit: `feat(alerts): domain entities and value objects`.
+
+**TASKS 1–3 DONE** — commits `5b46862`, `c2b58a2`, `105eb41`. Build 0 warnings across 32 projects; suite
+**531 passed, 7 skipped**, of which 54 are the new Alerts unit tests. Both deliberate-break steps were run
+and both went red on the right thing.
+
+Four corrections that later tasks depend on:
+
+- **`Alerts.Domain`'s value objects keep a `public` positional constructor**, not the `internal` one written
+  above. The converters live in `Alerts.Infrastructure`, a different assembly, and §3.1 lists no
+  `AssemblyInfo.cs` under `.Domain` to grant it access — so `internal` would make the converter's read path
+  uncompilable. This matches `Portfolio.Domain.Ticker` exactly: public constructor, validation only in
+  `Create`. **Task 4's converters therefore need no change.**
+- **The five Alerts projects also had to be added to `tests/StockPortfolio.Architecture.Tests/…csproj`.**
+  That suite discovers assemblies by `Assembly.Load` and by enumerating its own output directory, so without
+  the references `ExpectedAssemblies_AllLoadByName` fails on five names.
+- **Task 2's snippet did not compile** against this tree in three ways, all now fixed in the file:
+  `_fixture.Services.GetRequiredService<EndpointDataSource>()` rather than `_fixture.Endpoints`;
+  `IEndpointNameMetadata`/`.EndpointName` rather than `IRouteNameMetadata`/`.RouteName`; and a `List<string>`
+  return type, because CA1859 makes `IReadOnlyList<string>` a build error under `TreatWarningsAsErrors`.
+- **The count assertion in Task 2 is load-bearing and must not be softened.** Commenting out
+  `MapMarketDataEndpoints` leaves `MappedModules().Count` at 3, because `AddMarketDataApi()` keeps the
+  assembly loaded. So the derived set catches a missing **Map**, and the count is the only thing that would
+  catch a module wired nowhere at all. Task 12 raises it to 4 — raise it, do not replace it with
+  "non-empty".
 
 ---
 
@@ -816,8 +861,9 @@ public interface IPriceWindowStore
 3. `PriceWindowReader` computes `Current`, `Oldest`, `Low`, `High`, `SampleCount` and `LargestGap` from the
    read list in one pass. Returns `null` for an empty series — not a zero-filled window.
 4. Register both in `AddMarketDataModule`: `IPriceWindowStore` singleton, `IPriceWindowReader` scoped.
-5. Add `Alerts.Application` → `MarketData.Contracts` to the csproj. `ModuleBoundaryTests` rule 1 must still
-   pass, proving Alerts reaches only `.Contracts`.
+5. ~~Add `Alerts.Application` → `MarketData.Contracts` to the csproj.~~ **Already done in Task 1**, which
+   built every project's references from §3.1. Just confirm `ModuleBoundaryTests` rule 1 still passes,
+   proving Alerts reaches only `.Contracts`.
 6. Commit: `feat(marketdata): trimmed price windows in Redis`.
 
 ---
