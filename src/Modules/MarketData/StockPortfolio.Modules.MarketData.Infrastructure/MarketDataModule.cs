@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -9,6 +10,7 @@ using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
 using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Infrastructure.Names;
+using StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 using StockPortfolio.Modules.MarketData.Infrastructure.Polling;
 using StockPortfolio.Modules.MarketData.Infrastructure.Prices;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
@@ -22,11 +24,42 @@ public static class MarketDataModule
     // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>Registers MarketData: a provider, the Redis stores, the contracts and the poller.</summary>
+    /// <summary>The ConnectionStrings key this module reads.</summary>
+    public const string ConnectionStringName = "MarketData";
+
+    /// <summary>Registers only the MarketData DbContext, for the migrator, which fetches nothing and encrypts nothing.</summary>
+    public static IServiceCollection AddMarketDataPersistence(this IServiceCollection services, IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var connectionString = configuration.GetConnectionString(ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                $"Connection string '{ConnectionStringName}' is not configured. Set "
+                + $"ConnectionStrings:{ConnectionStringName} (or ConnectionStrings__{ConnectionStringName}). "
+                + "Passing a null connection string to UseNpgsql throws later, from a stack that names "
+                + "neither the key nor the file.");
+        }
+
+        // AddDbContext, never AddDbContextFactory: the Migrator finds contexts by service type.
+        services.AddDbContext<MarketDataDbContext>(options => options.UseNpgsql(
+            connectionString,
+            npg => npg.MigrationsHistoryTable(
+                MarketDataDbContext.MigrationsHistoryTableName,
+                MarketDataDbContext.SchemaName)));
+
+        return services;
+    }
+
+    /// <summary>Registers MarketData: its DbContext, a provider, the Redis stores, the contracts and the poller.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(config);
+
+        services.AddMarketDataPersistence(config);
 
         // No eager validation of anything: a missing Finnhub key is a supported state and a throw here
         // would take down `docker compose up`, which is the P0 gate.

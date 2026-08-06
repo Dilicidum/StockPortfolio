@@ -13,8 +13,16 @@ namespace StockPortfolio.Tests;
 
 public sealed class MarketDataModuleTests
 {
+    // AddMarketDataModule now calls AddMarketDataPersistence, which throws without a connection string.
+    // None of these tests open a real connection, so a syntactically-valid placeholder is all AddDbContext
+    // needs; AddInMemoryCollection is called twice so a caller-supplied value below still overrides it.
+    private const string FallbackConnectionString =
+        "Host=localhost;Database=marketdata-unit-tests;Username=none;Password=none";
+
     private static IConfiguration Config(params (string Key, string Value)[] settings) =>
         new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new[] { new KeyValuePair<string, string?>("ConnectionStrings:MarketData", FallbackConnectionString) })
             .AddInMemoryCollection(settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)))
             .Build();
 

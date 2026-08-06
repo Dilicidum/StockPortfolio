@@ -10,7 +10,7 @@ public sealed class MigrationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The four module schemas exist, both built modules hold their tables, and — the part that is easy to get wrong.</summary>
+    /// <summary>The four module schemas exist, every module holds its tables, and — the part that is easy to get wrong.</summary>
     [Fact]
     public async Task Migrations_ApplyCleanly_OnEmptyDatabase()
     {
@@ -62,6 +62,18 @@ public sealed class MigrationTests(ApiFixture fixture)
         alertsTables.ShouldContain("fired_alerts");
         alertsTables.ShouldContain("__EFMigrationsHistory");
 
+        var marketDataTables = await ReadStringsAsync(
+            connection,
+            """
+            SELECT table_name FROM information_schema.tables
+             WHERE table_schema = 'marketdata'
+             ORDER BY table_name
+            """);
+
+        marketDataTables.ShouldContain("user_provider_keys");
+        marketDataTables.ShouldContain("data_protection_keys");
+        marketDataTables.ShouldContain("__EFMigrationsHistory");
+
         var historySchemas = await ReadStringsAsync(
             connection,
             """
@@ -70,10 +82,10 @@ public sealed class MigrationTests(ApiFixture fixture)
              ORDER BY table_schema
             """);
 
-        // The load-bearing line, and with a second context it finally has something to say: HasDefaultSchema
-        // does not move __EFMigrationsHistory, so without MigrationsHistoryTable per context both land in
-        // public, each context reads the other's ids as applied, and it looks exactly like corruption.
-        historySchemas.ShouldBe(["alerts", "identity", "portfolio"]);
+        // The load-bearing line, and with a fourth context it finally has something to say: HasDefaultSchema
+        // does not move __EFMigrationsHistory, so without MigrationsHistoryTable per context all four land
+        // in public, each context reads the others' ids as applied, and it looks exactly like corruption.
+        historySchemas.ShouldBe(["alerts", "identity", "marketdata", "portfolio"]);
         historySchemas.ShouldNotContain("public");
 
         // The migration is recorded, not merely the tables created: an empty history table with the right.
@@ -97,6 +109,13 @@ public sealed class MigrationTests(ApiFixture fixture)
 
         alertsApplied.ShouldNotBeEmpty();
         alertsApplied.ShouldContain(id => id.EndsWith("InitialAlerts", StringComparison.Ordinal));
+
+        var marketDataApplied = await ReadStringsAsync(
+            connection,
+            """SELECT "MigrationId" FROM marketdata."__EFMigrationsHistory" ORDER BY "MigrationId" """);
+
+        marketDataApplied.ShouldNotBeEmpty();
+        marketDataApplied.ShouldContain(id => id.EndsWith("InitialMarketData", StringComparison.Ordinal));
     }
 
     private static async Task<IReadOnlyList<string>> ReadStringsAsync(NpgsqlConnection connection, string sql)
