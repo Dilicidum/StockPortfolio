@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
+using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Domain;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 
@@ -126,6 +127,28 @@ public sealed class FakeQuoteProviderTests
 
         everything.ShouldNotBeEmpty("a single-letter query matched nothing at all, so this proves nothing");
         everything.ShouldAllBe(symbol => Ticker.Create(symbol).IsT0);
+    }
+
+    /// <summary>The fake is the only provider on the clean-clone path, so it needs a rule that can say no.</summary>
+    [Theory]
+    [InlineData("sixteen-character", true)]
+    [InlineData("too-short", false)]
+    [InlineData("unknown", false)]
+    public async Task FakeProvider_VerifyKey_AcceptsSixteenOrMoreCharacters(string key, bool accepted)
+    {
+        var verdict = await Build(Now).VerifyKeyAsync(key, TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(accepted ? KeyVerdict.Accepted : KeyVerdict.Rejected);
+    }
+
+    /// <summary>There is no Unknown verdict from the fake: a fake that pretends the provider is down is
+    /// a fake nobody can reason about.</summary>
+    [Fact]
+    public async Task FakeProvider_VerifyKey_NeverAnswersUnknown()
+    {
+        var verdict = await Build(Now).VerifyKeyAsync("way-more-than-sixteen-characters", TestContext.Current.CancellationToken);
+
+        verdict.ShouldNotBe(KeyVerdict.Unknown);
     }
 
     [Fact]

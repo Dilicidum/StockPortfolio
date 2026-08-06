@@ -125,6 +125,9 @@ public sealed class QuoteReaderTests
 
         public Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SymbolMatch>>([]);
+
+        public Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct) =>
+            Task.FromResult(KeyVerdict.Accepted);
     }
 
     private sealed class RecordingStore : ILastKnownPriceStore

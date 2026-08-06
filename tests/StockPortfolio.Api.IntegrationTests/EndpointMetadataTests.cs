@@ -34,8 +34,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             "SaveDashboardSettings",
         ],
 
-        // The two that ship in every environment; the dev nudge is not mapped in all.
-        ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
+        // The two that ship in every environment, plus the BYOK settings trio; the dev nudge is not
+        // mapped in all.
+        ["MarketData"] = ["GetMarketDataHealth", "SearchTickers", "GetApiKeyStatus", "SaveApiKey", "RemoveApiKey"],
 
         // The settings pair, history, and the two-step handshake the stream needs.
         ["Alerts"] =

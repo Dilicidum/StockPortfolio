@@ -82,6 +82,40 @@ internal sealed partial class FinnhubQuoteProvider(
         }
     }
 
+    /// <summary>Checks a CANDIDATE key, never the app's own. Unlike every method above, this does not
+    /// fail open: a timeout, a 5xx or an open circuit is Unknown, never Accepted.</summary>
+    public async Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("search?q=AAPL", UriKind.Relative));
+
+            // Overrides the client's default X-Finnhub-Token for this one request: HttpClient only
+            // copies a default header onto the outgoing request when the request has not already set it.
+            request.Headers.Add("X-Finnhub-Token", apiKey);
+
+            using var response = await client.SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return KeyVerdict.Accepted;
+            }
+
+            if (IsUnauthorised(response.StatusCode))
+            {
+                return KeyVerdict.Rejected;
+            }
+
+            LogVerifyUnexpectedStatus(logger, (int)response.StatusCode);
+            return KeyVerdict.Unknown;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogVerifyFailed(logger, ex);
+            return KeyVerdict.Unknown;
+        }
+    }
+
     /// <summary>401 and 403 carry the same body and mean the same thing here; neither is ever retried.</summary>
     internal static bool IsUnauthorised(HttpStatusCode status) =>
         status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
@@ -152,4 +186,16 @@ internal sealed partial class FinnhubQuoteProvider(
         Level = LogLevel.Warning,
         Message = "Finnhub search failed for '{Query}'; the field falls back to being a plain text box")]
     private static partial void LogSearchFailed(ILogger logger, Exception exception, string query);
+
+    [LoggerMessage(
+        EventId = 5105,
+        Level = LogLevel.Warning,
+        Message = "Finnhub key verification failed transport-side; treated as unanswerable, never as rejected")]
+    private static partial void LogVerifyFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 5106,
+        Level = LogLevel.Warning,
+        Message = "Finnhub key verification got unexpected status {StatusCode}; treated as unanswerable")]
+    private static partial void LogVerifyUnexpectedStatus(ILogger logger, int statusCode);
 }

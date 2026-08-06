@@ -184,6 +184,21 @@ public sealed class ApiFixture : IAsyncLifetime
             });
     }
 
+    /// <summary>Builds a second host with the BYOK feature switched off, so 404 can be driven for real.</summary>
+    public ApiFactory CreateHostWithByokDisabled()
+    {
+        var settings = SettingsFor(new ModuleConnectionStrings(
+            IdentityConnectionString,
+            PortfolioConnectionString,
+            AlertsConnectionString,
+            MarketDataConnectionString,
+            _redis.GetConnectionString()));
+
+        settings["MarketData:Byok:Enabled"] = "false";
+
+        return new ApiFactory(settings);
+    }
+
     /// <summary>Builds a host whose Redis cannot answer while its quote provider still can.</summary>
     public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(new ModuleConnectionStrings(
         IdentityConnectionString,

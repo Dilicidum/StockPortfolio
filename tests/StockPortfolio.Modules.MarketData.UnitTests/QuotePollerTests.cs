@@ -272,6 +272,9 @@ public sealed class QuotePollerTests
 
         public Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct) => Task.FromResult(true);
 
+        public Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct) =>
+            Task.FromResult(KeyVerdict.Accepted);
+
         public Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SymbolMatch>>([]);
     }

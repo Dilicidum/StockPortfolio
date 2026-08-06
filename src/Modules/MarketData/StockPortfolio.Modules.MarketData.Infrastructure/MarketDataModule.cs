@@ -4,7 +4,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 
+using OneOf;
+using OneOf.Types;
+
+using StockPortfolio.Modules.MarketData.Application;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
+using StockPortfolio.Modules.MarketData.Application.Keys.Commands.RemoveApiKey;
+using StockPortfolio.Modules.MarketData.Application.Keys.Commands.SaveApiKey;
+using StockPortfolio.Modules.MarketData.Application.Keys.Queries.GetApiKeyStatus;
 using StockPortfolio.Modules.MarketData.Application.Names;
 using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
@@ -26,6 +33,9 @@ public static class MarketDataModule
 
     /// <summary>The ConnectionStrings key this module reads.</summary>
     public const string ConnectionStringName = "MarketData";
+
+    /// <summary>The configuration key the BYOK feature switch is read from.</summary>
+    private const string ByokEnabledKey = "MarketData:Byok:Enabled";
 
     /// <summary>Registers only the MarketData DbContext, for the migrator, which fetches nothing and encrypts nothing.</summary>
     public static IServiceCollection AddMarketDataPersistence(this IServiceCollection services, IConfiguration configuration)
@@ -101,16 +111,48 @@ public static class MarketDataModule
         services.AddScoped<ISymbolValidator, SymbolValidator>();
         services.AddScoped<ICompanyNameReader, CompanyNameReader>();
 
-        // The module's first CQRS handler. Program.cs calls DecorateHandlers() after this, so it is
-        // wrapped in the logging decorator like every other one.
+        // Program.cs calls DecorateHandlers() after every module has registered, so each handler below
+        // is wrapped in the logging decorator like every other one in the host.
         services.AddScoped<
             IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>>,
             SearchTickersQueryHandler>();
+
+        AddKeys(services, config);
 
         AddPolling(services, config);
 
         return services;
     }
+
+    /// <summary>BYOK: the feature switch, the repository, the reader Task 7 needs, and the three handlers.</summary>
+    private static void AddKeys(IServiceCollection services, IConfiguration config)
+    {
+        services.AddSingleton(ReadByokOptions(config));
+
+        services.AddScoped<IUserProviderKeyRepository, UserProviderKeyRepository>();
+
+        // Unused until Task 7 wires the dashboard's price path onto it. Declared now because the port
+        // is part of this phase's public surface, not a call site of it.
+        services.AddScoped<IUserProviderKeyReader, UserProviderKeyReader>();
+
+        services.AddScoped<
+            ICommandHandler<
+                SaveApiKeyCommand,
+                OneOf<SaveApiKeyResult, ProviderRejectedTheKey, ProviderCouldNotAnswer, ByokDisabled>>,
+            SaveApiKeyCommandHandler>();
+
+        services.AddScoped<
+            ICommandHandler<RemoveApiKeyCommand, OneOf<Success, NotFound>>,
+            RemoveApiKeyCommandHandler>();
+
+        services.AddScoped<
+            IQueryHandler<GetApiKeyStatusQuery, GetApiKeyStatusResult>,
+            GetApiKeyStatusQueryHandler>();
+    }
+
+    /// <summary>A blank, unparseable value or a missing key is a file that has not been told, not a "no".</summary>
+    private static ByokOptions ReadByokOptions(IConfiguration config) =>
+        new(bool.TryParse(config[ByokEnabledKey], out var enabled) ? enabled : ByokOptions.DefaultEnabled);
 
     /// <summary>The poller, its two locks, and the observer the host is expected to replace.</summary>
     private static void AddPolling(IServiceCollection services, IConfiguration config)

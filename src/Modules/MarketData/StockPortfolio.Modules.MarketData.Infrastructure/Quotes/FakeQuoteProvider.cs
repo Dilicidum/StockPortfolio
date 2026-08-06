@@ -11,6 +11,11 @@ internal sealed class FakeQuoteProvider(FakeQuoteOptions options, TimeProvider c
     private const uint Fnv1aOffsetBasis = 2166136261;
     private const uint Fnv1aPrime = 16777619;
 
+    /// <summary>Sixteen characters or more is accepted. Below it, or the "unknown" sentinel, is rejected.</summary>
+    private const int MinimumVerifiableKeyLength = 16;
+
+    private const string UnknownKeySentinel = "unknown";
+
     /// <summary>Base prices land in $20.00 to $499.99 and never move for a given symbol.</summary>
     private const uint BasePriceSpread = 48000;
 
@@ -79,6 +84,17 @@ internal sealed class FakeQuoteProvider(FakeQuoteOptions options, TimeProvider c
                 .Select(entry => new SymbolMatch(Ticker.Create(entry.Symbol).AsT0, entry.Name)),
         ]);
     }
+
+    // With no Finnhub__ApiKey configured this fake is the ONLY provider there is, so a rule that
+    // accepted everything would make the rejected arm of BYOK verification unreachable on the clean-clone
+    // path and in every test. There is deliberately no Unknown verdict here: a fake that pretends the
+    // provider is down is a fake nobody can reason about, so length is the only axis it can say no on.
+    public Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct) =>
+        Task.FromResult(
+            apiKey.Length >= MinimumVerifiableKeyLength
+                && !string.Equals(apiKey, UnknownKeySentinel, StringComparison.Ordinal)
+                ? KeyVerdict.Accepted
+                : KeyVerdict.Rejected);
 
     public void Nudge(string ticker, decimal percent, TimeSpan duration)
     {

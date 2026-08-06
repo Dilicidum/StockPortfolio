@@ -92,6 +92,9 @@ param jwtAudience string = 'stockportfolio-spa'
 @secure()
 param finnhubApiKey string = ''
 
+@description('Whether a signed-in user may bring their own provider key. Not a secret — a plain feature switch.')
+param byokEnabled bool = true
+
 @description('Tags applied to every resource.')
 param tags object = {
   application: 'stockportfolio'
@@ -242,6 +245,7 @@ module api 'modules/containerapp-api.bicep' = {
     jwtIssuer: jwtIssuer
     jwtAudience: jwtAudience
     finnhubApiKey: finnhubApiKey
+    byokEnabled: byokEnabled
     // Back to 1 with Phase 4, and the expiry date on the old cost decision has passed.
     // QuotePoller is a BackgroundService, so a sleeping replica evaluates no thresholds: the app
     // would look alive and quietly never alert. The two go together and one without the other is

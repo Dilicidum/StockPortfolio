@@ -26,4 +26,8 @@ public static class ProblemDetailsExtensions
     /// <summary>Builds a 404 problem response.</summary>
     public static ProblemHttpResult NotFoundProblem(string detail) =>
         TypedResults.Problem(detail, statusCode: StatusCodes.Status404NotFound, title: "Not Found");
+
+    /// <summary>Builds a 503 problem response.</summary>
+    public static ProblemHttpResult ServiceUnavailableProblem(string detail) =>
+        TypedResults.Problem(detail, statusCode: StatusCodes.Status503ServiceUnavailable, title: "Service Unavailable");
 }

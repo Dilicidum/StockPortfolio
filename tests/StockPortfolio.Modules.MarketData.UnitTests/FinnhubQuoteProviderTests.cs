@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
+using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Domain;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 
@@ -218,6 +219,86 @@ public sealed class FinnhubQuoteProviderTests
             TestContext.Current.CancellationToken);
 
         quotes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task VerifyKey_WhenTheProviderAccepts_IsAccepted()
+    {
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, """{"count":1,"result":[{"symbol":"AAPL"}]}"""));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Accepted);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task VerifyKey_WhenTheProviderRejects_IsRejectedNotUnknown(HttpStatusCode status)
+    {
+        var provider = Build(new CountingHandler(status));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Rejected);
+    }
+
+    /// <summary>The check this test exists for: an unanswerable provider must never be read as a bad key.</summary>
+    [Fact]
+    public async Task VerifyKey_WhenTheProviderCannotAnswer_IsUnknownNotRejected()
+    {
+        var provider = Build(new CountingHandler(HttpStatusCode.InternalServerError));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Unknown);
+    }
+
+    [Fact]
+    public async Task VerifyKey_WhenTheTransportFails_IsUnknown()
+    {
+        var provider = new FinnhubQuoteProvider(
+            new HttpClient(new FlakyHandler("AAPL")) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
+            new FakeTimeProvider(Now),
+            NullLogger<FinnhubQuoteProvider>.Instance);
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Unknown);
+    }
+
+    /// <summary>The app's own key must never leak into a check of someone else's candidate key.</summary>
+    [Fact]
+    public async Task VerifyKey_SendsTheCandidateKey_NotTheClientsOwn()
+    {
+        var handler = new HeaderCapturingHandler();
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        // Mimics MarketDataModule.cs, which adds the app's own key as a default header on this client.
+        client.DefaultRequestHeaders.Add("X-Finnhub-Token", "the-apps-own-key");
+
+        var provider = new FinnhubQuoteProvider(client, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+
+        await provider.VerifyKeyAsync("candidate-key", TestContext.Current.CancellationToken);
+
+        handler.LastTokenHeader.ShouldBe("candidate-key");
+    }
+
+    private sealed class HeaderCapturingHandler : HttpMessageHandler
+    {
+        public string? LastTokenHeader { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            LastTokenHeader = request.Headers.TryGetValues("X-Finnhub-Token", out var values)
+                ? values.FirstOrDefault()
+                : null;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"count":1,"result":[{"symbol":"AAPL"}]}""", System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
     }
 
     private sealed class FlakyHandler(string failingSymbol) : HttpMessageHandler

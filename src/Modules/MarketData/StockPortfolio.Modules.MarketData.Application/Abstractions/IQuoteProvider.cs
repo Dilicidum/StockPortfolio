@@ -17,4 +17,8 @@ public interface IQuoteProvider
     /// <summary>Fuzzy search over symbols and company names. Empty means nothing matched OR the provider
     /// could not answer — the two are the same to a caller, because a search outage falls back to typing.</summary>
     Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct);
+
+    /// <summary>Checks a candidate key directly against the provider. Unlike every other method here,
+    /// this does not fail open: an unanswerable check must never be read as a valid key.</summary>
+    Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct);
 }
