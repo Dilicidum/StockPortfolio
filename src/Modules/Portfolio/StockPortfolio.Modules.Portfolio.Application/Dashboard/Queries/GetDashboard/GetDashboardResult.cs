@@ -14,6 +14,8 @@ public sealed record DashboardPosition(
 
     // JsonIgnoreCondition.Never on every nullable member, because Program.cs sets DefaultIgnoreCondition
     // to WhenWritingNull — which drops nullable value types too, so without these the field is ABSENT.
+    // Name is null whenever no name is cached, which never affects any other member of the row.
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] string? Name,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] Money? CurrentPrice,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] Money? MarketValue,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.Never)] Money? Profit,

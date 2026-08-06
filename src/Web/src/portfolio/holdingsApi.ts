@@ -25,6 +25,13 @@ export type { Money } from '../lib/format'
 export interface Holding {
   id: string
   ticker: string
+  /**
+   * The company name, from MarketData's name cache. Really arrives as `null` rather than
+   * being absent, and `null` is the ordinary case rather than a failure: every position
+   * added before ticker search existed has no cached name, and the cache expires weekly.
+   * The row renders the ticker alone when it is missing — see `TickerCell`.
+   */
+  name: string | null
   quantity: number
   averagePrice: Money
   invested: Money

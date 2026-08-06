@@ -15,6 +15,9 @@ public sealed class DashboardCalculatorTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 5, TimeSpan.Zero);
 
+    /// <summary>The ordinary case: nothing has been searched for, so no ticker has a cached name.</summary>
+    private static readonly Dictionary<string, string> NoNames = new(StringComparer.Ordinal);
+
     /// <summary>The canonical case from the spec: 20 @ $125, now $150.</summary>
     [Fact]
     public void Position_ProfitInCurrencyAndPercent()
@@ -110,7 +113,7 @@ public sealed class DashboardCalculatorTests
     [Fact]
     public void Totals_NoPositions_ProfitPercentIsNull()
     {
-        DashboardCalculator.Calculate([], Prices(), Now).Totals.ProfitPercent.ShouldBeNull();
+        DashboardCalculator.Calculate([], Prices(), NoNames, Now).Totals.ProfitPercent.ShouldBeNull();
     }
 
     /// <summary>The single-currency assumption, stated: mixing them would mislabel every total.</summary>
@@ -181,8 +184,9 @@ public sealed class DashboardCalculatorTests
 
     private static GetDashboardResult Calculate(
         IReadOnlyList<HoldingRow> rows,
-        IReadOnlyDictionary<string, QuotedPrice> prices) =>
-        DashboardCalculator.Calculate(rows, prices, Now);
+        IReadOnlyDictionary<string, QuotedPrice> prices,
+        IReadOnlyDictionary<string, string>? names = null) =>
+        DashboardCalculator.Calculate(rows, prices, names ?? NoNames, Now);
 
     private static HoldingRow Row(string ticker, decimal quantity, decimal averagePrice) =>
         new(Guid.CreateVersion7(), ticker, quantity, Money.Usd(averagePrice));

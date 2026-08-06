@@ -13,4 +13,8 @@ public interface IQuoteProvider
 
     /// <summary>Whether the provider recognises this symbol; true when it cannot answer.</summary>
     Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct);
+
+    /// <summary>Fuzzy search over symbols and company names. Empty means nothing matched OR the provider
+    /// could not answer — the two are the same to a caller, because a search outage falls back to typing.</summary>
+    Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct);
 }

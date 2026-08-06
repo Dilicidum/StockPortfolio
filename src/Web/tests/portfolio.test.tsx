@@ -13,11 +13,15 @@ import { authStore } from '../src/auth/authStore'
 import { queryClient } from '../src/lib/queryClient'
 import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { holdingKeys, type Holding } from '../src/portfolio/holdingsApi'
+import { emptyTickerSearchHandler } from './msw/tickerSearch'
 import { server } from './msw/server'
 
 const AAPL: Holding = {
   id: '0199a1f0-0000-7000-8000-000000000001',
   ticker: 'AAPL',
+  // Null on purpose: a position recorded before ticker search existed, which is what the
+  // deployed database is full of. `tickerSearch.test.tsx` covers the named case.
+  name: null,
   quantity: 10,
   averagePrice: { amount: '100', currency: 'USD' },
   invested: { amount: '1000', currency: 'USD' },
@@ -47,6 +51,10 @@ beforeEach(() => {
 async function renderPortfolio(seed: Holding[] = [AAPL]) {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), seed)
+
+  // The ticker field searches as you type; every test below types into it. It is added
+  // FIRST so a test that wants real matches can still shadow it with its own handler.
+  server.use(emptyTickerSearchHandler)
 
   const router = createRouter({
     routeTree,

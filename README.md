@@ -47,22 +47,26 @@ Start from a clean clone with no API key configured. The fake price provider has
 own, because there is no demo key to hand anybody.
 
 1. Register, land on the dashboard, hard-refresh — still signed in.
-2. Add 10 shares of AAPL at $100, then 10 more at $150. One row, 20 shares, average $125.
-3. Prices appear on the first render, including for a stock added seconds ago.
-4. Set a threshold to 1% and press Simulate — an alert arrives in about a second.
-5. Reload. The alert is still listed, because it was saved, not replayed.
-6. Switch to Ukrainian and to dark mode. Both survive a reload.
-7. Hide a position. Its row goes; it is still watched and still alerts.
-8. Set the refresh interval to 15 seconds. The dashboard visibly updates faster.
-9. Stop the price provider. Prices go amber with their age, health goes amber, nothing crashes.
-10. Narrow the window to 375px. The table becomes cards.
-11. `docker compose down && docker compose up`. The data is still there.
+2. Start typing `appl` in the ticker field. Apple appears with its name; arrow down and press Enter to
+   fill the field. Then clear it and type `AAPL` by hand — that still works and always will.
+3. Add 10 shares of AAPL at $100, then 10 more at $150. One row, 20 shares, average $125, and the row
+   carries the company name that step 2 cached.
+4. Prices appear on the first render, including for a stock added seconds ago.
+5. Set a threshold to 1% and press Simulate — an alert arrives in about a second.
+6. Reload. The alert is still listed, because it was saved, not replayed.
+7. Switch to Ukrainian and to dark mode. Both survive a reload.
+8. Hide a position. Its row goes; it is still watched and still alerts.
+9. Set the refresh interval to 15 seconds. The dashboard visibly updates faster.
+10. Stop the price provider. Prices go amber with their age, health goes amber, nothing crashes — and the
+    ticker field still accepts a typed symbol, it just stops suggesting.
+11. Narrow the window to 375px. The table becomes cards.
+12. `docker compose down && docker compose up`. The data is still there.
 
-Then repeat steps 1 to 5 against the deployed site, watching that the alert connection survives past
+Then repeat steps 1 to 6 against the deployed site, watching that the alert connection survives past
 four minutes — the hosting platform closes idle connections at four minutes and will not go higher,
 which is the whole reason the connection sends something every twenty seconds.
 
-Steps 4 to 8 need Phases 4 and 5, which are not built yet.
+Steps 5 to 9 need Phases 4 and 5, which are not built yet.
 
 ---
 
@@ -376,6 +380,25 @@ non-existent symbol and a healthy symbol Finnhub blipped on both come back as `c
 distinguish them in principle and would mark a valid holding unknown after one bad second. Not `count > 0`
 either — `/search` is fuzzy, and `q=AAP` returns AAPL.
 
+### Finding a symbol you half-remember
+
+The ticker field suggests companies as you type. It is still a text box first: type `AAPL` and submit
+without ever opening the list, and nothing changes from before it existed. That matters because search
+answers `200` with an empty list for *every* failure — a query too short to mean anything, a provider that
+is down, a provider out of quota — so an outage looks like "no matches" and leaves a working form rather
+than blocking a purchase someone really made.
+
+Suggestions are filtered to symbols the add-position form would actually accept. `/search` returns foreign
+listings such as `AAPL.SW` alongside `AAPL`, and offering one would fill the field with a value the form
+then rejects. Fuzzy matching itself is kept — `AAP` still finds `AAPL`.
+
+Search is also the only thing that produces a **company name**, which then appears on the holdings and
+dashboard tables. Names are cached in Redis for a week; prices never are. The rules only look contradictory:
+a price is meant to change every second, so a stored one is almost certainly wrong, while a name is meant
+never to change. The week-long expiry exists so that a company which renames itself corrects on its own. A
+row with no cached name shows its ticker alone — the ordinary case for anything added before this shipped,
+and for anything at all if Redis is down.
+
 ### No API key? It still works.
 
 With no `Finnhub__ApiKey` configured the app registers `FakeQuoteProvider`, logs a single warning naming the
@@ -468,12 +491,6 @@ Stated plainly rather than left for you to find.
   bug — over budget, tickers fall back to their last known price rather than failing.
 - **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
   `TODO`. They work and are exercised by tests; they have not been signed off.
-- **There is no ticker search, and adding a position is still a free-text box.** A search box that
-  suggests symbols as you type was specified in the Phase 2 plan and never built, so you must type a
-  symbol from memory, and a typo comes back as a validation error with no way to find the right one.
-  It is the first thing anyone does with the app, which is why it is worth stating here. Nothing is
-  broken: free text validates against `^[A-Z]{1,5}$` and the symbol-existence check rejects anything
-  that is not real. Tracked in [docs/deferred-work.md](docs/deferred-work.md) as **E2**.
 - **Holding visibility is a column, not a control.** The dashboard read already filters on
   `holdings.is_visible`, which is always `true` until Phase 5 adds the toggle. The filter is a no-op
   today and costs nothing.

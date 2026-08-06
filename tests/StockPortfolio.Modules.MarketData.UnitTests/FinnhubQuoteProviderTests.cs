@@ -102,6 +102,89 @@ public sealed class FinnhubQuoteProviderTests
         exists.ShouldBeTrue();
     }
 
+    /// <summary>Search keeps what the existence check throws away — the whole point of reusing that call.</summary>
+    [Fact]
+    public async Task Search_KeepsTheDescriptionTheExistenceCheckDiscards()
+    {
+        const string Body = """
+            {"count":2,"result":[
+              {"symbol":"AAPL","description":"APPLE INC"},
+              {"symbol":"APLE","description":"APPLE HOSPITALITY REIT INC"}]}
+            """;
+
+        using var bucket = FullBucket();
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body), bucket);
+
+        var matches = await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken);
+
+        matches.Select(match => match.Ticker.Value).ShouldBe(["AAPL", "APLE"]);
+        matches[0].Name.ShouldBe("APPLE INC");
+        matches[1].Name.ShouldBe("APPLE HOSPITALITY REIT INC");
+    }
+
+    /// <summary>A suggestion the add-position form would then reject is worse than no suggestion.</summary>
+    [Fact]
+    public async Task Search_DropsRowsThatCouldNotBeAdded_AndDeduplicates()
+    {
+        const string Body = """
+            {"count":6,"result":[
+              {"symbol":"AAPL","description":"APPLE INC"},
+              {"symbol":"AAPL.SW","description":"APPLE INC SWISS"},
+              {"symbol":"AAPL34.SA","description":"APPLE INC BDR"},
+              {"symbol":"AAPL","description":"APPLE INC (SECOND LISTING)"},
+              {"symbol":"TOOLONG","description":"SEVEN LETTERS"},
+              {"symbol":"NONAME","description":"   "}]}
+            """;
+
+        using var bucket = FullBucket();
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body), bucket);
+
+        var matches = await provider.SearchSymbolsAsync("aapl", TestContext.Current.CancellationToken);
+
+        // One AAPL, and nothing else: the fuzzy hits are wanted, the unaddable rows are not.
+        matches.ShouldHaveSingleItem().Ticker.Value.ShouldBe("AAPL");
+        matches[0].Name.ShouldBe("APPLE INC");
+    }
+
+    /// <summary>An outage must leave the field a plain text box, never break the form it sits on.</summary>
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Search_WhenTheKeyIsRejected_IsEmptyNotAThrow(HttpStatusCode status)
+    {
+        using var bucket = FullBucket();
+        var provider = Build(new CountingHandler(status), bucket);
+
+        (await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Search_WhenTheTransportFails_IsEmptyNotAThrow()
+    {
+        using var bucket = FullBucket();
+
+        var provider = new FinnhubQuoteProvider(
+            new HttpClient(new FlakyHandler("appl")) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
+            bucket,
+            new FakeTimeProvider(Now),
+            NullLogger<FinnhubQuoteProvider>.Instance);
+
+        (await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
+    /// <summary>A body with no result array at all is "nothing matched", not a null reference.</summary>
+    [Theory]
+    [InlineData("""{"count":0,"result":[]}""")]
+    [InlineData("""{"count":0}""")]
+    [InlineData("{}")]
+    public async Task Search_EmptyOrShapelessBody_IsAnEmptyList(string body)
+    {
+        using var bucket = FullBucket();
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, body), bucket);
+
+        (await provider.SearchSymbolsAsync("zzzz", TestContext.Current.CancellationToken)).ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Fetch_StampsObservedAtWithOurClock_NotFinnhubsTradeTime()
     {

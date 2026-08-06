@@ -15,7 +15,6 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 Still open:
 
 - `TokenPolicy` values (token lifetimes, rotation, grace window) are provisional and unsigned-off.
-- **Ticker search is specified and unbuilt.** The Phase 2 plan describes a search endpoint and a combobox on the Add-position form; neither exists. Tracked as **E2** in [docs/deferred-work.md](docs/deferred-work.md).
 - The `alerts` schema, the `alerts_svc` role and the Alerts deployment variables are still in the tree with no module behind them. Tracked as **E1**.
 
 [docs/deferred-work.md](docs/deferred-work.md) is the register for anything deferred, unbuilt or rejected. Something described in a plan and missing from the code belongs there too, not only defects found in code that exists. Read it before assuming an unimplemented feature is simply "not that phase yet".
@@ -42,6 +41,7 @@ These describe the shape of the system rather than the order it gets built in, s
 
 - [docs/reference/er-diagram.md](docs/reference/er-diagram.md) — the data model: tables, what lives in Redis instead, which indexes carry weight, and which tables exist today.
 - [docs/reference/module-interactions.md](docs/reference/module-interactions.md) — which module depends on which, what crosses each line and why.
+- [docs/reference/service-interactions.md](docs/reference/service-interactions.md) — the runtime picture: browser, the one process, and which module talks to Postgres, Redis or the price provider.
 - [docs/reference/module-boundaries.md](docs/reference/module-boundaries.md) — why the boundaries are where they are, and the three places one was deliberately not drawn.
 - [docs/reference/bounded-contexts.md](docs/reference/bounded-contexts.md) — what kind of relationship crosses each boundary.
 - [docs/reference/identity-contracts.md](docs/reference/identity-contracts.md) — how sessions and tokens behave, and what about them is fixed.
@@ -95,6 +95,7 @@ Four modules are *designed* — `Identity`, `Portfolio`, `MarketData`, `Alerts` 
 **Prices: two questions, two paths.** The dashboard asks *what is this worth now* and answers it by calling the provider directly on load — there is **no read-through cache, no request coalescing and no in-memory tier**. Alert evaluation asks *how has it moved over N minutes*, which needs history, which is the only reason a poller and a Redis window exist. The poller polls only tickers with an active alert; with no alerts configured nothing polls, and the dashboard is unaffected.
 
 - Two Redis price structures, deliberately kept apart: `marketdata:last:{ticker}` is one value per ticker, never trimmed, written by any path that fetches, and is the dashboard's only fallback when the provider is down. `marketdata:prices:{ticker}` is the trimmed alert window. They have different lifetimes — merging them would tie the dashboard's fallback to the alert retention setting.
+- **`marketdata:name:{ticker}` is a third key and is not a price at all.** It holds the company name, written whenever a ticker search sees one, with a seven-day expiry. A cached price would be wrong within a second; a cached name is right for years, and the expiry only exists so a company that renames itself corrects without anyone acting. Search *results* are not cached — the term is arbitrary and rarely repeated, while ticker-to-name is a small set read on every page. Names never reach the provider on a page render: the holdings page has no provider dependency and a cosmetic field must not give it one.
 - The poller and the window are **Phase 4**. `minReplicas` goes to 1 there, for the same reason.
 - The live deployment needs a real `FINNHUB_API_KEY`. `FakeQuoteProvider` is for the clean-clone path and the tests; leaving it on in Azure serves invented prices for real tickers.
 
@@ -114,7 +115,7 @@ Two reference rules are enforced by the compiler and checked again by `Architect
 - `Shared.Kernel` must stay free of frameworks — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no domain-event machinery: `IDomainEvent`, `IDomainEventHandler` and `IDomainEventPublisher` do not exist. Nothing raises an event, so nothing needs them. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler cannot check this now that Domain is public, so `Architecture.Tests` is the only thing enforcing it — do not weaken or skip those tests.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would turn the kernel into a shared domain, which is exactly what modules exist to prevent.
-- Dependency edges: **Portfolio → MarketData** (dashboard prices), **Alerts → MarketData** (price windows), **Alerts → Portfolio** (`IUserHoldsTicker`, validation only). Nothing depends on Alerts. Identity sits off to the side with nothing depending on it at runtime; the JWT is self-contained. Keep it that way — it is the reason Identity would be the easiest module to pull out first.
+- Dependency edges: **Portfolio → MarketData** (dashboard prices, and company names for both tables — two separate contracts on purpose, because a price outage and a missing name are different failures and must not share an interface), **Alerts → MarketData** (price windows), **Alerts → Portfolio** (`IUserHoldsTicker`, validation only). Nothing depends on Alerts. Identity sits off to the side with nothing depending on it at runtime; the JWT is self-contained. Keep it that way — it is the reason Identity would be the easiest module to pull out first.
 - MarketData depends on nothing. When the Phase 4 poller arrives, MarketData will declare an interface for "which tickers to poll" and the host will supply an adapter over `Alerts.Contracts`. Do not make MarketData read another module directly.
 - One `DbContext` and one Postgres schema per module **that persists anything**, each connecting as its own role. **MarketData is the stated exception and has no `DbContext`, no migration and no `MigratedModules.cs` entry.** Everything Phase 3 persists is one Redis key per ticker; an empty context would buy a zero-table migration, a `marketdata.__EFMigrationsHistory` row and a failing `MigrationTests` assertion, for no behaviour. The `marketdata` schema and `marketdata_svc` role exist and are unused — Phase 5's per-user API keys are what make them real. `alert_settings` and `fired_alerts` belong to the `alerts` schema and `AlertsDbContext`; `alert_settings` is keyed on user **and ticker**, so a threshold belongs to a position rather than to an account.
 
@@ -190,18 +191,18 @@ The trade is worth knowing: the typed union made the compiler reject a result th
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** **416 passing and 2 skipped of 418 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** **472 passing and 2 skipped of 474 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
 | Assembly | Passed | Skipped |
 |---|---|---|
 | `Shared.Kernel.UnitTests` | 21 | 0 |
 | `Modules.Identity.UnitTests` | 98 | 0 |
 | `Modules.Portfolio.UnitTests` | 90 | 0 |
-| `Modules.MarketData.UnitTests` | 61 | 0 |
+| `Modules.MarketData.UnitTests` | 97 | 0 |
 | `Architecture.Tests` | 46 | **2** |
-| `Api.IntegrationTests` | 100 | 0 |
+| `Api.IntegrationTests` | 120 | 0 |
 
-The browser tests are counted separately by `npm --prefix src/Web test` — **26 passing across 6 files**. These are the only test counts in the repository; do not copy them into another document.
+The browser tests are counted separately by `npm --prefix src/Web test` — **37 passing across 7 files**. These are the only test counts in the repository; do not copy them into another document.
 
 **Both skips are architecture rules waiting on an empty assembly.** A rule that skips checks nothing. Both are `Identity.Contracts` — rule 1 (`Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts`) and rule 2 (`ContractsAssembly_ReferencesNoPersistence`) — and both are correct: nothing reaches into Identity, so its `.Contracts` is deliberately empty. `EmptyShells_AreExactlyThePhasesNotYetBuilt` fixes the exact list of empty assemblies, so one appearing or disappearing is a deliberate edit rather than a silent change in what is enforced. The number of empty assemblies and the number of skips are different quantities and any match between them is a coincidence — read both from the test source, never from here. Quoting a passing count without the skip count hides all of this.
 

@@ -26,6 +26,9 @@ const dashboard: GetDashboardResult = {
     {
       id: '0199a1f0-0000-7000-8000-000000000001',
       ticker: 'AAPL',
+      // A name the cache knew; TSLA's is null, which is the ordinary case for a position
+      // recorded before ticker search existed. Both render through `TickerCell`.
+      name: 'Apple Inc',
       quantity: 20,
       averagePrice: { amount: '125.000000', currency: 'USD' },
       cost: { amount: '2500.000000', currency: 'USD' },
@@ -40,6 +43,7 @@ const dashboard: GetDashboardResult = {
     {
       id: '0199a1f0-0000-7000-8000-000000000002',
       ticker: 'TSLA',
+      name: null,
       quantity: 5,
       averagePrice: { amount: '200.000000', currency: 'USD' },
       cost: { amount: '1000.000000', currency: 'USD' },

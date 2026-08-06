@@ -79,6 +79,55 @@ public sealed class FakeQuoteProviderTests
         (await PriceOf(provider, "AAPL")).ShouldBeGreaterThan(before);
     }
 
+    /// <summary>`docker compose up` with no key is the acceptance gate, so search must work without one.</summary>
+    [Theory]
+    [InlineData("appl", "AAPL")]
+    [InlineData("APPLE", "AAPL")]
+    [InlineData("aap", "AAPL")]
+    [InlineData("micro", "MSFT")]
+    [InlineData("tsl", "TSLA")]
+    public async Task FakeProvider_Search_FindsBySymbolPrefixOrName(string query, string expected)
+    {
+        var matches = await Build(Now).SearchSymbolsAsync(query, TestContext.Current.CancellationToken);
+
+        matches.Select(match => match.Ticker.Value).ShouldContain(expected);
+    }
+
+    [Fact]
+    public async Task FakeProvider_Search_CarriesAName()
+    {
+        var matches = await Build(Now).SearchSymbolsAsync("aapl", TestContext.Current.CancellationToken);
+
+        matches.ShouldHaveSingleItem().Name.ShouldBe("Apple Inc");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("zzzzz")]
+    public async Task FakeProvider_Search_NothingMatching_IsAnEmptyList(string query) =>
+        (await Build(Now).SearchSymbolsAsync(query, TestContext.Current.CancellationToken)).ShouldBeEmpty();
+
+    /// <summary>Every catalogue symbol must be addable, or picking one fills a field the form rejects.</summary>
+    [Fact]
+    public async Task FakeProvider_EverySuggestion_IsASymbolThisAppCanHold()
+    {
+        var provider = Build(Now);
+        var everything = new List<string>();
+
+        foreach (var letter in "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        {
+            var matches = await provider.SearchSymbolsAsync(
+                letter.ToString(),
+                TestContext.Current.CancellationToken);
+
+            everything.AddRange(matches.Select(match => match.Ticker.Value));
+        }
+
+        everything.ShouldNotBeEmpty("a single-letter query matched nothing at all, so this proves nothing");
+        everything.ShouldAllBe(symbol => Ticker.Create(symbol).IsT0);
+    }
+
     [Fact]
     public void FakeProvider_Hash_IsTheDocumentedFnv1a()
     {

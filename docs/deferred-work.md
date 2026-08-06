@@ -293,50 +293,39 @@ removed parameter that a workflow still passes fails at preflight, not at runtim
 is the Phase 6 README and verification pass, which is where a reviewer reading `db/init/01-roles.sql` would
 find a role for a module that does not exist.
 
-### E2 — ticker search is specified and unbuilt
+### E2 — ticker search was specified and unbuilt — **DONE (after Phase 3, ahead of Phase 4)**
 
-The Phase 2 plan specifies a ticker search — `GET /api/tickers/search?q=appl` returning
-`[{ symbol, description }]`, backed by Finnhub's symbol-search endpoint in `MarketData`, consumed by
-Portfolio through `MarketData.Contracts`, with a search box on the Add-position form that suggests symbols
-as you type. It reached no implementation task and nothing downstream picked it up.
+The Phase 2 plan specified a ticker search — type a few letters, see matching companies, pick one — and it
+reached no implementation task. Nothing downstream picked it up, so it was never mapped, never contracted
+and never built. Nothing was broken by its absence: free text validated, the existence check rejected
+symbols that do not exist, and the error message was usable. What was missing was **discovery**, on the
+first screen anyone uses.
 
-Confirmed unbuilt:
+**Done.** The endpoint, the cross-module name contract, the Redis name cache, the fake provider's own
+search and the suggestion box all ship. Company names now appear on the holdings and dashboard tables,
+which nothing else in the system could produce.
 
-| Where it should appear | What is actually there |
-|---|---|
-| `src/` — the endpoint | No `/api/tickers/search` anywhere. `MarketDataEndpoints.cs` maps exactly two routes, `/api/marketdata/health` and the Development-only nudge |
-| `MarketData.Contracts` | No search contract. Finnhub's `/search` *is* called, but only from `FinnhubQuoteProvider.SymbolExistsAsync` for the existence check, which throws away everything but a yes or no |
-| `src/Web/` | No suggestion box; the ticker field is still the free-text input Phase 2 shipped |
+Two things came out of building it that the item had not anticipated.
 
-**It is not a defect and nothing is broken.** Free text still validates against `^[A-Z]{1,5}$`, the
-existence check rejects a symbol that does not exist, and `UnknownTicker` comes back with a usable message.
-What is missing is discovery. Adding a position is the **first** thing a reviewer does with the application,
-and without search they must type a symbol from memory. Search also supplies the company name, which the
-mockup's table wants and which nothing else produces — so leaving it out leaves a column with nothing to
-fill it.
+**The route is `/api/marketdata/search`, not `/api/tickers/search`.** The original spelling predates the
+module that owns the provider; every other route in that module is already under `/api/marketdata/`, and
+one module serving two prefixes is a seam with no reason behind it. Closing condition 1 below is written
+against the endpoint, not the string.
 
-**Fix:** build it as specified — a search contract in `MarketData.Contracts`, a `/search`-backed
-implementation beside `FinnhubQuoteProvider` (whose private `SearchAsync` and `FinnhubSearchResponse`
-already parse the exact body this needs, and currently discard the descriptions), the endpoint in
-`MarketData.Api`, and the suggestion box on the Add-position form. Results are **not** cached in Redis.
-`FakeQuoteProvider` needs a search implementation too, or the clean-clone path loses the feature.
+**Suggestions are filtered to symbols the add-position form would accept.** The provider's search returns
+foreign listings and longer symbols, and offering one fills the field with a value the form then rejects.
+This is *not* the exact-match rule the existence check uses — fuzzy hits are still kept, and searching part
+of a symbol still returns the whole one. An integration test adds every suggestion the search returns and
+asserts each is accepted, so the two rules cannot drift apart.
 
-**Trigger:** Phase 4, as its first frontend task — it is the last piece of the Phase 2 spec still
-outstanding, and it gets further from its reasoning every phase it waits. If Phase 4 is full, the firm
-deadline is the **Phase 6 verification pass**, since that is a reviewer walking the first-run path this
-feature exists to serve.
+**Closing conditions, all four met:**
 
-**Closing condition — all four, or the item stays open:**
-
-1. `GET /api/tickers/search?q=appl` returns a 200 carrying an object with `symbol == "AAPL"`.
+1. The search endpoint returns a 200 carrying an object with `symbol == "AAPL"` for a prefix of it. ✅
 2. The route appears in `EndpointMetadataTests`' expected MarketData route set, which is what stops it
-   being mapped and then lost (see C11).
+   being mapped and then lost (see C11). ✅
 3. The Add-position field lists suggestions and still accepts free text when the endpoint fails, so a
-   provider outage degrades to the Phase 2 behaviour rather than blocking the form.
-4. The Phase 2 plan marks the feature delivered, naming the phase that delivered it.
-
-**Alternatively, close it by deciding not to build it** — a legitimate outcome, and better than silence.
-That needs an entry under Rejected giving the reason, and the Phase 2 plan amended to say so.
+   provider outage degrades to the Phase 2 behaviour rather than blocking the form. ✅
+4. The Phase 2 plan marks the feature delivered. ✅
 
 ---
 

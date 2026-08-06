@@ -201,6 +201,7 @@ That risk profile is what licenses a different store.
 | Key | Type | Contents | Lifetime |
 |---|---|---|---|
 | `marketdata:last:{ticker}` | string | the last price any path fetched, with the time it was seen | **never trimmed** — the dashboard's only fallback when the provider is unreachable |
+| `marketdata:name:{ticker}` | string | the company name, learned whenever a search returns one | expires after a week, so a company that renames itself corrects without anyone acting |
 | `marketdata:prices:{ticker}` | sorted set | recent observations, scored by time | trimmed on write to a little over an hour; written only for tickers with an active alert |
 | `marketdata:claim:{window}` | string | decides *who* polls this window | expires shortly after the window |
 | `marketdata:cycle-inflight` | string | decides *whether* any cycle is running | expires, and is deleted when the cycle ends |
@@ -208,7 +209,7 @@ That risk profile is what licenses a different store.
 | `alerts:ticket:{ticket}` | string | who a live-stream ticket belongs to | expires in thirty seconds, deleted on first use |
 | `alerts:user:{user}` | channel | fired alerts, fanned out to whichever copy holds the stream | — |
 
-**Only the first key exists today.** Everything else arrives with alerting.
+**Only the first two keys exist today.** Everything else arrives with alerting.
 
 Each observation in the series is stored as time-and-price together, not price alone. Members of a sorted
 set must be unique, so a bare price would mean a ticker hitting the same value twice updates the existing

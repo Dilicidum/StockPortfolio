@@ -10,6 +10,7 @@ namespace StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDash
 public sealed class GetDashboardQueryHandler(
     IDashboardHoldingReader holdings,
     IQuoteReader quotes,
+    ICompanyNameReader names,
     TimeProvider clock)
     : IQueryHandler<GetDashboardQuery, GetDashboardResult>
 {
@@ -25,12 +26,18 @@ public sealed class GetDashboardQueryHandler(
             return DashboardCalculator.Calculate(
                 rows,
                 ReadOnlyDictionary<string, QuotedPrice>.Empty,
+                ReadOnlyDictionary<string, string>.Empty,
                 clock.GetUtcNow());
         }
 
-        var prices = await quotes.GetCurrentPricesAsync([.. rows.Select(row => row.Ticker)], ct);
+        string[] tickers = [.. rows.Select(row => row.Ticker)];
+
+        var prices = await quotes.GetCurrentPricesAsync(tickers, ct);
+
+        // After the prices, and cache-only: a name is cosmetic, so it must never delay or fail the figures.
+        var known = await names.GetNamesAsync(tickers, ct);
 
         // Read after the fetch, so asOf is never earlier than the observedAt it is compared against.
-        return DashboardCalculator.Calculate(rows, prices, clock.GetUtcNow());
+        return DashboardCalculator.Calculate(rows, prices, known, clock.GetUtcNow());
     }
 }

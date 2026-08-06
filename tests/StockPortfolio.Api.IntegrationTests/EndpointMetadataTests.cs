@@ -21,8 +21,8 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     private static readonly string[] PortfolioRouteNames =
         ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"];
 
-    /// <summary>MarketData's one route that ships in every environment; the dev nudge is not mapped in all.</summary>
-    private static readonly string[] MarketDataRouteNames = ["GetMarketDataHealth"];
+    /// <summary>MarketData's two routes that ship in every environment; the dev nudge is not mapped in all.</summary>
+    private static readonly string[] MarketDataRouteNames = ["GetMarketDataHealth", "SearchTickers"];
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
@@ -43,9 +43,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [Fact]
     public void EndpointDataSource_ExposesTheFivePortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
 
-    /// <summary>And for MarketData, whose .Api assembly exists only because this route ships everywhere.</summary>
+    /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheMarketDataHealthRoute() => ShouldExposeExactly(MarketDataRouteNames);
+    public void EndpointDataSource_ExposesTheMarketDataRoutes() => ShouldExposeExactly(MarketDataRouteNames);
 
     /// <summary>The check the typed Results union used to make: a status the route emits must be a status it.</summary>
     [Theory]
@@ -86,9 +86,13 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
-    /// <summary>The health route is anonymous by design, so 200 is the only status a caller can drive.</summary>
+    /// <summary>The health route is anonymous by design, so 200 is the only status a caller can drive.
+    /// Search is behind sign-in, and an unusable query is a 200 with an empty list rather than a 400.</summary>
     [Theory]
     [InlineData("GetMarketDataHealth", "anonymous", 200)]
+    [InlineData("SearchTickers", "bearer", 200)]
+    [InlineData("SearchTickers", "empty-query", 200)]
+    [InlineData("SearchTickers", "anonymous", 401)]
     public async Task MarketDataRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
@@ -428,6 +432,31 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("GetMarketDataHealth", "anonymous"):
             {
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/marketdata/health");
+
+                return response.StatusCode;
+            }
+
+            case ("SearchTickers", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-search");
+
+                using var response = await Wire.SearchTickersAsync(client, token, "appl");
+
+                return response.StatusCode;
+            }
+
+            case ("SearchTickers", "empty-query"):
+            {
+                var token = await SignedInAsync(client, "metadata-search-empty");
+
+                using var response = await Wire.SearchTickersAsync(client, token, string.Empty);
+
+                return response.StatusCode;
+            }
+
+            case ("SearchTickers", "anonymous"):
+            {
+                using var response = await Wire.SearchTickersAsync(client, accessToken: null, "appl");
 
                 return response.StatusCode;
             }

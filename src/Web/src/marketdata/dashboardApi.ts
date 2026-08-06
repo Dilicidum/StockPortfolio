@@ -15,6 +15,8 @@ import type { Money } from '../lib/format'
 export interface DashboardPosition {
   id: string
   ticker: string
+  /** Company name from the name cache. `null` is normal — an uncached name, not a failure. */
+  name: string | null
   quantity: number
   averagePrice: Money
   cost: Money

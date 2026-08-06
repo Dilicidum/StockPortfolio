@@ -76,11 +76,33 @@ internal sealed partial class FinnhubQuoteProvider(
             // /quote answers c:0 for a symbol that does not exist AND for a healthy one Finnhub blipped
             // on, so it cannot tell the two apart and would answer "known" to everything. /search can,
             // and null still means the provider could not answer, so an outage never rejects a purchase.
-            return await SearchAsync(ticker, ct) is not { } matches || matches.Contains(ticker.Value);
+            return await SearchAsync(ticker.Value, ct) is not { } matches || matches.Contains(ticker.Value);
         }
         catch (HttpRequestException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
         catch (TimeoutRejectedException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
         catch (BrokenCircuitException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
+    }
+
+    /// <summary>The same /search call the existence check makes, keeping the names instead of discarding them.</summary>
+    public async Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct)
+    {
+        try
+        {
+            using var lease = await budget.AcquireAsync(1, ct);
+
+            if (!lease.IsAcquired)
+            {
+                LogSearchBudgetExhausted(logger, query);
+                return [];
+            }
+
+            // Empty rather than a throw on every failure below: search is a convenience over a field that
+            // still accepts a typed symbol, so an outage must degrade to no suggestions and nothing else.
+            return await SearchAsync(query, ct) is { } response ? response.Suggestions() : [];
+        }
+        catch (HttpRequestException ex) { LogSearchFailed(logger, ex, query); return []; }
+        catch (TimeoutRejectedException ex) { LogSearchFailed(logger, ex, query); return []; }
+        catch (BrokenCircuitException ex) { LogSearchFailed(logger, ex, query); return []; }
     }
 
     /// <summary>401 and 403 carry the same body and mean the same thing here; neither is ever retried.</summary>
@@ -113,15 +135,15 @@ internal sealed partial class FinnhubQuoteProvider(
         return await response.Content.ReadFromJsonAsync<FinnhubQuoteResponse>(ct);
     }
 
-    private async Task<FinnhubSearchResponse?> SearchAsync(Ticker ticker, CancellationToken ct)
+    private async Task<FinnhubSearchResponse?> SearchAsync(string query, CancellationToken ct)
     {
-        var path = string.Create(CultureInfo.InvariantCulture, $"search?q={Uri.EscapeDataString(ticker.Value)}");
+        var path = string.Create(CultureInfo.InvariantCulture, $"search?q={Uri.EscapeDataString(query)}");
 
         using var response = await client.GetAsync(new Uri(path, UriKind.Relative), ct);
 
         if (IsUnauthorised(response.StatusCode))
         {
-            LogAuthRejected(logger, (int)response.StatusCode, ticker.Value);
+            LogAuthRejected(logger, (int)response.StatusCode, query);
             return null;
         }
 
@@ -153,4 +175,16 @@ internal sealed partial class FinnhubQuoteProvider(
         Level = LogLevel.Warning,
         Message = "Finnhub symbol check failed for {Ticker}; treating it as known so the add still succeeds")]
     private static partial void LogSymbolCheckFailed(ILogger logger, Exception exception, string ticker);
+
+    [LoggerMessage(
+        EventId = 5104,
+        Level = LogLevel.Warning,
+        Message = "Finnhub search failed for '{Query}'; the field falls back to being a plain text box")]
+    private static partial void LogSearchFailed(ILogger logger, Exception exception, string query);
+
+    [LoggerMessage(
+        EventId = 5105,
+        Level = LogLevel.Warning,
+        Message = "Finnhub call budget exhausted before '{Query}' could be searched")]
+    private static partial void LogSearchBudgetExhausted(ILogger logger, string query);
 }

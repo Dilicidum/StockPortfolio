@@ -10,15 +10,20 @@ using Microsoft.Extensions.Logging;
 using StockPortfolio.Modules.MarketData.Api.Requests;
 using StockPortfolio.Modules.MarketData.Api.Validators;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
+using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
 using StockPortfolio.Shared.Api;
+using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.MarketData.Api;
 
-/// <summary>MarketData's entire inbound HTTP surface: the health route, and a dev-only price nudge.</summary>
+/// <summary>MarketData's entire inbound HTTP surface: health, ticker search, and a dev-only price nudge.</summary>
 public static partial class MarketDataEndpoints
 {
     /// <summary>Anonymous, and shipped in every environment: the SPA's health panel reads it.</summary>
     private const string HealthPath = "/api/marketdata/health";
+
+    /// <summary>Ticker suggestions for the add-position form. Under /api/marketdata/, beside the health route.</summary>
+    private const string SearchPath = "/api/marketdata/search";
 
     /// <summary>Development only, and only while a nudgeable provider is registered.</summary>
     private const string NudgePath = "/api/dev/nudge";
@@ -63,6 +68,18 @@ public static partial class MarketDataEndpoints
             .Produces<MarketDataHealthResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // No ValidationFilter and no 400: an empty, short or nonsense q is an empty list, not an error.
+        // The form behind this is already behind sign-in, so the route is too.
+        app.MapGet(SearchPath, SearchTickersAsync)
+            .RequireAuthorization()
+            .WithTags("MarketData")
+            .WithName("SearchTickers")
+            .WithSummary("Suggests symbols matching what has been typed so far.")
+            .WithDescription("A query too short to mean anything, and a provider that cannot answer, both come back as an empty list with 200 — picking from the list is a convenience, and typing a symbol always works.")
+            .Produces<IReadOnlyList<SearchTickersResult>>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         // Gated on the PROVIDER as well as the environment. In Azure the environment is Production so the
         // route does not exist at all — 404, not 401 — and with a real key there is no IQuoteNudge to map
         // even if someone deletes the environment check. RequireAuthorization is deliberately not the gate:
@@ -87,6 +104,13 @@ public static partial class MarketDataEndpoints
 
         return app;
     }
+
+    /// <summary>Suggests symbols. A bare array, matching GET /api/holdings.</summary>
+    private static async Task<IResult> SearchTickersAsync(
+        string? q,
+        IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>> handler,
+        CancellationToken ct) =>
+        TypedResults.Ok(await handler.Handle(new SearchTickersQuery(q), ct));
 
     [LoggerMessage(
         EventId = 5200,

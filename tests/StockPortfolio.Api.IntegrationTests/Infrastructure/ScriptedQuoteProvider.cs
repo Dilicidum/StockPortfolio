@@ -42,4 +42,8 @@ internal sealed class ScriptedQuoteProvider : IQuoteProvider
 
     /// <summary>True even when this provider cannot price the symbol: existence fails open, per §2.11.</summary>
     public Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct) => Task.FromResult(true);
+
+    /// <summary>Nothing, always — which is exactly what a provider that cannot answer a search returns.</summary>
+    public Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<SymbolMatch>>([]);
 }
