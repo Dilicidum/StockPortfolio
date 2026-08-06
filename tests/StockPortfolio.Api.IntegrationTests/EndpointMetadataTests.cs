@@ -18,8 +18,8 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>The names WithName gives each module's routes, keyed by the module that ships them.</summary>
     private static readonly Dictionary<string, string[]> ExpectedRouteNames = new(StringComparer.Ordinal)
     {
-        // The /api/auth five.
-        ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"],
+        // The /api/auth five, plus the /api/settings pair.
+        ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser", "GetAppearance", "SaveAppearance"],
 
         // Four under /api/holdings, plus the dashboard.
         ["Portfolio"] = ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"],
@@ -41,7 +41,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The five names WithName gives the /api/auth routes.</summary>
+    /// <summary>The names WithName gives the /api/auth and /api/settings routes.</summary>
     private static string[] AuthRouteNames => ExpectedRouteNames["Identity"];
 
     /// <summary>The five names WithName gives Portfolio's routes.</summary>
@@ -53,7 +53,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>Alerts' names.</summary>
     private static string[] AlertsRouteNames => ExpectedRouteNames["Alerts"];
 
-    /// <summary>The five routes, as theory data.</summary>
+    /// <summary>The Identity routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
     /// <summary>The five Portfolio routes, as theory data.</summary>
@@ -67,7 +67,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheFiveAuthRoutes() => ShouldExposeExactly(AuthRouteNames);
+    public void EndpointDataSource_ExposesTheIdentityRoutes() => ShouldExposeExactly(AuthRouteNames);
 
     /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
     [Fact]

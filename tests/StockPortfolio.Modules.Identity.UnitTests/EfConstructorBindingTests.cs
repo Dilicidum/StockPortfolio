@@ -39,9 +39,20 @@ public sealed class EfConstructorBindingTests
             .ShouldNotContain(c => c.GetParameters().Length == 0);
     }
 
+    [Fact]
+    public void UserPreferences_HasNoParameterlessConstructor()
+    {
+        typeof(UserPreferences).GetConstructors(
+                System.Reflection.BindingFlags.Instance
+                | System.Reflection.BindingFlags.Public
+                | System.Reflection.BindingFlags.NonPublic)
+            .ShouldNotContain(c => c.GetParameters().Length == 0);
+    }
+
     [Theory]
     [InlineData(typeof(User))]
     [InlineData(typeof(RefreshToken))]
+    [InlineData(typeof(UserPreferences))]
     public void Entity_BindsItsAllArgsConstructor_ForMaterialisation(Type clrType)
     {
         var entityType = BuildModel().FindEntityType(clrType);

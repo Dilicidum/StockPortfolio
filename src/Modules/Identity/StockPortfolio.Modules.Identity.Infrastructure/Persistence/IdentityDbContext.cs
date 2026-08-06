@@ -19,6 +19,8 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
+    public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
@@ -40,5 +42,11 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
         configurationBuilder.Properties<RefreshTokenId>().HaveConversion<RefreshTokenIdConverter>();
         configurationBuilder.DefaultTypeMapping<RefreshTokenId>().HasConversion<RefreshTokenIdConverter>();
+
+        configurationBuilder.Properties<ThemeChoice>().HaveConversion<ThemeChoiceConverter>();
+        configurationBuilder.DefaultTypeMapping<ThemeChoice>().HasConversion<ThemeChoiceConverter>();
+
+        configurationBuilder.Properties<LanguageChoice>().HaveConversion<LanguageChoiceConverter>();
+        configurationBuilder.DefaultTypeMapping<LanguageChoice>().HasConversion<LanguageChoiceConverter>();
     }
 }

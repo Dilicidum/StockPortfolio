@@ -14,13 +14,15 @@ using StockPortfolio.Modules.Identity.Application.Authentication.Commands.Refres
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
+using StockPortfolio.Modules.Identity.Application.Preferences.Commands.SaveAppearance;
+using StockPortfolio.Modules.Identity.Application.Preferences.Queries.GetAppearance;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Api;
 
-/// <summary>The Identity module's entire inbound HTTP surface: five routes under /api/auth, plus the one DI seam.</summary>
+/// <summary>The Identity module's entire inbound HTTP surface: five routes under /api/auth, two under /api/settings, plus the one DI seam.</summary>
 public static class IdentityEndpoints
 {
     /// <summary>Where a newly created account is addressable.</summary>
@@ -97,6 +99,25 @@ public static class IdentityEndpoints
             .WithSummary("Returns the identity behind the current access token.")
             .Produces<GetCurrentUserResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        var settings = app.MapGroup("/api/settings")
+            .WithTags("Settings")
+            .RequireAuthorization()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        settings.MapGet("/appearance", GetAppearanceAsync)
+            .WithName("GetAppearance")
+            .WithSummary("Returns the caller's theme and language, defaulting to system and English.")
+            .Produces<GetAppearanceResult>(StatusCodes.Status200OK);
+
+        settings.MapPut("/appearance", SaveAppearanceAsync)
+            .AddEndpointFilter<ValidationFilter<SaveAppearanceRequest>>()
+            .WithName("SaveAppearance")
+            .WithSummary("Saves the caller's theme and language.")
+            .Produces<GetAppearanceResult>(StatusCodes.Status200OK)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         return app;
     }
@@ -183,5 +204,42 @@ public static class IdentityEndpoints
 
             // The JWT outlived the account it names — deleted, or issued by a previous database.
             gone => ProblemDetailsExtensions.UnauthorizedProblem("This session no longer refers to a valid account."));
+    }
+
+    /// <summary>Reads the caller's appearance settings, creating the default row on first read.</summary>
+    private static async Task<IResult> GetAppearanceAsync(
+        ClaimsPrincipal principal,
+        IQueryHandler<GetAppearanceQuery, GetAppearanceResult> handler,
+        CancellationToken ct)
+    {
+        if (!Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out var userId))
+        {
+            return ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");
+        }
+
+        var result = await handler.Handle(new GetAppearanceQuery(userId), ct);
+
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>Saves the caller's appearance settings.</summary>
+    private static async Task<IResult> SaveAppearanceAsync(
+        SaveAppearanceRequest request,
+        ClaimsPrincipal principal,
+        ICommandHandler<SaveAppearanceCommand, OneOf<GetAppearanceResult, InvalidInput>> handler,
+        CancellationToken ct)
+    {
+        if (!Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out var userId))
+        {
+            return ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");
+        }
+
+        var result = await handler.Handle(new SaveAppearanceCommand(userId, request.Theme, request.Language), ct);
+
+        return result.Match<IResult>(
+            saved => TypedResults.Ok(saved),
+
+            // Reachable only if the validator and the handler disagree about the allowed set.
+            invalid => invalid.ToValidationProblem());
     }
 }

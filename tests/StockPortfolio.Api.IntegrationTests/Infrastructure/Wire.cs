@@ -16,6 +16,9 @@ public sealed record AuthPayload(string AccessToken, string RefreshToken, DateTi
 /// <summary>The body of GET /api/auth/me.</summary>
 public sealed record UserPayload(Guid Id, string Email);
 
+/// <summary>The body of GET and PUT /api/settings/appearance.</summary>
+public sealed record AppearancePayload(string Theme, string Language);
+
 /// <summary>An amount as the API serialises it. Amount is a string on purpose — see MoneyJsonConverter.</summary>
 public sealed record MoneyPayload(string Amount, string Currency);
 
@@ -101,6 +104,9 @@ internal static class Wire
 
     /// <summary>Thresholds: one GET for the lot, one PUT per position.</summary>
     public const string AlertSettingsPath = "/api/alerts/settings";
+
+    /// <summary>The appearance settings pair: one GET, one PUT, both under /api/settings.</summary>
+    public const string AppearancePath = "/api/settings/appearance";
 
     /// <summary>Fired-alert history, and the group root — the SPA calls it without a trailing slash.</summary>
     public const string AlertHistoryPath = "/api/alerts";
