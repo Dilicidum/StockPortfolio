@@ -689,14 +689,40 @@ dotnet ef migrations add InitialAlerts --context AlertsDbContext --output-dir Pe
 1. Extract `public static IServiceCollection AddIdentityPersistence(this IServiceCollection services,
    IConfiguration configuration)` containing only the connection-string read, the eager throw and
    `AddDbContext<IdentityDbContext>`. `AddIdentityModule` calls it first, then does everything else.
-2. In `MigratedModules.AddEveryMigratedModule`, call `AddIdentityPersistence`, `AddPortfolioModule` and
-   `AddAlertsModule`. Portfolio and Alerts have no eager non-persistence validation, so they need no split.
+2. In `MigratedModules.AddEveryMigratedModule`, call `AddIdentityPersistence` and `AddPortfolioModule`.
+   Portfolio has no eager non-persistence validation, so it needs no split. **`AddAlertsModule` is Task 4's
+   line, not this one** — it does not exist while this task runs.
 3. Delete the `Jwt:SigningKey` entry from the `overrides` dictionary in `Migrator/Program.cs`, and the
    `"migrator-placeholder-signing-key-unused-32b"` literal with it.
 4. Delete `MigratorConfiguration`'s matching `Jwt:SigningKey` entry in `ApiFixture`.
-5. Run `MigratorTests`. It must still report three contexts. The `Count == 0` guard in `Migrator/Program.cs`
-   is what catches a botched split loudly.
+5. Run `MigratorTests` and `MigrationTests`. Both contexts must still be found and applied. The `Count == 0`
+   guard in `Migrator/Program.cs` catches a botched split loudly, and `MigratorTests` asserts non-empty
+   *before* comparing, so it cannot pass on two empty lists.
 6. Commit: `refactor(identity): split persistence out of the module registration (closes C8)`.
+
+**DONE — branch `worktree-agent-a50a9980c22672580`, commit `0c93efd`. Build 0 warnings; 472 passed, 2
+skipped.** Awaiting merge behind Task 1.
+
+Two findings that Task 16 must carry into the register rather than repeat from it:
+
+**C8's claim that the split "tightens the `ServiceCollection` walk" is false.** The walk filters on
+`ServiceType.IsSubclassOf(typeof(DbContext))`, and nothing `AddIdentityModule` registered was ever a
+`DbContext` — `JwtOptions`, two repositories, the hasher, the token issuer and six closed-generic handlers
+are all unrelated types. The filter had no false positive to reject before and has none now. The collection
+is about eleven descriptors smaller and the walk's *result* is identical.
+
+**What the split actually buys.** `JwtOptions.FromConfiguration` is the argument to `AddSingleton`, so it
+runs at *registration* time — every migrator run was parsing, base64-decoding and length-checking a signing
+key before touching a database. That is now unreachable, not merely fed a dummy value. And the migrator's
+contract with a module is now "give me a connection string", so no future module's eager validation can
+force a new placeholder line back into `Migrator/Program.cs`. That second point is what C8's trigger was
+about, and it is why this belonged in Phase 4 rather than earlier.
+
+**Honest cost.** Running against a bare `ServiceCollection` used to prove incidentally that `Add<M>Module`
+was self-contained — that it leaned on no host-registered service. That proof now covers only Identity's
+persistence half. `ApiFixture` builds the real host and would catch a missing host service by a different
+route, so this narrows coverage rather than opening a hole, but it is a real change in what the migrator
+seam enforces for free.
 
 ---
 
