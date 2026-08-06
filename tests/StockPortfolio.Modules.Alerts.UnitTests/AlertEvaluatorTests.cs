@@ -5,6 +5,7 @@ using Shouldly;
 
 using StockPortfolio.Modules.Alerts.Application;
 using StockPortfolio.Modules.Alerts.Application.Evaluation;
+using StockPortfolio.Modules.Alerts.Application.Streaming;
 using StockPortfolio.Modules.Alerts.Domain;
 using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Tests.Fakes;
@@ -300,10 +301,9 @@ public sealed class AlertEvaluatorTests
 
         return new AlertEvaluator(
             _settings,
-            _firedAlerts,
             _windows,
             _cooldowns,
-            _publisher,
+            new AlertDispatcher(_firedAlerts, _publisher, NullLogger<AlertDispatcher>.Instance),
             new AlertsOptions(
                 AlertsOptions.DefaultMaxWindowMinutes,
                 TimeSpan.FromMinutes(AlertsOptions.DefaultCooldownMinutes),

@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 using OneOf;
+using OneOf.Types;
 
 using StockPortfolio.Modules.Alerts.Api.Requests;
 using StockPortfolio.Modules.Alerts.Api.Validators;
@@ -16,6 +17,7 @@ using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
+using StockPortfolio.Modules.Alerts.Application.Simulation.Commands.SimulateAlert;
 using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.IssueStreamTicket;
 using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.RedeemStreamTicket;
 using StockPortfolio.Shared.Api;
@@ -66,6 +68,16 @@ public static class AlertsEndpoints
             .WithDescription("A user with no thresholds gets an empty list, never a 404 — the portfolio page reads this on every mount.")
             .Produces<IReadOnlyList<GetAlertSettingsResult>>(StatusCodes.Status200OK);
 
+        group.MapPost("/simulate", SimulateAlertAsync)
+            .AddEndpointFilter<ValidationFilter<SimulateAlertRequest>>()
+            .WithName("SimulateAlert")
+            .WithSummary("Fires one alert on demand, down the real path.")
+            .WithDescription("Saved and then published exactly as an evaluated alert is, so what arrives proves the mechanism rather than the button. An omitted ticker lets the server pick one of the caller's thresholds.")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
+
         group.MapPost("/stream-ticket", CreateStreamTicketAsync)
             .WithName("CreateStreamTicket")
             .WithSummary("Mints a single-use, 30-second ticket for the alert stream.")
@@ -94,6 +106,33 @@ public static class AlertsEndpoints
 
         return app;
     }
+
+    /// <summary>Fires one alert on demand.</summary>
+    private static async Task<IResult> SimulateAlertAsync(
+        SimulateAlertRequest request,
+        ClaimsPrincipal principal,
+        ICommandHandler<SimulateAlertCommand, OneOf<Success, NoPositionToSimulate>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        var result = await handler.Handle(new SimulateAlertCommand(userId, request.Ticker), ct);
+
+        return result.Match<IResult>(
+            // 202, not 200: the row is written here but the arrival happens on a connection this
+            // request knows nothing about, and there is no body worth inventing.
+            simulated => TypedResults.Accepted((string?)null),
+
+            nothing => ProblemDetailsExtensions.ConflictProblem(Describe(nothing)));
+    }
+
+    /// <summary>Says which of the two ways there was nothing to simulate, because the fixes differ.</summary>
+    private static string Describe(NoPositionToSimulate nothing) => nothing.Ticker is null
+        ? "You have no enabled threshold to simulate. Set one on a position first."
+        : $"You have no enabled threshold on {nothing.Ticker}, so there is nothing to simulate for it.";
 
     /// <summary>Mints a ticket for the stream.</summary>
     private static async Task<IResult> CreateStreamTicketAsync(

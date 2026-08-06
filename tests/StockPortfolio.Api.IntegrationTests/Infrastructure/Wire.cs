@@ -234,6 +234,14 @@ internal static class Wire
         return payload;
     }
 
+    /// <summary>Posts to /api/alerts/simulate. The body is always sent, with a null ticker if none is named:
+    /// a bodiless POST 415s against a required parameter, so the client never sends one.</summary>
+    public static Task<HttpResponseMessage> SimulateAlertAsync(
+        HttpClient client,
+        string? accessToken,
+        string? ticker = null) =>
+        SendAsync(client, HttpMethod.Post, "/api/alerts/simulate", accessToken, new { ticker });
+
     /// <summary>Reads /api/alerts, asserting the 200 on the way.</summary>
     public static async Task<IReadOnlyList<FiredAlertPayload>> ListFiredAlertsAsync(
         HttpClient client,

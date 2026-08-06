@@ -35,6 +35,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             "GetAlerts",
             "CreateStreamTicket",
             "StreamAlerts",
+            "SimulateAlert",
         ],
     };
 
@@ -180,6 +181,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("CreateStreamTicket", "bearer", 200)]
     [InlineData("CreateStreamTicket", "anonymous", 401)]
     [InlineData("StreamAlerts", "no-ticket", 401)]
+    [InlineData("SimulateAlert", "watched", 202)]
+    [InlineData("SimulateAlert", "nothing-to-simulate", 409)]
+    [InlineData("SimulateAlert", "bad-ticker", 400)]
+    [InlineData("SimulateAlert", "no-body", 400)]
+    [InlineData("SimulateAlert", "wrong-content-type", 415)]
+    [InlineData("SimulateAlert", "anonymous", 401)]
     public async Task AlertsRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
@@ -729,6 +736,82 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 // — see StockPortfolio.Api.IntegrationTests.AlertStreamTests for where the accepted
                 // path is proven instead.
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/alerts/stream");
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "watched"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate");
+                var ticker = Wire.UniqueTicker();
+
+                using (var bought = await Wire.AddHoldingAsync(client, token, ticker, 10m, 100m))
+                {
+                    bought.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(bought));
+                }
+
+                using (var saved = await Wire.SaveAlertSettingAsync(client, token, ticker, 5m, 30))
+                {
+                    saved.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(saved));
+                }
+
+                using var response = await Wire.SimulateAlertAsync(client, token);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "nothing-to-simulate"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-none");
+
+                using var response = await Wire.SimulateAlertAsync(client, token);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "bad-ticker"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-shape");
+
+                using var response = await Wire.SimulateAlertAsync(client, token, "BRK.B");
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "no-body"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-bodiless");
+
+                // An ABSENT body is 400, not 415 — driven here because this is the one route whose
+                // client is documented as always sending a body precisely to avoid the other one.
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Post,
+                    "/api/alerts/simulate",
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-simulate-415");
+
+                using var request = new HttpRequestMessage(HttpMethod.Post, "/api/alerts/simulate")
+                {
+                    Content = new StringContent("""{"ticker":null}""", Encoding.UTF8, "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SimulateAlert", "anonymous"):
+            {
+                using var response = await Wire.SimulateAlertAsync(client, accessToken: null);
 
                 return response.StatusCode;
             }

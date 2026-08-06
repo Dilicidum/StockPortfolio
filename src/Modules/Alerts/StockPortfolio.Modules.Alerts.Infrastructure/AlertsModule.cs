@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using StockPortfolio.Modules.Alerts.Application;
 using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Application.Evaluation;
+using StockPortfolio.Modules.Alerts.Application.Streaming;
 using StockPortfolio.Modules.Alerts.Contracts;
 using StockPortfolio.Modules.Alerts.Infrastructure.Persistence;
 using StockPortfolio.Modules.Alerts.Infrastructure.Redis;
@@ -69,6 +70,7 @@ public static class AlertsModule
         services.AddSingleton<IAlertPublisher>(sp => sp.GetRequiredService<RedisAlertPublisher>());
         services.AddSingleton<IAlertStreamSubscriber>(sp => sp.GetRequiredService<RedisAlertPublisher>());
 
+        services.AddScoped<AlertDispatcher>();
         services.AddScoped<IAlertEvaluator, AlertEvaluator>();
         services.AddScoped<IWatchedTickerReader, WatchedTickerReader>();
 

@@ -12,10 +12,9 @@ namespace StockPortfolio.Modules.Alerts.Application.Evaluation;
 /// <summary>Judges one ticker's thresholds against its price window, once per fresh sample.</summary>
 public sealed partial class AlertEvaluator(
     IAlertSettingRepository settings,
-    IFiredAlertRepository firedAlerts,
     IPriceWindowReader windows,
     IAlertCooldownStore cooldowns,
-    IAlertPublisher publisher,
+    AlertDispatcher dispatcher,
     AlertsOptions options,
     TimeProvider clock,
     ILogger<AlertEvaluator> logger) : IAlertEvaluator
@@ -121,25 +120,9 @@ public sealed partial class AlertEvaluator(
             clock.GetUtcNow(),
             isSimulated: false);
 
-        await firedAlerts.AddAsync(alert, ct);
-
-        await PublishQuietlyAsync(alert, ct);
-    }
-
-    /// <summary>Persist, then publish. Whether anyone is connected only decides whether it also arrives now.</summary>
-    private async Task PublishQuietlyAsync(FiredAlert alert, CancellationToken ct)
-    {
-        try
-        {
-            await publisher.PublishAsync(AlertNotification.From(alert), ct);
-        }
-
-        // Deliberately every exception, not RedisException alone: the row is saved, the history read
-        // will carry it, and there is nothing a publisher can throw that is worth losing an alert over.
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            LogPublishFailed(logger, ex, alert.Id.Value);
-        }
+        // Persist, then publish — and the order lives in the dispatcher, not here, because Simulate
+        // sends an alert down the same path and the two must not be able to disagree about it.
+        await dispatcher.DispatchAsync(alert, ct);
     }
 
     [LoggerMessage(
@@ -148,10 +131,4 @@ public sealed partial class AlertEvaluator(
         Message = "Price alerts for {Ticker} are suppressed: the newest sample is from {NewestAt} and the "
             + "feed is stale. A stale feed is not a price that stopped moving")]
     private static partial void LogStaleFeed(ILogger logger, string ticker, DateTimeOffset newestAt);
-
-    [LoggerMessage(
-        EventId = 5311,
-        Level = LogLevel.Warning,
-        Message = "Alert {AlertId} was saved but could not be published; it arrives on the next history read")]
-    private static partial void LogPublishFailed(ILogger logger, Exception exception, Guid alertId);
 }
