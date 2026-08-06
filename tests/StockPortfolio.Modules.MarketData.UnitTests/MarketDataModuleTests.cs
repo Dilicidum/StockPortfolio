@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
+using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Domain;
 using StockPortfolio.Modules.MarketData.Infrastructure;
 
@@ -30,6 +31,9 @@ public sealed class MarketDataModuleTests
         return services.BuildServiceProvider();
     }
 
+    private static ServiceLifetime Lifetime<TService>(IServiceCollection services) =>
+        services.Single(descriptor => descriptor.ServiceType == typeof(TService)).Lifetime;
+
     [Fact]
     public void Module_WithNoApiKey_BootsOntoTheFakeProviderRatherThanThrowing()
     {
@@ -45,6 +49,21 @@ public sealed class MarketDataModuleTests
         using var provider = Build(Config(("Finnhub:ApiKey", "   ")));
 
         provider.GetRequiredService<IQuoteProvider>().Name.ShouldBe("Fake");
+    }
+
+    [Fact]
+    public void Module_PriceWindow_RegistersTheStoreOnceAndTheReaderPerRequest()
+    {
+        // Read off the collection rather than the provider: both types need IConnectionMultiplexer, which
+        // AddStockPortfolioRedis registers in the host and nothing in this module declares.
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddMarketDataModule(Config());
+
+        Lifetime<IPriceWindowStore>(services).ShouldBe(ServiceLifetime.Singleton);
+        Lifetime<IPriceWindowReader>(services).ShouldBe(ServiceLifetime.Scoped);
     }
 
     [Fact]

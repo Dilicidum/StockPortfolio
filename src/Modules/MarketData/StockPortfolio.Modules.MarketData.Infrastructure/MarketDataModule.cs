@@ -22,7 +22,7 @@ public static class MarketDataModule
     // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>Registers MarketData: a provider, the token budget, the two Redis stores and the three contracts.</summary>
+    /// <summary>Registers MarketData: a provider, the token budget, the three Redis stores and the four contracts.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -62,7 +62,9 @@ public static class MarketDataModule
 
         services.AddSingleton<ILastKnownPriceStore, RedisLastKnownPriceStore>();
         services.AddSingleton<ICompanyNameStore, RedisCompanyNameStore>();
+        services.AddSingleton<IPriceWindowStore, RedisPriceWindowStore>();
         services.AddScoped<IQuoteReader, QuoteReader>();
+        services.AddScoped<IPriceWindowReader, PriceWindowReader>();
         services.AddScoped<ISymbolValidator, SymbolValidator>();
         services.AddScoped<ICompanyNameReader, CompanyNameReader>();
 
