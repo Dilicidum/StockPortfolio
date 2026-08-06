@@ -81,6 +81,14 @@ jobs:
         run: npm ci
         working-directory: src/Web
 
+      - name: Check locale parity
+        # Every key present in one language's locale files must exist in the other. There is no
+        # fallback to English (see src/lib/i18n.ts), so a key missing from Ukrainian would
+        # otherwise ship silently and render as a raw key path in the UI.
+        if: steps.spa.outputs.present == 'true'
+        run: node scripts/check-locale-parity.mjs
+        working-directory: src/Web
+
       - name: Build
         if: steps.spa.outputs.present == 'true'
         # No VITE_BASE and no VITE_API_BASE_URL here. Both must come from the environment, and CI
