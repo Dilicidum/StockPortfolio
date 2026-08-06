@@ -162,8 +162,23 @@ sensible threshold, extreme-vs-high −5.33% is over it, and both point down —
 off the window high that an endpoint-only comparison sleeps through, and it is the entire reason extremes
 are in the design.
 
-What it deliberately gives up: a ticker that fell sharply mid-window and recovered *fully*, ending net up,
-stays silent. It recovered; there is nothing to tell anyone.
+**What it gives up — and an earlier draft of this paragraph described it wrongly.** It said a ticker that
+fell sharply and recovered fully, ending net up, "stays silent". It does not. Oldest 150, low 130, current
+151: endpoint +0.67% (up), extreme-vs-low +16.15% (up), signs agree, threshold cleared — it fires a **rise**
+at +16.15%. What stays silent is the *fall*, not the alert.
+
+**That leaves one open question, and it is the user's.** A V-shaped recovery ending barely above where it
+started reports as a large rise. The climb from 130 to 151 is real, and the alert text names the comparison
+so nothing is hidden — but it is the same *shape* of artefact sign agreement was introduced to kill, and the
+rule only kills the half where the two measurements disagree. Three ways to settle it:
+
+- **Accept it.** A 16% climb off the low is information; the wording carries the caveat.
+- **Require the endpoint move to clear some fraction of the threshold too** — say a fifth. Kills the
+  V-recovery, and starts to converge on the endpoint-only comparison that extremes exist to beat.
+- **Report the endpoint move and reference the extreme**, so the headline number is always the net move.
+
+Nothing is blocked on it: `MoveVerdict` carries both figures either way. **No test was written for this
+case on purpose** — a test would have settled it silently.
 
 The rule lives in one pure static class, `MoveAssessment` in `Alerts.Application/Evaluation/`, with no I/O
 and no clock, so the whole of it is unit-testable. **The test that pins it is not "an alert fired at −6%"** —
@@ -229,11 +244,24 @@ Measured on the tree:
 |---|---|---|
 | Task 1 | `Domain`, `Application`, `Infrastructure`, `Api` | **9** |
 | Task 3 | `Application`, `Infrastructure`, `Api` | **7** |
+| Task 8 | `Infrastructure`, `Api` | **6** |
+| Task 4 | `Api` | fewer again |
 | Task 12 | none | back to **2** |
 
 This is the test working as designed, not a regression: the expected list is hard-coded precisely so that
 each assembly coming off it is a deliberate edit on the commit that fills it. Keep it in ordinal order — the
 assertion compares in order, not as a set.
+
+**Every task that puts the first type into an Alerts layer must edit `ModuleBoundaryTests.cs`, and it is two
+lists, not one.** The assembly comes *off* `EmptyShells_AreExactlyThePhasesNotYetBuilt` and *onto*
+`PopulatedAssemblies_AreNotEmptyShells`. Miss either and the build goes red on a test the task never named.
+Tasks 3, 4, 8 and 12 each own one of these edits; the task text does not repeat it.
+
+**A related and nastier consequence: a rule that skips is not a rule.** Task 7's original step 5 said to
+"confirm rule 1 still passes, proving Alerts reaches only `.Contracts`". It proved nothing. With no types in
+`Alerts.Application` the compiler trims the project reference straight out of assembly metadata, so rule 1
+was reporting `[SKIP]` on that assembly, and only became live when Task 8 put two types there. Do not treat
+a green rule over a layer you have not filled yet as evidence of anything.
 
 **The check worth running is not the number.** It is that `Alerts.Contracts` never appears on the list at
 all. If it does, `IWatchedTickerReader` did not land, and the two rules over that assembly are silently
@@ -255,7 +283,14 @@ Ownership follows the prefix. MarketData owns everything under `marketdata:`; Al
 
 **A sorted-set member is `"{epochMs}:{price}"`, never the bare price.** Members must be unique; a ticker
 hitting the same value twice would otherwise update the existing entry's score and silently erase the
-earlier reading. This is the same trap `RedisLastKnownPriceStore.Encode` already documents.
+earlier reading.
+
+**Do not copy `RedisLastKnownPriceStore.Encode`'s shape** — an earlier draft said to, and it is wrong twice
+over. That method documents an *InvariantCulture* hazard, not a uniqueness one; a plain string key has no
+uniqueness problem, because overwriting is the entire point of it. And the two field orders are **opposite**:
+the last-known store writes `{price}:{epochMs}` and decodes with `LastIndexOf(':')`, while the window member
+is `{epochMs}:{price}` and decodes with `IndexOf(':')`. Anyone told to match its shape writes price-first.
+The InvariantCulture point does carry across and must be honoured.
 
 ### 2.8 DECISION — configuration keys and defaults
 
@@ -969,6 +1004,27 @@ public void OscillatingInsideTheBand_DoesNotFireEveryCycle()
    the other three stay green. If deleting the rule leaves everything green, the test does not pin the rule
    it is named after.
 7. Commit: `feat(alerts): sign-agreement move assessment`.
+
+**SCAFFOLDING DONE — branch `worktree-agent-a8ce066249a339e27`, commits `ab6d7c3` (Task 7) and `89df011`.**
+Task 7 is complete, including a mutation run that proves the member-uniqueness tests catch a bare-price
+encoding while four sibling window tests stay green — an erased reading is invisible to any assertion about
+prices and ordering alone, which is the same blind spot `Dashboard_ProviderReturns429` had.
+
+`Assess` is a stub throwing `NotImplementedException`, so **six `MoveAssessmentTests` fail by design** and
+the build stays at 0 warnings. That is the red state, not a regression. Two `// TODO(you):` markers sit
+inside `Assess` at the points where the remaining choices live.
+
+Two things the plan never specified and nobody should guess:
+
+- **What `MoveVerdict` holds when `Fires` is false.** `Direction`, `ExtremePercent`, `EndpointPercent` and
+  `ReferencePrice` are all non-nullable. The non-firing tests assert `Fires` alone, deliberately.
+- **Whether `Assess` rounds.** The worked figures are quoted to two decimals; the tests use a 0.005
+  tolerance, so a rounding and a non-rounding implementation both read as correct. Pin it or leave it.
+
+And one convention divergence, built as specified rather than silently corrected:
+`IPriceWindowStore.ReadAsync` returns `IReadOnlyList<(DateTimeOffset At, decimal Price)>` and takes a
+`string` ticker. It is the only tuple-returning abstraction in the codebase — every other MarketData
+abstraction returns a named type and takes the `Ticker` value object.
 
 ---
 
