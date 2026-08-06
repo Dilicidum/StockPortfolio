@@ -78,6 +78,20 @@ public sealed class DomainShapeTests
 
         SolutionAssemblies.IsDomainNamespace("StockPortfolio.Shared.Kernel").ShouldBeFalse(
             "Shared.Kernel is not a module, so it carries no module's domain namespace.");
+
+        // AppUser derives from IdentityUser<Guid>, whose properties all carry public setters — and rule 3
+        // still passes over it, with no exemption. That is not luck: DescribeMutableProperties asks for
+        // DeclaredOnly, and AppUser declares nothing of its own.
+        //
+        // Pinned because it is the load-bearing reason a framework type can sit in .Domain at all. Add one
+        // property with a public setter to AppUser and rule 3 will fail, which is the correct outcome.
+        scanned.ShouldContain(
+            typeof(AppUser).FullName!,
+            "AppUser is scanned by rule 3 like any other domain type. It is not excused.");
+
+        DescribeMutableProperties(typeof(AppUser)).ShouldBeEmpty(
+            "AppUser declares no properties of its own, so rule 3 has nothing to police. If this ever "
+                + "reports something, the type has grown a public setter and should get a private one.");
     }
 
     private static bool IsDomainType(Type type) =>

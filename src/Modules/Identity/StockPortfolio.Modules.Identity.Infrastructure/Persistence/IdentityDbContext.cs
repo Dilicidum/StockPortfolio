@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
-using StockPortfolio.Modules.Identity.Application;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence.Converters;
 

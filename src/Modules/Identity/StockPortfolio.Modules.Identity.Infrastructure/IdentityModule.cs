@@ -2,8 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
-using StockPortfolio.Modules.Identity.Application;
 using StockPortfolio.Modules.Identity.Application.Abstractions;
+using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure;

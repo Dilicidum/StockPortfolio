@@ -33,7 +33,7 @@ public static class AlertFeed
         // "alert" sees nothing at all.
         TypedResults.ServerSentEvents(StreamAsync(userId, subscriber, clock, ct));
 
-    /// <summary>Yields alerts as they arrive and a heartbeat whenever they do not.</summary>
+    /// <summary>Drains one queue of ready-made frames; alerts and beats are both written into it.</summary>
     public static async IAsyncEnumerable<SseItem<object>> StreamAsync(
         Guid userId,
         IAlertStreamSubscriber subscriber,
@@ -42,56 +42,43 @@ public static class AlertFeed
     {
         // Unbounded: a burst of alerts for one user is a handful of small records, and a bounded
         // writer would have to choose between blocking the Redis worker and dropping an alert.
-        var channel = Channel.CreateUnbounded<AlertNotification>();
+        var frames = Channel.CreateUnbounded<SseItem<object>>();
 
-        await using var subscription = await subscriber.SubscribeAsync(userId, channel.Writer, ct);
+        // Written before the subscription exists, so it is first in the queue and cannot race an alert.
+        // Nothing reaches the socket until a frame does, so a stream whose first frame is twenty seconds
+        // away leaves the response headers unsent and looks to a proxy like a connection still opening.
+        frames.Writer.TryWrite(Ping(clock));
 
-        using var heartbeat = new PeriodicTimer(HeartbeatInterval, clock);
+        await using var subscription = await subscriber.SubscribeAsync(
+            userId, new AlertFrameWriter(frames.Writer), ct);
 
-        // One beat straight away, before anything can be waited on. Nothing is written to the socket
-        // until the first frame, so the response headers do not leave the server either - and a client
-        // behind a proxy that buffers until it sees bytes then sits on a connection it believes is
-        // still opening. This costs one frame and makes "connected" observable immediately.
-        yield return new SseItem<object>(new Heartbeat(clock.GetUtcNow()), PingEventName);
+        // Cancellation closes the queue rather than tearing through the read below, so the browser
+        // closing its tab ends this enumerable normally instead of throwing out of it.
+        using var cancellation = ct.Register(() => frames.Writer.TryComplete());
 
-        // Both pending operations are held ACROSS iterations, and that is not a tidiness point.
-        // ChannelReader.ReadAsync registers a waiter that consumes the next item; starting a fresh one
-        // each pass and abandoning the old one hands the following alert to a task nobody awaits, and
-        // the browser simply never sees it. Only whichever one completed is replaced.
-        Task<AlertNotification>? next = null;
-        Task<bool>? tick = null;
+        using var heartbeat = clock.CreateTimer(
+            _ => frames.Writer.TryWrite(Ping(clock)), null, HeartbeatInterval, HeartbeatInterval);
 
-        while (!ct.IsCancellationRequested)
+        await foreach (var frame in frames.Reader.ReadAllAsync(CancellationToken.None))
         {
-            next ??= channel.Reader.ReadAsync(ct).AsTask();
-            tick ??= heartbeat.WaitForNextTickAsync(ct).AsTask();
-
-            SseItem<object> item;
-
-            try
-            {
-                if (await Task.WhenAny(next, tick) == next)
-                {
-                    item = new SseItem<object>(await next, AlertEventName);
-                    next = null;
-                }
-                else
-                {
-                    await tick;
-                    tick = null;
-                    item = new SseItem<object>(new Heartbeat(clock.GetUtcNow()), PingEventName);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // The browser closed the tab. That is how every one of these ends.
-                yield break;
-            }
-
-            yield return item;
+            yield return frame;
         }
     }
 
     /// <summary>The heartbeat payload. A named event with no listener is dropped before it reaches code.</summary>
     public sealed record Heartbeat(DateTimeOffset At);
+
+    private static SseItem<object> Ping(TimeProvider clock) =>
+        new(new Heartbeat(clock.GetUtcNow()), PingEventName);
+
+    /// <summary>Names each alert as it is written, so the subscriber and the beat share one queue.</summary>
+    private sealed class AlertFrameWriter(ChannelWriter<SseItem<object>> frames)
+        : ChannelWriter<AlertNotification>
+    {
+        public override bool TryWrite(AlertNotification item) =>
+            frames.TryWrite(new SseItem<object>(item, AlertEventName));
+
+        public override ValueTask<bool> WaitToWriteAsync(CancellationToken ct = default) =>
+            frames.WaitToWriteAsync(ct);
+    }
 }

@@ -14,9 +14,9 @@ using OneOf;
 
 using StockPortfolio.Modules.Identity.Api.Requests;
 using StockPortfolio.Modules.Identity.Api.Validators;
-using StockPortfolio.Modules.Identity.Application;
 using StockPortfolio.Modules.Identity.Application.Preferences.Commands.SaveAppearance;
 using StockPortfolio.Modules.Identity.Application.Preferences.Queries.GetAppearance;
+using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;

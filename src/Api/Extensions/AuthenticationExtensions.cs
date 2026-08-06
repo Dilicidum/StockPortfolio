@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Identity;
 
-using StockPortfolio.Modules.Identity.Application;
+using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Api.Extensions;
 

@@ -90,7 +90,7 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
                     b.ToTable("AspNetUserTokens", "identity");
                 });
 
-            modelBuilder.Entity("StockPortfolio.Modules.Identity.Application.AppUser", b =>
+            modelBuilder.Entity("StockPortfolio.Modules.Identity.Domain.AppUser", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -180,7 +180,7 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserClaim<System.Guid>", b =>
                 {
-                    b.HasOne("StockPortfolio.Modules.Identity.Application.AppUser", null)
+                    b.HasOne("StockPortfolio.Modules.Identity.Domain.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -189,7 +189,7 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserLogin<System.Guid>", b =>
                 {
-                    b.HasOne("StockPortfolio.Modules.Identity.Application.AppUser", null)
+                    b.HasOne("StockPortfolio.Modules.Identity.Domain.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -198,7 +198,7 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityUserToken<System.Guid>", b =>
                 {
-                    b.HasOne("StockPortfolio.Modules.Identity.Application.AppUser", null)
+                    b.HasOne("StockPortfolio.Modules.Identity.Domain.AppUser", null)
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade)
@@ -207,7 +207,7 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("StockPortfolio.Modules.Identity.Domain.UserPreferences", b =>
                 {
-                    b.HasOne("StockPortfolio.Modules.Identity.Application.AppUser", null)
+                    b.HasOne("StockPortfolio.Modules.Identity.Domain.AppUser", null)
                         .WithOne()
                         .HasForeignKey("StockPortfolio.Modules.Identity.Domain.UserPreferences", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)

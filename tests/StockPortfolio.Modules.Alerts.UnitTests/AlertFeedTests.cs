@@ -82,7 +82,7 @@ public sealed class AlertFeedTests
         await cts.CancelAsync();
     }
 
-    /// <summary>The one that a fresh ReadAsync every pass would break: an alert during a beat is not eaten.</summary>
+    /// <summary>A beat must not cost the alert behind it: both share one queue and both come out.</summary>
     [Fact]
     public async Task AnAlertThatArrivesAfterAHeartbeat_IsStillDelivered()
     {
@@ -92,9 +92,6 @@ public sealed class AlertFeedTests
 
         (await frames.MoveNextAsync()).ShouldBeTrue();
 
-        // One beat, which is where a loop that starts a new channel read every pass abandons the old
-        // one. An abandoned ReadAsync still consumes the next item, so the alert below would be handed
-        // to a task nobody awaits and the browser would never see it.
         var beat = frames.MoveNextAsync();
         _clock.Advance(AlertFeed.HeartbeatInterval);
         (await beat).ShouldBeTrue();
