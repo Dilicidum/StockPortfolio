@@ -1165,6 +1165,50 @@ internal sealed class AlertsPollTargetSource(IWatchedTickerReader reader) : IPol
    it is the cheapest one to regress.
 10. Commit: `feat(marketdata): the quote poller, its two locks, and an always-on replica`.
 
+**STEPS 1–5 DONE — branch `worktree-agent-aa3485da71659e6eb`, commit `31e5360`.** Build 0 warnings; suite
+**638 passed, 2 skipped**. Steps 6–10 remain.
+
+**Two corrections that would each have silently disabled alerting**, and they are the reason to read this
+block before writing the adapters:
+
+- **Step 5's justification for `TryAddSingleton` is wrong.** `TryAdd` skips when the *service type* is
+  already registered, and step 6 registers the adapters **after** the module calls — so `TryAdd` always runs
+  first and always adds the no-op. What makes the host's adapter win is last-registration-wins plus the host
+  using a plain `Add`. **Write `TryAddScoped` for `AlertsPriceSampleObserver` and the no-op wins, no alert
+  ever evaluates, and nothing fails.** Pinned by `Module_HostRegistersAnObserverAfterwards_TheHostsWins`.
+- **Step 6 contradicts itself inside one bullet.** The four-line sample constructor-injects a scoped
+  `IWatchedTickerReader`; the next sentence says the adapter takes `IServiceScopeFactory`. A singleton
+  adapter cannot do both. **Resolved in favour of the sample: the *poller* takes `IServiceScopeFactory` and
+  resolves both ports from a per-cycle scope, so both adapters stay four lines and register as `scoped`.**
+
+Three more the plan never said:
+
+- **`IQuoteProvider` must not be captured by the poller.** With a real key it is a **transient** typed
+  `HttpClient`; injecting it into a singleton pins one `HttpClient` for the process and defeats handler
+  rotation. Resolve it from the per-cycle scope.
+- **Lock order is claim-then-in-flight, and `ReleaseAsync` runs only after a successful acquire.** Releasing
+  after a *refused* claim deletes the winner's in-flight key and re-opens the exact overlap the second key
+  exists to prevent. Pinned by `Cycle_LeaseRefused_DoesNotEvenAskWhatToPoll`.
+- **`FakeTimeProvider` plus `BackgroundService` has a startup race.** A single `Advance(interval)` after
+  `StartAsync` loses the tick — `PeriodicTimer` does not buffer one that arrives before the service
+  registered its wait, and neither that moment nor a cycle's end is observable. Advance until the cycle
+  count is seen.
+
+And three scope corrections: §3.2 lists three poller files but five were needed (`IPollLease` is the seam
+that keeps the poller's unit tests off a live Redis, and `NoOpPriceSampleObserver` has no slot in the list);
+**§2.8 lists four `MarketData:Polling:*` keys but MarketData reads two** — `MaxMissedSamples` and
+`MinimumSamples` are the Alerts evaluator's, read straight from `IConfiguration`, because `PollingOptions`
+is `internal`; and **§2.4's `staleTickers` field on `/api/marketdata/health` is unbuildable as specified**,
+since only Alerts could compute it and MarketData depends on nothing. **The log at `Warning` 5310 is the
+whole feed-health signal for this phase.** MarketData can judge its own windows' staleness later if the
+field is ever wanted.
+
+Two smaller notes: `Microsoft.Extensions.Hosting.Abstractions` was neither in `Directory.Packages.props` nor
+referenced — `BackgroundService` compiled only because `Microsoft.Extensions.Http.Resilience` dragged it in
+transitively, the exact case the repo's own `System.Threading.RateLimiting` comment says to pin. And the
+per-ticker `try/catch` in the poller is what actually enforces "a failed observer must not stop the next
+ticker"; on the interface it is only a comment.
+
 ---
 
 ### Task 11 — `GET /api/alerts?limit=50`
