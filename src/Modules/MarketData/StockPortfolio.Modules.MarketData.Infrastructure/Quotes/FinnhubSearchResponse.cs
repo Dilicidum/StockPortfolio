@@ -9,7 +9,7 @@ internal sealed record FinnhubSearchResponse(
     [property: JsonPropertyName("count")] int? Count,
     [property: JsonPropertyName("result")] IReadOnlyList<FinnhubSearchMatch>? Result)
 {
-    /// <summary>Whether a returned row IS this symbol: q=AAP returns AAPL, so a hit is not a match.</summary>
+    /// <summary>Whether a returned row IS this symbol: q=appl returns Applovin too, so a hit is not a match.</summary>
     public bool Contains(string ticker) =>
         Result?.Any(match => string.Equals(match.Symbol, ticker, StringComparison.OrdinalIgnoreCase)) == true;
 

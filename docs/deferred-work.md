@@ -314,9 +314,10 @@ against the endpoint, not the string.
 
 **Suggestions are filtered to symbols the add-position form would accept.** The provider's search returns
 foreign listings and longer symbols, and offering one fills the field with a value the form then rejects.
-This is *not* the exact-match rule the existence check uses — fuzzy hits are still kept, and searching part
-of a symbol still returns the whole one. An integration test adds every suggestion the search returns and
-asserts each is accepted, so the two rules cannot drift apart.
+This is *not* the exact-match rule the existence check uses — fuzzy hits are still kept, including the ones
+that match on a company name rather than a symbol, which is what makes the feature useful to someone who
+does not know the symbol. An integration test adds every suggestion the search returns and asserts each is
+accepted, so the two rules cannot drift apart.
 
 **Closing conditions, all four met:**
 

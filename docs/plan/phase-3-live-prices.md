@@ -143,7 +143,8 @@ that response can tell them apart. A price-based check would permanently reject 
 second.
 
 The check therefore uses the search endpoint, matching the symbol exactly and case-insensitively. Never
-"did the search return anything": search is fuzzy, and searching for AAP returns AAPL.
+"did the search return anything": search matches company names as well as symbols, so searching for `appl`
+returns Applied Materials and Applovin beside Apple. A non-empty answer is not an answer about the symbol.
 
 **If the provider cannot answer at all, the answer is "assume it exists."** This puts an outbound HTTP call on
 a write path. One extra call per add against the budget is nothing; a provider outage rejecting a purchase

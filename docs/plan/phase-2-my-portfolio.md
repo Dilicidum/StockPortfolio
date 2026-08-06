@@ -230,8 +230,9 @@ made while search is down. Picking from the list is a convenience and never a re
 
 **Only symbols this form would accept are offered.** The provider's search is fuzzy and also returns foreign
 listings and longer symbols. Suggesting one would fill the field with a value the form then rejects, which
-is worse than suggesting nothing. Fuzziness itself is wanted and kept — typing part of a symbol still finds
-the whole one.
+is worse than suggesting nothing. Fuzziness itself is wanted and kept: the provider matches company names
+as well as symbols, so typing the start of a company's name finds it without knowing its symbol at all —
+which is the entire point of the feature.
 
 **Company names are cached; prices are not, and the two rules do not conflict.** A price is meant to change
 every second, so a stored one is almost certainly wrong. A name is meant never to change, so a stored one is

@@ -378,7 +378,9 @@ for exactly this reason — the two degrade in opposite directions, and one poli
 The check uses `/search` with an exact, case-insensitive match on the returned symbol. Not `/quote`: a
 non-existent symbol and a healthy symbol Finnhub blipped on both come back as `c: 0`, so `/quote` cannot
 distinguish them in principle and would mark a valid holding unknown after one bad second. Not `count > 0`
-either — `/search` is fuzzy, and `q=AAP` returns AAPL.
+either — `/search` matches company names as well as symbols, so `q=appl` comes back with Applied Materials,
+Applovin and Science Applications International beside Apple. A non-empty result says nothing about the
+symbol you actually asked for.
 
 ### Finding a symbol you half-remember
 
@@ -390,7 +392,8 @@ than blocking a purchase someone really made.
 
 Suggestions are filtered to symbols the add-position form would actually accept. `/search` returns foreign
 listings such as `AAPL.SW` alongside `AAPL`, and offering one would fill the field with a value the form
-then rejects. Fuzzy matching itself is kept — `AAP` still finds `AAPL`.
+then rejects. Fuzzy matching itself is kept: `appl` finds Apple, and also Applied Materials and Applovin,
+because the provider matches company names as well as symbols.
 
 Search is also the only thing that produces a **company name**, which then appears on the holdings and
 dashboard tables. Names are cached in Redis for a week; prices never are. The rules only look contradictory:
@@ -398,6 +401,11 @@ a price is meant to change every second, so a stored one is almost certainly wro
 never to change. The week-long expiry exists so that a company which renames itself corrects on its own. A
 row with no cached name shows its ticker alone — the ordinary case for anything added before this shipped,
 and for anything at all if Redis is down.
+
+One cosmetic quirk, observed live and left alone: Finnhub does not return a company's name in a consistent
+case. `q=appl` gives `Apple Inc` and `q=AAPL` gives `APPLE INC`, so which one a row displays depends on
+which search happened to warm the cache. Normalising it would mean guessing at capitalisation rules for
+every company in the world, which is a worse answer than showing what the provider said.
 
 ### No API key? It still works.
 
