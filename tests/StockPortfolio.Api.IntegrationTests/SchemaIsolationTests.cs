@@ -59,7 +59,8 @@ public sealed class SchemaIsolationTests(ApiFixture fixture)
         await using var connection = new NpgsqlConnection(_fixture.IdentityConnectionString);
         await connection.OpenAsync(TestContext.Current.CancellationToken);
 
-        await using var command = new NpgsqlCommand("SELECT count(*) FROM identity.users", connection);
+        // Quoted because the library's table names are PascalCase, unlike this repo's own snake_case ones.
+        await using var command = new NpgsqlCommand("""SELECT count(*) FROM identity."AspNetUsers" """, connection);
 
         var count = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
 

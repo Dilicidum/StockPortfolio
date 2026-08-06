@@ -1,208 +1,91 @@
-using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
-using System.Text.Json;
-using System.Threading.Channels;
 
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
-using OneOf;
-
-using StackExchange.Redis;
-
+using StockPortfolio.Api.Extensions;
 using StockPortfolio.Api.IntegrationTests.Infrastructure;
-using StockPortfolio.Modules.Alerts.Application.Abstractions;
-using StockPortfolio.Modules.Alerts.Application.Streaming;
-using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.RedeemStreamTicket;
-using StockPortfolio.Shared.Kernel.Cqrs;
+using StockPortfolio.Modules.Alerts.Api;
+using StockPortfolio.Modules.Alerts.Api.Streaming;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The ticket handshake against real Redis, and the fan-out that nothing else proves.
+/// <summary>The three things about the alert hub that are ours rather than SignalR's.
 ///
-/// Deliberately NOT over HTTP: TestServer holds a streaming response open until the server-side
-/// enumerator ends, and the enumerator only ends when the client lets go — so reading the feed
-/// through CreateClient() deadlocks. The frame names and the heartbeat are pinned by
-/// StockPortfolio.Tests.AlertStreamTests instead, which drives the same enumerable directly.</summary>
+/// The fan-out across replicas is no longer tested here and deliberately so: it is the Redis
+/// backplane, which is Microsoft's code and configuration, not ours. What IS ours is reading the
+/// token out of the query string, refusing to do that anywhere else, and naming the claim that
+/// decides who a message is for.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AlertStreamTests(ApiFixture fixture)
 {
-    private const string TicketPath = "/api/alerts/stream-ticket";
-    private const string StreamPath = "/api/alerts/stream";
-
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>Single use, and it is the only security property a query-string credential has.</summary>
+    /// <summary>The hub carries [Authorize], so an unauthenticated request must not reach it.</summary>
     [Fact]
-    public async Task ATicket_RedeemsOnce_AndTheSecondAttemptFails()
+    public async Task TheHubPath_WithNoToken_IsRefused()
     {
         using var client = _fixture.CreateClient();
-        var token = await SignedInAsync(client, "ticket-single-use");
-        var userId = await UserIdAsync(client, token);
 
-        var ticket = await TicketAsync(client, token);
+        using var response = await Wire.SendAsync(client, HttpMethod.Get, AlertsEndpoints.HubPath);
 
-        (await RedeemAsync(ticket)).AsT0.ShouldBe(userId);
-
-        (await RedeemAsync(ticket)).IsT1.ShouldBeTrue(
-            "the redeem is one StringGetDeleteAsync. A GET followed by a DEL would let two connections "
-                + "both read the ticket before either deleted it, and single use is the whole of what "
-                + "makes a credential in a query string tolerable.");
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>The expiry is Redis's own, so the route never re-checks a lifetime it did not set.</summary>
+    /// <summary>THE test for the query-string token. A browser cannot send the header, so this is the only way in.</summary>
     [Fact]
-    public async Task AnExpiredTicket_Fails()
+    public async Task TheHubPath_WithTheTokenInTheQueryString_GetsPastAuthentication()
     {
         using var client = _fixture.CreateClient();
-        var token = await SignedInAsync(client, "ticket-expiry");
-        var userId = await UserIdAsync(client, token);
+        var token = await SignedInAsync(client, "hub-query-token");
 
-        var expiring = "expiring-" + Guid.NewGuid().ToString("N");
+        // The real path the browser opens, not /negotiate — the client skips negotiation, so a test
+        // driving that route would keep passing if the hook were narrowed to negotiate alone.
+        using var response = await Wire.SendAsync(
+            client,
+            HttpMethod.Get,
+            $"{AlertsEndpoints.HubPath}?access_token={Uri.EscapeDataString(token)}");
 
-        // A second rather than the route's thirty, so this test costs a second rather than half a minute.
-        await _fixture.Services.GetRequiredService<IStreamTicketStore>()
-            .IssueAsync(expiring, userId, TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
-
-        (await RedeemAsync(expiring)).AsT0.ShouldBe(userId, "it must work before it expires.");
-
-        var again = "expiring-" + Guid.NewGuid().ToString("N");
-
-        await _fixture.Services.GetRequiredService<IStreamTicketStore>()
-            .IssueAsync(again, userId, TimeSpan.FromSeconds(1), TestContext.Current.CancellationToken);
-
-        await Task.Delay(TimeSpan.FromSeconds(1.5), TestContext.Current.CancellationToken);
-
-        (await RedeemAsync(again)).IsT1.ShouldBeTrue();
+        // Not 200: this is a plain GET rather than a WebSocket handshake, so SignalR refuses it on
+        // its own terms. Anything other than 401 means authentication accepted the token, which is
+        // the whole of what this test is for. Delete the OnMessageReceived hook and it goes 401,
+        // the SPA reconnects for ever, and no alert is ever delivered with nothing failing.
+        response.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>Expired, spent and never-issued deliberately get one answer, and the route's is 401.</summary>
+    /// <summary>The hook is path-scoped, and this is the test that keeps it that way.</summary>
     [Fact]
-    public async Task AnInventedTicket_IsRefusedByTheRoute()
+    public async Task AnOrdinaryRoute_WithTheTokenInTheQueryString_IsStillRefused()
     {
         using var client = _fixture.CreateClient();
+        var token = await SignedInAsync(client, "query-token-scope");
 
         using var response = await Wire.SendAsync(
             client,
             HttpMethod.Get,
-            $"{StreamPath}?ticket={Uri.EscapeDataString("never-issued-by-this-host")}");
+            $"/api/alerts/settings?access_token={Uri.EscapeDataString(token)}");
 
+        // Drop the StartsWithSegments check and this becomes a 200 — at which point every route in
+        // the app can be called with the token in the URL, and every access log holds a live credential.
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>The stream is the one anonymous route, so no ticket at all is still a 401 rather than a 400.</summary>
+    /// <summary>The silent failure: a provider reading the wrong claim delivers every alert to nobody.</summary>
     [Fact]
-    public async Task TheStream_WithNoTicketAtAll_IsRefused()
+    public void TheUserIdProvider_IsOurs_AndReadsTheClaimTheTokensActuallyCarry()
     {
-        using var client = _fixture.CreateClient();
+        _fixture.Services.GetRequiredService<IUserIdProvider>()
+            .ShouldBeOfType<SubjectClaimUserIdProvider>(
+                "the built-in provider reads `nameidentifier`, which these tokens do not carry. "
+                    + "Clients.User then matches nothing and every alert is delivered to no one, "
+                    + "with no exception and no log line anywhere.");
 
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, StreamPath);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
-    }
-
-    /// <summary>THE fan-out test. An alert produced on another connection reaches this replica's subscriber.</summary>
-    [Fact]
-    public async Task AnAlertPublishedOnAnotherConnection_ReachesASubscribedStream()
-    {
-        using var client = _fixture.CreateClient();
-        var token = await SignedInAsync(client, "fan-out");
-        var userId = await UserIdAsync(client, token);
-
-        var channel = Channel.CreateUnbounded<AlertNotification>();
-
-        await using var subscription = await _fixture.Services
-            .GetRequiredService<IAlertStreamSubscriber>()
-            .SubscribeAsync(userId, channel.Writer, TestContext.Current.CancellationToken);
-
-        // A SECOND multiplexer, and that is the entire point: an in-process hand-off would pass this
-        // test only if the publisher and the subscriber shared a field, which is exactly the design
-        // that loses an alert produced on replica A while the user's stream is held by replica B.
-        await using var elsewhere = await ConnectionMultiplexer.ConnectAsync(_fixture.RedisConnectionString);
-
-        var redisChannel = RedisChannel.Literal(
-            string.Create(CultureInfo.InvariantCulture, $"alerts:user:{userId:D}"));
-
-        var payload = JsonSerializer.Serialize(
-            new
-            {
-                id = Guid.NewGuid(),
-                userId,
-                ticker = "AAPL",
-                direction = "Fall",
-                changePercent = "-6.00",
-                endpointPercent = "-6.00",
-                triggerPrice = "141",
-                referencePrice = "150",
-                currency = "USD",
-                firedAt = DateTimeOffset.UtcNow,
-                isSimulated = false,
-                reason = "fell 6% from the window high",
-            },
-            JsonSerializerOptions.Web);
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(TestContext.Current.CancellationToken);
-        cts.CancelAfter(TimeSpan.FromSeconds(15));
-
-        var arrival = channel.Reader.ReadAsync(cts.Token).AsTask();
-
-        // Published until somebody is listening: subscribing is a round trip to Redis and the first
-        // publish can beat it, in which case pub/sub drops the message rather than queueing it.
-        while (!arrival.IsCompleted
-            && await elsewhere.GetSubscriber().PublishAsync(redisChannel, payload) == 0)
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(100), cts.Token);
-        }
-
-        var received = await arrival;
-
-        received.Ticker.ShouldBe("AAPL");
-        received.Direction.ShouldBe("Fall");
-        received.UserId.ShouldBe(userId);
-    }
-
-    private async Task<OneOf<Guid, TicketNotRecognised>> RedeemAsync(string ticket)
-    {
-        await using var scope = _fixture.Services.CreateAsyncScope();
-
-        return await scope.ServiceProvider
-            .GetRequiredService<ICommandHandler<RedeemStreamTicketCommand, OneOf<Guid, TicketNotRecognised>>>()
-            .Handle(new RedeemStreamTicketCommand(ticket), TestContext.Current.CancellationToken);
+        SubjectClaimUserIdProvider.SubjectClaimType.ShouldBe(
+            AuthenticationExtensions.UserIdClaimType,
+            "the claim the tokens are issued with and the claim the hub matches on are two settings "
+                + "in two files, and nothing except this line makes them agree.");
     }
 
     private static async Task<string> SignedInAsync(HttpClient client, string prefix) =>
         (await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail(prefix))).AccessToken;
-
-    private static async Task<Guid> UserIdAsync(HttpClient client, string accessToken)
-    {
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", accessToken);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
-
-        var payload = await response.Content.ReadFromJsonAsync<UserPayload>(JsonSerializerOptions.Web);
-
-        payload.ShouldNotBeNull();
-
-        // Alerts keys a fired alert on a uuid, so this parse matches what its endpoints do.
-        return payload.Id;
-    }
-
-    private static async Task<string> TicketAsync(HttpClient client, string accessToken)
-    {
-        // No body at all, exactly as logout is sent: a ticket request has no input.
-        using var response = await Wire.SendAsync(client, HttpMethod.Post, TicketPath, accessToken);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
-
-        var payload = await response.Content.ReadFromJsonAsync<StreamTicketPayload>(JsonSerializerOptions.Web);
-
-        payload.ShouldNotBeNull();
-        payload.Ticket.ShouldNotBeNullOrWhiteSpace();
-        payload.ExpiresAt.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
-
-        return payload.Ticket;
-    }
-
-    /// <summary>What POST /api/alerts/stream-ticket answers with.</summary>
-    private sealed record StreamTicketPayload(string Ticket, DateTimeOffset ExpiresAt);
 }

@@ -24,8 +24,8 @@ public sealed class ParameterisationTests(ApiFixture fixture)
         // A quote, a tautology and a comment introducer.
         var hostileEmail = $"{marker}'-or-1=1--@example.test";
 
-        // The password is hostile too, though it is hashed with Argon2id before it goes anywhere near SQL, so.
-        var hostilePassword = $"{marker}');DROP-TABLE-identity.users;--";
+        // The password is hostile too, though the hasher turns it into a digest long before SQL sees it.
+        var hostilePassword = $"{marker}');DROP-TABLE-identity.AspNetUsers;--";
 
         var before = _fixture.RecordedCommands.Commands.Count;
 
@@ -48,8 +48,10 @@ public sealed class ParameterisationTests(ApiFixture fixture)
 
         // ── Guard: we are looking at the right statements ────────────────────────────────────────
         thisRequest.ShouldContain(
-            command => command.CommandText.Contains("identity.users", StringComparison.OrdinalIgnoreCase),
-            "the registration and login should have produced statements against identity.users");
+            command => command.CommandText.Contains("AspNetUsers", StringComparison.OrdinalIgnoreCase),
+            "the registration and login should have produced statements against the user table. The "
+            + "framework owns its name now, and Npgsql quotes it, so this matches the bare name rather "
+            + "than a schema-qualified one");
 
         // ── The claim: the hostile value is nowhere in any statement text ────────────────────────
         foreach (var command in recorded)
@@ -111,9 +113,10 @@ public sealed class ParameterisationTests(ApiFixture fixture)
             JsonSerializerOptions.Web,
             TestContext.Current.CancellationToken);
 
-        // Round-tripped unchanged: nothing was escaped away, truncated, or interpreted.
+        // Round-tripped unchanged: nothing was escaped away, truncated, or interpreted. Compared against
+        // what was typed, because Identity normalises into NormalizedEmail and leaves Email as entered.
         user.ShouldNotBeNull();
-        user.Email.ShouldBe(hostileEmail.ToLowerInvariant());
+        user.Email.ShouldBe(hostileEmail);
 
         // The table survived, which a successful injection would not have allowed.
         using var again = await Wire.LoginAsync(client, hostileEmail, Wire.ValidPassword);

@@ -4,8 +4,6 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 
-using Microsoft.AspNetCore.Identity;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
@@ -359,25 +357,6 @@ internal static class Wire
             + "validation problem this assertion reads: " + await Describe(response));
 
         return new HashSet<string>(problem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
-    }
-
-    /// <summary>The caller's user id, read through UserManager.</summary>
-    /// <remarks>
-    /// /api/auth/me carries the id, so this is only for tests that have an email and no token, so a test that needs the id — to assert on a
-    /// row keyed by user_id — asks the store rather than the wire. A string, because IdentityUser.Id is.
-    /// </remarks>
-    public static async Task<string> UserIdAsync(IServiceProvider services, string email)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-
-        await using var scope = services.CreateAsyncScope();
-
-        var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
-        var user = await users.FindByEmailAsync(email);
-
-        user.ShouldNotBeNull($"No account exists for {email}.");
-
-        return user.Id;
     }
 
     // MintAccessToken is gone with the JWT. An Identity bearer token is a Data Protection payload keyed

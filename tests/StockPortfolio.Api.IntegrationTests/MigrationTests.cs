@@ -35,8 +35,12 @@ public sealed class MigrationTests(ApiFixture fixture)
              ORDER BY table_name
             """);
 
-        identityTables.ShouldContain("users");
-        identityTables.ShouldContain("refresh_tokens");
+        // The library owns four of these names; user_preferences is the module's own.
+        identityTables.ShouldContain("AspNetUsers");
+        identityTables.ShouldContain("AspNetUserClaims");
+        identityTables.ShouldContain("AspNetUserLogins");
+        identityTables.ShouldContain("AspNetUserTokens");
+        identityTables.ShouldContain("user_preferences");
         identityTables.ShouldContain("__EFMigrationsHistory");
 
         var portfolioTables = await ReadStringsAsync(

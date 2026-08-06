@@ -112,9 +112,9 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         problem.Errors["Password"].ShouldNotBeEmpty();
     }
 
-    /// <summary>Case and surrounding whitespace do not create a second account.</summary>
+    /// <summary>One address is one account whatever the casing, and the casing typed is what is stored.</summary>
     [Fact]
-    public async Task Register_NormalisesEmailToLowercase()
+    public async Task Register_TreatsEmailCaseInsensitively_ButKeepsTheCasingTyped()
     {
         using var client = _fixture.CreateClient();
 
@@ -131,7 +131,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         using var loggedIn = await Wire.LoginAsync(client, lower, Wire.ValidPassword);
         loggedIn.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedIn));
 
-        // And /me reports the normalised form, not what was typed.
+        // /me echoes the casing typed: Identity normalises into NormalizedEmail and leaves Email as entered.
         var tokens = await Wire.ReadTokensAsync(loggedIn);
         using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
 
@@ -142,10 +142,10 @@ public sealed class AuthenticationTests(ApiFixture fixture)
             TestContext.Current.CancellationToken);
 
         user.ShouldNotBeNull();
-        user.Email.ShouldBe(lower);
+        user.Email.ShouldBe(mixed);
 
-        // Registering the mixed-case form a second time conflicts, which is the property that matters: two.
-        using var again = await Wire.RegisterAsync(client, mixed, Wire.ValidPassword);
+        // The property that matters: the lower-cased form is the same account, so it cannot register again.
+        using var again = await Wire.RegisterAsync(client, lower, Wire.ValidPassword);
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(again));
     }
 
