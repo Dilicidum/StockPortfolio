@@ -21,6 +21,7 @@ public sealed class FakeQuoteProviderTests
     {
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create(ticker).AsT0 },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         return quotes.ShouldHaveSingleItem().Price;
@@ -35,6 +36,21 @@ public sealed class FakeQuoteProviderTests
         var second = await PriceOf(Build(Now), "AAPL");
 
         second.ShouldBe(first);
+    }
+
+    [Fact]
+    public async Task FakeProvider_ApiKeyOverride_IsIgnored()
+    {
+        var ticker = new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 };
+
+        var withOverride = await Build(Now).GetQuotesAsync(
+            ticker, "an-override-key", TestContext.Current.CancellationToken);
+
+        var withoutOverride = await Build(Now).GetQuotesAsync(
+            ticker, apiKeyOverride: null, TestContext.Current.CancellationToken);
+
+        // Two fresh instances, same clock: identical output is only possible if the override changed nothing.
+        withOverride.ShouldHaveSingleItem().Price.ShouldBe(withoutOverride.ShouldHaveSingleItem().Price);
     }
 
     [Fact]

@@ -22,6 +22,10 @@ internal sealed class ScriptedQuoteProvider : IQuoteProvider
     /// <summary>Named so a failing assertion says which host it came from.</summary>
     public string Name => "Scripted";
 
+    /// <summary>Every apiKeyOverride GetQuotesAsync was called with, in call order — the BYOK dashboard
+    /// test's only way to prove which key a fetch actually used.</summary>
+    public List<string?> ApiKeyOverridesSeen { get; } = [];
+
     /// <summary>A provider that answers for exactly these symbols and fails every other one.</summary>
     public static ScriptedQuoteProvider Serving(params (string Ticker, decimal Price)[] prices)
     {
@@ -36,9 +40,12 @@ internal sealed class ScriptedQuoteProvider : IQuoteProvider
     public static ScriptedQuoteProvider VerifyingKeyAs(KeyVerdict verdict) => new([], verdict);
 
     /// <summary>An unscripted symbol is absent, never zero-valued — which is what the real per-item catch does.</summary>
-    public Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct)
+    public Task<IReadOnlyList<Quote>> GetQuotesAsync(
+        IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tickers);
+
+        ApiKeyOverridesSeen.Add(apiKeyOverride);
 
         var now = TimeProvider.System.GetUtcNow();
 

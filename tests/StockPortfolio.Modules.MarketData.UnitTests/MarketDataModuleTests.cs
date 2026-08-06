@@ -127,6 +127,7 @@ public sealed class MarketDataModuleTests
 
         var quotes = await services.GetRequiredService<IQuoteProvider>().GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         quotes.ShouldBeEmpty();
@@ -147,6 +148,7 @@ public sealed class MarketDataModuleTests
 
         await services.GetRequiredService<IQuoteProvider>().GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         handler.Calls.ShouldBeGreaterThan(1);

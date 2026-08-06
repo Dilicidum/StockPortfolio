@@ -12,4 +12,8 @@ public interface IUserProviderKeyRepository
 
     // Removes the row and commits.
     Task RemoveAsync(UserProviderKey key, CancellationToken ct);
+
+    // Marks the stored key rejected, if the user still has one, and commits. A no-op if they have since
+    // removed it — a rejection landing after a removal must not resurrect a row nobody asked to keep.
+    Task MarkRejectedAsync(Guid userId, CancellationToken ct);
 }

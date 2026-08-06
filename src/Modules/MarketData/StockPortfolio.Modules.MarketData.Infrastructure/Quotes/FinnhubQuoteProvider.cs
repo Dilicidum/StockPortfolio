@@ -13,15 +13,21 @@ namespace StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 /// <summary>The live provider. Fetches and returns; recording what was fetched belongs to QuoteReader.</summary>
 internal sealed partial class FinnhubQuoteProvider(
     HttpClient client,
+    IHttpClientFactory httpClientFactory,
     TimeProvider clock,
     ILogger<FinnhubQuoteProvider> logger) : IQuoteProvider
 {
     /// <summary>Four in flight, to bound sockets rather than to pace requests — that is Finnhub's job now.</summary>
     private const int MaxDegreeOfParallelism = 4;
 
+    /// <summary>The second named client MarketDataModule registers, so a revoked user key trips a breaker
+    /// that is theirs alone rather than the one every dashboard and the poller share.</summary>
+    internal const string ByokClientName = "FinnhubByok";
+
     public string Name => "Finnhub";
 
-    public async Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct)
+    public async Task<IReadOnlyList<Quote>> GetQuotesAsync(
+        IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tickers);
 
@@ -35,7 +41,7 @@ internal sealed partial class FinnhubQuoteProvider(
             {
                 try
                 {
-                    if (await FetchOneAsync(ticker, token) is { } quote)
+                    if (await FetchOneAsync(ticker, apiKeyOverride, token) is { } quote)
                     {
                         quotes.Add(quote);
                     }
@@ -120,20 +126,31 @@ internal sealed partial class FinnhubQuoteProvider(
     internal static bool IsUnauthorised(HttpStatusCode status) =>
         status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
-    private async Task<Quote?> FetchOneAsync(Ticker ticker, CancellationToken ct)
+    private async Task<Quote?> FetchOneAsync(Ticker ticker, string? apiKeyOverride, CancellationToken ct)
     {
         // ObservedAt is when this app fetched, never Finnhub's t: t freezes at Friday's close, which would
         // render every weekend dashboard amber while the provider is perfectly healthy.
-        return await GetQuoteAsync(ticker, ct) is { Price: { } price }
+        return await GetQuoteAsync(ticker, apiKeyOverride, ct) is { Price: { } price }
             ? new Quote(ticker, price, clock.GetUtcNow())
             : null;
     }
 
-    private async Task<FinnhubQuoteResponse?> GetQuoteAsync(Ticker ticker, CancellationToken ct)
+    private async Task<FinnhubQuoteResponse?> GetQuoteAsync(Ticker ticker, string? apiKeyOverride, CancellationToken ct)
     {
         var path = string.Create(CultureInfo.InvariantCulture, $"quote?symbol={Uri.EscapeDataString(ticker.Value)}");
 
-        using var response = await client.GetAsync(new Uri(path, UriKind.Relative), ct);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(path, UriKind.Relative));
+
+        // A header on the request wins over the client's default, so the key travels per request rather
+        // than per client — and the client itself is a separate one, so a revoked key trips its own breaker.
+        if (apiKeyOverride is not null)
+        {
+            request.Headers.Add("X-Finnhub-Token", apiKeyOverride);
+        }
+
+        var httpClient = apiKeyOverride is null ? client : httpClientFactory.CreateClient(ByokClientName);
+
+        using var response = await httpClient.SendAsync(request, ct);
 
         if (IsUnauthorised(response.StatusCode))
         {

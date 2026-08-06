@@ -7,6 +7,7 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Domain;
 using StockPortfolio.Modules.MarketData.Infrastructure.Prices;
+using StockPortfolio.Tests.Fakes;
 
 namespace StockPortfolio.Tests;
 
@@ -14,10 +15,21 @@ public sealed class QuoteReaderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
 
+    private static readonly Guid AUser = Guid.CreateVersion7();
+
     private static Ticker T(string value) => Ticker.Create(value).AsT0;
 
-    private static QuoteReader Build(IQuoteProvider provider, ILastKnownPriceStore store) =>
-        new(provider, store, new FakeTimeProvider(Now));
+    private static QuoteReader Build(
+        IQuoteProvider provider,
+        ILastKnownPriceStore store,
+        IUserProviderKeyReader? keyReader = null,
+        IUserProviderKeyRepository? keyRepository = null) =>
+        new(
+            provider,
+            store,
+            keyReader ?? new StubKeyReader(_ => null),
+            keyRepository ?? new FakeUserProviderKeyRepository(),
+            new FakeTimeProvider(Now));
 
     [Fact]
     public async Task Fetch_WritesLastKnownPrice()
@@ -25,7 +37,7 @@ public sealed class QuoteReaderTests
         var store = new RecordingStore();
         var reader = Build(new StubProvider(new Quote(T("AAPL"), 187.42m, Now)), store);
 
-        await reader.GetCurrentPricesAsync(["AAPL"], TestContext.Current.CancellationToken);
+        await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
         // One writer in QuoteReader, so the fake and Finnhub paths record identically.
         store.Written.ShouldHaveSingleItem().Price.ShouldBe(187.42m);
@@ -42,6 +54,7 @@ public sealed class QuoteReaderTests
             store);
 
         var prices = await reader.GetCurrentPricesAsync(
+            AUser,
             ["AAPL", "MSFT", "TSLA"],
             TestContext.Current.CancellationToken);
 
@@ -57,7 +70,7 @@ public sealed class QuoteReaderTests
     public async Task Fetch_NeverFetchedAndProviderDown_IsAbsentNotZero()
     {
         var prices = await Build(new StubProvider(), new RecordingStore())
-            .GetCurrentPricesAsync(["AAPL"], TestContext.Current.CancellationToken);
+            .GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
         prices.ShouldBeEmpty();
     }
@@ -69,7 +82,7 @@ public sealed class QuoteReaderTests
         store.Stored[T("AAPL")] = new LastPrice(0m, Now - TimeSpan.FromMinutes(1));
 
         var prices = await Build(new StubProvider(), store)
-            .GetCurrentPricesAsync(["AAPL"], TestContext.Current.CancellationToken);
+            .GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
         prices.ShouldBeEmpty();
     }
@@ -78,7 +91,7 @@ public sealed class QuoteReaderTests
     public async Task Fetch_KeysAreCanonicalUpperCaseAndOrdinal()
     {
         var prices = await Build(new StubProvider(new Quote(T("AAPL"), 187.42m, Now)), new RecordingStore())
-            .GetCurrentPricesAsync(["aapl", "  AAPL  ", "BRK.B"], TestContext.Current.CancellationToken);
+            .GetCurrentPricesAsync(AUser, ["aapl", "  AAPL  ", "BRK.B"], TestContext.Current.CancellationToken);
 
         // Both sides canonicalise, so Ordinal turns a divergence into a visible miss instead of hiding it.
         prices.Keys.ShouldBe(["AAPL"]);
@@ -100,10 +113,62 @@ public sealed class QuoteReaderTests
             new StubProvider(new Quote(T("AAPL"), 187.42m, Now)),
             new RedisLastKnownPriceStore(multiplexer, NullLogger<RedisLastKnownPriceStore>.Instance));
 
-        var prices = await reader.GetCurrentPricesAsync(["AAPL"], TestContext.Current.CancellationToken);
+        var prices = await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
         prices["AAPL"].Price.ShouldBe(187.42m);
         prices["AAPL"].IsLastKnown.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetCurrentPrices_WhenTheUserHasTheirOwnKey_PassesItToTheProvider()
+    {
+        var provider = new StubProvider(new Quote(T("AAPL"), 187.42m, Now));
+        var reader = Build(provider, new RecordingStore(), new StubKeyReader(_ => "user-key-a1b2"));
+
+        await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
+
+        provider.LastApiKeyOverride.ShouldBe("user-key-a1b2");
+    }
+
+    [Fact]
+    public async Task GetCurrentPrices_WhenTheUserHasNoKey_LeavesTheProviderOnTheApplicationKey()
+    {
+        var provider = new StubProvider(new Quote(T("AAPL"), 187.42m, Now));
+        var reader = Build(provider, new RecordingStore(), new StubKeyReader(_ => null));
+
+        await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
+
+        provider.LastApiKeyOverride.ShouldBeNull();
+    }
+
+    /// <summary>The test §Step 4b exists for: a revoked key must not stay invisible behind a stale price.</summary>
+    [Fact]
+    public async Task GetCurrentPrices_WhenTheProviderRefusesTheUsersKey_MarksItRejected()
+    {
+        var repository = new FakeUserProviderKeyRepository();
+        repository.Saved.Add(UserProviderKey.Create(AUser, "cipher", "a1b2", TimeProvider.System));
+
+        var provider = new StubProvider { VerifyVerdict = KeyVerdict.Rejected };
+        var reader = Build(provider, new RecordingStore(), new StubKeyReader(_ => "user-key-a1b2"), repository);
+
+        await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
+
+        repository.Saved.ShouldHaveSingleItem().LastRejectedAt.ShouldNotBeNull();
+    }
+
+    /// <summary>The other half: an outage must degrade quietly rather than brand a good key bad.</summary>
+    [Fact]
+    public async Task GetCurrentPrices_WhenTheProviderCannotAnswerForTheUsersKey_DoesNotMarkItRejected()
+    {
+        var repository = new FakeUserProviderKeyRepository();
+        repository.Saved.Add(UserProviderKey.Create(AUser, "cipher", "a1b2", TimeProvider.System));
+
+        var provider = new StubProvider { VerifyVerdict = KeyVerdict.Unknown };
+        var reader = Build(provider, new RecordingStore(), new StubKeyReader(_ => "user-key-a1b2"), repository);
+
+        await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
+
+        repository.Saved.ShouldHaveSingleItem().LastRejectedAt.ShouldBeNull();
     }
 
     [Theory]
@@ -114,12 +179,27 @@ public sealed class QuoteReaderTests
         (await new SymbolValidator(new StubProvider()).IsKnownSymbolAsync(
             candidate, TestContext.Current.CancellationToken)).ShouldBe(expected);
 
+    private sealed class StubKeyReader(Func<Guid, string?> keyFor) : IUserProviderKeyReader
+    {
+        public Task<string?> ReadPlaintextAsync(Guid userId, CancellationToken ct) =>
+            Task.FromResult(keyFor(userId));
+    }
+
     private sealed class StubProvider(params Quote[] quotes) : IQuoteProvider
     {
         public string Name => "Stub";
 
-        public Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct) =>
-            Task.FromResult<IReadOnlyList<Quote>>([.. quotes.Where(quote => tickers.Contains(quote.Ticker))]);
+        public string? LastApiKeyOverride { get; private set; }
+
+        public KeyVerdict VerifyVerdict { get; set; } = KeyVerdict.Accepted;
+
+        public Task<IReadOnlyList<Quote>> GetQuotesAsync(
+            IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct)
+        {
+            LastApiKeyOverride = apiKeyOverride;
+
+            return Task.FromResult<IReadOnlyList<Quote>>([.. quotes.Where(quote => tickers.Contains(quote.Ticker))]);
+        }
 
         public Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct) => Task.FromResult(true);
 
@@ -127,7 +207,7 @@ public sealed class QuoteReaderTests
             Task.FromResult<IReadOnlyList<SymbolMatch>>([]);
 
         public Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct) =>
-            Task.FromResult(KeyVerdict.Accepted);
+            Task.FromResult(VerifyVerdict);
     }
 
     private sealed class RecordingStore : ILastKnownPriceStore

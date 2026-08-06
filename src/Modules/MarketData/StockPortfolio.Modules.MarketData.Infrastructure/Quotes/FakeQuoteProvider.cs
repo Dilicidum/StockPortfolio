@@ -50,7 +50,10 @@ internal sealed class FakeQuoteProvider(FakeQuoteOptions options, TimeProvider c
 
     public string Name => "Fake";
 
-    public Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct)
+    // apiKeyOverride is ignored: with no Finnhub key configured this fake is the only provider there is,
+    // so a per-user key has no live provider to be sent to.
+    public Task<IReadOnlyList<Quote>> GetQuotesAsync(
+        IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tickers);
 

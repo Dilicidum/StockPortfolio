@@ -27,4 +27,11 @@ internal sealed class FakeUserProviderKeyRepository : IUserProviderKeyRepository
 
         return Task.CompletedTask;
     }
+
+    public Task MarkRejectedAsync(Guid userId, CancellationToken ct)
+    {
+        Saved.Find(key => key.UserId == userId)?.MarkRejected(TimeProvider.System);
+
+        return Task.CompletedTask;
+    }
 }

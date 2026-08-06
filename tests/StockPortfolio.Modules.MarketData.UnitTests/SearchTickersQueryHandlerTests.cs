@@ -144,7 +144,8 @@ public sealed class SearchTickersQueryHandlerTests
 
         public List<string> Queries { get; } = [];
 
-        public Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct) =>
+        public Task<IReadOnlyList<Quote>> GetQuotesAsync(
+            IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<Quote>>([]);
 
         public Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct) => Task.FromResult(true);

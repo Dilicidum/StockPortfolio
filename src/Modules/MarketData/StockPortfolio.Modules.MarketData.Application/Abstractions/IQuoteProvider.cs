@@ -8,8 +8,10 @@ public interface IQuoteProvider
     /// <summary>The name the startup log line, the health route and the integration fixture all read.</summary>
     string Name { get; }
 
-    /// <summary>Fetches what it can. A symbol that failed or priced at zero is absent, never zero-valued.</summary>
-    Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct);
+    /// <summary>Fetches what it can. A symbol that failed or priced at zero is absent, never zero-valued.
+    /// apiKeyOverride, when not null, is a caller's own provider key to fetch with instead of the app's.</summary>
+    Task<IReadOnlyList<Quote>> GetQuotesAsync(
+        IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct);
 
     /// <summary>Whether the provider recognises this symbol; true when it cannot answer.</summary>
     Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct);

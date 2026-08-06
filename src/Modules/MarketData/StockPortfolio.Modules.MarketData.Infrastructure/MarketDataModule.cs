@@ -91,6 +91,16 @@ public static class MarketDataModule
                     client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
                 })
                 .AddStandardResilienceHandler(ConfigureResilience);
+
+            // A separate client, so a user's revoked key trips a breaker that is theirs alone. Sharing the
+            // client above would mean ten 401s from one bad key opens the circuit for every dashboard and
+            // the poller too. No default token header: the key travels per request instead.
+            services.AddHttpClient(FinnhubQuoteProvider.ByokClientName, client =>
+                {
+                    client.BaseAddress = options.BaseUrl;
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+                })
+                .AddStandardResilienceHandler(ConfigureResilience);
         }
         else
         {
@@ -124,15 +134,12 @@ public static class MarketDataModule
         return services;
     }
 
-    /// <summary>BYOK: the feature switch, the repository, the reader Task 7 needs, and the three handlers.</summary>
+    /// <summary>BYOK: the feature switch, the repository, the reader QuoteReader uses, and the three handlers.</summary>
     private static void AddKeys(IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton(ReadByokOptions(config));
 
         services.AddScoped<IUserProviderKeyRepository, UserProviderKeyRepository>();
-
-        // Unused until Task 7 wires the dashboard's price path onto it. Declared now because the port
-        // is part of this phase's public surface, not a call site of it.
         services.AddScoped<IUserProviderKeyReader, UserProviderKeyReader>();
 
         services.AddScoped<

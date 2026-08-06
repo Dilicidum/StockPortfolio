@@ -32,7 +32,7 @@ public sealed class GetDashboardQueryHandler(
 
         string[] tickers = [.. rows.Select(row => row.Ticker)];
 
-        var prices = await quotes.GetCurrentPricesAsync(tickers, ct);
+        var prices = await quotes.GetCurrentPricesAsync(query.UserId, tickers, ct);
 
         // After the prices, and cache-only: a name is cosmetic, so it must never delay or fail the figures.
         var known = await names.GetNamesAsync(tickers, ct);
