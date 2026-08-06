@@ -23,7 +23,10 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         // Registering signs the caller straight in: one call, and the pair comes back with it.
         using var registered = await Wire.RegisterAsync(client, email, Wire.ValidPassword);
-        registered.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(registered));
+        registered.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(registered));
+
+        // 201 without a Location reads as an oversight.
+        registered.Headers.Location?.ToString().ShouldBe("/api/auth/me");
 
         var fromRegister = await Wire.ReadTokensAsync(registered);
         fromRegister.AccessToken.ShouldNotBeNullOrWhiteSpace();

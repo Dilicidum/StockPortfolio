@@ -176,7 +176,7 @@ internal static class Wire
     {
         using var response = await RegisterAsync(client, email, password);
 
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
+        response.StatusCode.ShouldBe(HttpStatusCode.Created, await Describe(response));
 
         return await ReadTokensAsync(response);
     }

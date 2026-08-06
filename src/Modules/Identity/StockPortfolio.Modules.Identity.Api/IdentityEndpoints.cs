@@ -36,6 +36,9 @@ public static class IdentityEndpoints
     /// <summary>Written by UserClaimsPrincipalFactory, from IdentityOptions.ClaimsIdentity.UserIdClaimType.</summary>
     private const string SubjectClaimType = "sub";
 
+    /// <summary>Where a newly created account is addressable, for register's Location header.</summary>
+    private const string CurrentUserPath = "/api/auth/me";
+
     /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
     public static IServiceCollection AddIdentityApi(this IServiceCollection services)
     {
@@ -56,8 +59,8 @@ public static class IdentityEndpoints
             .AllowAnonymous()
             .WithName("Register")
             .WithSummary("Creates an account and signs the caller straight in.")
-            .WithDescription("Returns the same token pair as login, so no second call is needed.")
-            .Produces<AccessTokenResponse>(StatusCodes.Status200OK)
+            .WithDescription("Returns the same token pair as login; Location points at /api/auth/me.")
+            .Produces<AccessTokenResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
@@ -127,7 +130,8 @@ public static class IdentityEndpoints
     private static async Task<IResult> RegisterAsync(
         RegisterUserRequest request,
         UserManager<AppUser> users,
-        SignInManager<AppUser> signIn)
+        SignInManager<AppUser> signIn,
+        HttpContext http)
     {
         var email = request.Email.Trim();
 
@@ -146,8 +150,16 @@ public static class IdentityEndpoints
             return ValidationProblemFrom(created);
         }
 
-        // Signing in on the bearer scheme is what writes the AccessTokenResponse, so the caller is
-        // signed in by the time register returns and never needs a second round trip.
+        // Set BEFORE the sign-in, and this is the whole trick. BearerTokenHandler.HandleSignInAsync
+        // writes the token body with WriteAsJsonAsync and never assigns a status code, so whatever is
+        // set here survives and the pair goes out under a 201 with a Location.
+        //
+        // It cannot be done afterwards. SignInAsync writes the entire response, so returning
+        // TypedResults.Created below would be setting a status on a response that has already started.
+        // TypedResults.Empty is the "already handled, leave it alone" result.
+        http.Response.StatusCode = StatusCodes.Status201Created;
+        http.Response.Headers.Location = CurrentUserPath;
+
         signIn.AuthenticationScheme = IdentityConstants.BearerScheme;
         await signIn.SignInAsync(user, isPersistent: false);
 
