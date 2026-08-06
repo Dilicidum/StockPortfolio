@@ -63,15 +63,14 @@ public sealed class DomainShapeTests
             .ToList();
 
         scanned.ShouldContain(
-            typeof(User).FullName!,
-            "Rule 3's filter no longer selects User, so the rule scans a smaller set than it reports.");
+            typeof(UserPreferences).FullName!,
+            "Rule 3's filter no longer selects UserPreferences, so the rule scans a smaller set than it "
+                + "reports. It is the only entity Identity.Domain still owns — User and RefreshToken "
+                + "belong to ASP.NET Core Identity now.");
 
-        scanned.ShouldContain(
-            typeof(RefreshToken).FullName!,
-            "Rule 3's filter no longer selects RefreshToken, so the rule scans a smaller set than it reports.");
-
-        SolutionAssemblies.IsDomainNamespace(typeof(User).Namespace).ShouldBeTrue(
-            typeof(User).Namespace + " is a module's domain namespace; not recognising it empties rule 3.");
+        SolutionAssemblies.IsDomainNamespace(typeof(UserPreferences).Namespace).ShouldBeTrue(
+            typeof(UserPreferences).Namespace
+                + " is a module's domain namespace; not recognising it empties rule 3.");
 
         SolutionAssemblies.IsDomainNamespace("StockPortfolio.Modules.Identity.Application").ShouldBeFalse(
             "Application is not Domain. Widening the filter would make rule 3 police types it has no "

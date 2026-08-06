@@ -54,7 +54,7 @@ afterEach(() => {
  * an empty dashboard's `Table` returns its empty-state div before any `<thead>` exists.
  */
 async function renderPortfolio() {
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  authStore.setUser({ email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), [AAPL])
   server.use(emptyTickerSearchHandler, ...alertsHandlers)
 

@@ -8,15 +8,18 @@ export interface Credentials {
 }
 
 /**
- * The API contract, verbatim:
+ * The API contract, verbatim. These are ASP.NET Core Identity's own routes now,
+ * mounted under /api/auth — only logout is hand-written, because MapIdentityApi
+ * ships none.
  *
- *   POST /api/auth/register  {email,password} -> 201 TokenPair | 409 | 400
- *   POST /api/auth/login     {email,password} -> 200 TokenPair | 401
- *   POST /api/auth/refresh   {refreshToken}   -> 200 TokenPair | 401
- *   POST /api/auth/logout    bearer           -> 204
- *   GET  /api/auth/me        bearer           -> 200 {id,email}
+ *   POST /api/auth/register          {email,password} -> 200 EMPTY | 400
+ *   POST /api/auth/login             {email,password} -> 200 TokenPair | 401
+ *   POST /api/auth/refresh           {refreshToken}   -> 200 TokenPair | 401
+ *   POST /api/auth/logout            bearer           -> 200
+ *   GET  /api/auth/manage/info       bearer           -> 200 {email,isEmailConfirmed}
  *
  * Errors are application/problem+json; a 400 carries field-level `errors`.
+ * Note register: it issues NO tokens, so signing up is register-then-login.
  */
 
 export const authKeys = {
@@ -24,7 +27,7 @@ export const authKeys = {
 }
 
 export function fetchMe(signal?: AbortSignal): Promise<AuthUser> {
-  return apiFetch<AuthUser>('/api/auth/me', { signal })
+  return apiFetch<AuthUser>('/api/auth/manage/info', { signal })
 }
 
 /**
@@ -56,13 +59,18 @@ export async function login(credentials: Credentials): Promise<AuthUser> {
   return completeSignIn(tokens)
 }
 
+/**
+ * Two calls, not one. The framework's /register creates the account and returns
+ * an empty 200 — it issues no tokens and starts no session — so the sign-in is
+ * a second request. The route this replaced returned the pair directly.
+ */
 export async function register(credentials: Credentials): Promise<AuthUser> {
-  const tokens = await apiFetch<TokenPair>('/api/auth/register', {
+  await apiFetch<void>('/api/auth/register', {
     method: 'POST',
     body: credentials,
     authenticated: false,
   })
-  return completeSignIn(tokens)
+  return login(credentials)
 }
 
 export async function logout(): Promise<void> {

@@ -47,7 +47,7 @@ beforeEach(() => {
 
 /** The seventh inline copy of the memory-router boilerplate, which is the convention here. */
 async function renderAt(path: string, heading: string, handlers: RequestHandler[] = []) {
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  authStore.setUser({ email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), [AAPL])
 
   // A test's own handlers first: within one `use` call the earliest wins, so these shadow

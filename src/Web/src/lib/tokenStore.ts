@@ -70,15 +70,21 @@ export function getRefreshToken(): string | null {
   }
 }
 
+/**
+ * AccessTokenResponse, exactly as ASP.NET Core Identity returns it. `expiresIn`
+ * is a lifetime in SECONDS, not an instant — the hand-written API this replaced
+ * sent an absolute `accessExpiresAt`, so the clock arithmetic moved here.
+ */
 export interface TokenPair {
+  tokenType?: string
   accessToken: string
   refreshToken?: string | null
-  accessExpiresAt: string
+  expiresIn: number
 }
 
 export function setTokens(pair: TokenPair): void {
   accessToken = pair.accessToken
-  accessExpiresAt = pair.accessExpiresAt
+  accessExpiresAt = new Date(Date.now() + pair.expiresIn * 1000).toISOString()
 
   try {
     if (pair.refreshToken) {

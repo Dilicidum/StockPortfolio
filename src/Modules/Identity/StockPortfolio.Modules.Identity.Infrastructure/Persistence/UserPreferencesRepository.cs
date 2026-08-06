@@ -7,7 +7,7 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
 internal sealed class UserPreferencesRepository(IdentityDbContext context) : IUserPreferencesRepository
 {
-    public Task<UserPreferences?> FindAsync(UserId userId, CancellationToken ct) =>
+    public Task<UserPreferences?> FindAsync(string userId, CancellationToken ct) =>
         context.UserPreferences.FirstOrDefaultAsync(p => p.UserId == userId, ct);
 
     public async Task SaveAsync(UserPreferences preferences, CancellationToken ct)

@@ -415,7 +415,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             {
                 var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("metadata-logout"));
 
-                using var response = await Wire.LogoutAsync(client, tokens.AccessToken, tokens.RefreshToken);
+                using var response = await Wire.LogoutAsync(client, tokens.AccessToken);
 
                 return response.StatusCode;
             }

@@ -1,10 +1,10 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 using StockPortfolio.Modules.Identity.Application.Abstractions;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
-using StockPortfolio.Modules.Identity.Infrastructure.Security;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure;
 
@@ -14,7 +14,7 @@ public static class IdentityModule
     /// <summary>The ConnectionStrings key this module reads.</summary>
     public const string ConnectionStringName = "Identity";
 
-    /// <summary>Registers only the Identity DbContext, for the migrator, which signs nothing and hashes nothing.</summary>
+    /// <summary>Registers only the Identity DbContext, for the migrator.</summary>
     public static IServiceCollection AddIdentityPersistence(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -40,7 +40,7 @@ public static class IdentityModule
         return services;
     }
 
-    /// <summary>Registers the Identity module: its DbContext, repositories, password hasher, token issuer, handlers.</summary>
+    /// <summary>Registers the module's EF store and preferences. The host adds the endpoints and the tokens.</summary>
     public static IServiceCollection AddIdentityModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -48,16 +48,12 @@ public static class IdentityModule
 
         services.AddIdentityPersistence(config);
 
-        // Validated eagerly - a bad signing key must not wait for the first login to surface.
-        services.AddSingleton(JwtOptions.FromConfiguration(config));
+        // The EF half of Identity only. AddIdentityApiEndpoints and the bearer scheme live in the host,
+        // because both are ASP.NET Core and this assembly may not reference the web stack.
+        services.AddIdentityCore<IdentityUser>()
+            .AddEntityFrameworkStores<IdentityDbContext>();
 
-        services.AddScoped<IUserRepository, UserRepository>();
-        services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
         services.AddScoped<IUserPreferencesRepository, UserPreferencesRepository>();
-
-        // Singletons: both are stateless and hold expensive pre-computed state.
-        services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();
-        services.AddSingleton<ITokenIssuer, JwtTokenIssuer>();
 
         services.AddIdentityHandlers();
 

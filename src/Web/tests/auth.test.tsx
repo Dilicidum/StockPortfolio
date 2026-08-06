@@ -132,7 +132,7 @@ describe('signed-in session', () => {
       ...alertsHandlers,
     )
 
-    authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+    authStore.setUser({ email: 'holder@example.com' })
 
     const user = userEvent.setup()
     const router = renderAt('/dashboard')

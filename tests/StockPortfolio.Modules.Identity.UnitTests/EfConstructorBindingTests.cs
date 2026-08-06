@@ -19,25 +19,9 @@ public sealed class EfConstructorBindingTests
         return context.Model;
     }
 
-    [Fact]
-    public void User_HasNoParameterlessConstructor()
-    {
-        typeof(User).GetConstructors(
-                System.Reflection.BindingFlags.Instance
-                | System.Reflection.BindingFlags.Public
-                | System.Reflection.BindingFlags.NonPublic)
-            .ShouldNotContain(c => c.GetParameters().Length == 0);
-    }
-
-    [Fact]
-    public void RefreshToken_HasNoParameterlessConstructor()
-    {
-        typeof(RefreshToken).GetConstructors(
-                System.Reflection.BindingFlags.Instance
-                | System.Reflection.BindingFlags.Public
-                | System.Reflection.BindingFlags.NonPublic)
-            .ShouldNotContain(c => c.GetParameters().Length == 0);
-    }
+    // User and RefreshToken are the framework's now, and IdentityUser does have a parameterless
+    // constructor — AddIdentityApiEndpoints requires one. UserPreferences is the last entity this
+    // module maps itself, so it is the only one this rule still has anything to say about.
 
     [Fact]
     public void UserPreferences_HasNoParameterlessConstructor()
@@ -50,8 +34,6 @@ public sealed class EfConstructorBindingTests
     }
 
     [Theory]
-    [InlineData(typeof(User))]
-    [InlineData(typeof(RefreshToken))]
     [InlineData(typeof(UserPreferences))]
     public void Entity_BindsItsAllArgsConstructor_ForMaterialisation(Type clrType)
     {
@@ -72,9 +54,9 @@ public sealed class EfConstructorBindingTests
     }
 
     [Fact]
-    public void User_BindsEveryMappedPropertyThroughTheConstructor()
+    public void UserPreferences_BindsEveryMappedPropertyThroughTheConstructor()
     {
-        var entityType = BuildModel().FindEntityType(typeof(User))!;
+        var entityType = BuildModel().FindEntityType(typeof(UserPreferences))!;
 
         var bound = entityType.ConstructorBinding!.ParameterBindings
             .SelectMany(p => p.ConsumedProperties)

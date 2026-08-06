@@ -124,12 +124,15 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         using var client = _fixture.CreateClient();
         var token = await SignedInAsync(client, "appearance-no-write");
 
-        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", token);
+        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/manage/info", token);
         me.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(me));
 
         var user = await me.Content.ReadFromJsonAsync<UserPayload>(
             JsonSerializerOptions.Web, TestContext.Current.CancellationToken);
         user.ShouldNotBeNull();
+
+        // A string: user_preferences.user_id is a foreign key onto AspNetUsers.Id, which is text.
+        var userId = await Wire.UserIdAsync(_fixture.Services, user.Email);
 
         using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath, token);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
@@ -140,7 +143,7 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         await using var command = new NpgsqlCommand(
             "SELECT count(*) FROM identity.user_preferences WHERE user_id = @userId",
             connection);
-        command.Parameters.AddWithValue("userId", user.Id);
+        command.Parameters.AddWithValue("userId", userId);
 
         var count = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
 

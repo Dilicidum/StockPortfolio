@@ -1,104 +1,59 @@
-using System.Globalization;
-using System.Security.Claims;
-using System.Text;
-
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Routing;
 
 namespace StockPortfolio.Api.Extensions;
 
-/// <summary>Bearer-token authentication for the whole host.</summary>
+/// <summary>ASP.NET Core Identity bearer-token authentication for the whole host.</summary>
 internal static class AuthenticationExtensions
 {
-    /// <summary>The configuration section carrying the signing settings: Jwt__SigningKey and friends.</summary>
-    public const string JwtSectionName = "Jwt";
+    /// <summary>Where the framework's own account routes are mounted.</summary>
+    public const string AuthRoutePrefix = "/api/auth";
 
-    /// <summary>HMAC-SHA256 keys shorter than the 256-bit output are rejected outright by SymmetricSecurityKey.</summary>
-    private const int MinimumSigningKeyBytes = 32;
+    /// <summary>
+    /// The claim the user id travels under. Overriding the framework default of ClaimTypes.NameIdentifier
+    /// is the one setting this host changes, and it is deliberate: `sub` is the JWT registered claim name
+    /// (RFC 7519) that every external identity provider issues, so the other three modules read a portable
+    /// name rather than a WS-Federation URI specific to ASP.NET Core Identity. UserManager.GetUserId reads
+    /// this same option, so the framework follows the override rather than fighting it.
+    /// </summary>
+    public const string UserIdClaimType = "sub";
 
-    /// <summary>Mirrors the module's own default so issuer and validator cannot drift when the key is unset.</summary>
-    private const string DefaultIssuer = "StockPortfolio";
-
-    private const string DefaultAudience = "StockPortfolio";
-
-    /// <summary>Registers JWT bearer authentication against the Jwt configuration section.</summary>
-    public static IServiceCollection AddStockPortfolioAuthentication(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    /// <summary>Registers Identity's bearer tokens and the services behind MapIdentityApi.</summary>
+    public static IServiceCollection AddStockPortfolioAuthentication(this IServiceCollection services)
     {
-        var section = configuration.GetSection(JwtSectionName);
-        var signingKey = section["SigningKey"];
-
-        if (string.IsNullOrWhiteSpace(signingKey))
-        {
-            throw new InvalidOperationException(
-                $"Configuration '{JwtSectionName}:SigningKey' is missing or empty. The API cannot validate "
-                + $"access tokens without it. Set {JwtSectionName}__SigningKey in the environment, in user "
-                + "secrets, or in appsettings.Development.json.");
-        }
-
-        var signingKeyBytes = Encoding.UTF8.GetBytes(signingKey);
-
-        if (signingKeyBytes.Length < MinimumSigningKeyBytes)
-        {
-            throw new InvalidOperationException(string.Create(
-                CultureInfo.InvariantCulture,
-                $"Configuration '{JwtSectionName}:SigningKey' is {signingKeyBytes.Length} UTF-8 bytes; "
-                + $"HMAC-SHA256 requires at least {MinimumSigningKeyBytes}."));
-        }
-
-        var issuer = section["Issuer"] ?? DefaultIssuer;
-        var audience = section["Audience"] ?? DefaultAudience;
-
-        services
-            .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            .AddJwtBearer(options =>
-            {
-                // THE line.
-                options.MapInboundClaims = false;
-
-                options.TokenValidationParameters = new TokenValidationParameters
-                {
-                    ValidateIssuer = true,
-                    ValidIssuer = issuer,
-                    ValidateAudience = true,
-                    ValidAudience = audience,
-                    ValidateLifetime = true,
-                    ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(signingKeyBytes),
-
-                    // Only the algorithm we issue with.
-                    ValidAlgorithms = [SecurityAlgorithms.HmacSha256],
-
-                    // The default is five minutes, which quietly extends every access token's lifetime by that much.
-                    ClockSkew = TimeSpan.FromSeconds(30),
-
-                    // Explicit with MapInboundClaims = false: these decide what Identity.Name and IsInRole read.
-                    NameClaimType = JwtRegisteredClaimNames.Sub,
-                    RoleClaimType = "role",
-                };
-
-                // Validation proves the signature, not the payload: a correctly signed token with no `sub`
-                // authenticates happily, and RequireAuthorization only asks for IsAuthenticated. Fail here so
-                // every guarded route can assume a usable subject rather than each one re-checking.
-                options.Events = new JwtBearerEvents
-                {
-                    OnTokenValidated = context =>
-                    {
-                        if (!Guid.TryParse(SubjectOf(context.Principal), out _))
-                        {
-                            context.Fail("The access token carries no usable 'sub' claim.");
-                        }
-
-                        return Task.CompletedTask;
-                    },
-                };
-            });
+        // Configures the bearer scheme and the cookie schemes, and adds the endpoint services.
+        // The EF store itself is registered by AddIdentityModule, which may not reference this assembly.
+        services.AddIdentityApiEndpoints<IdentityUser>(options =>
+            options.ClaimsIdentity.UserIdClaimType = UserIdClaimType);
 
         return services;
     }
 
-    private static string? SubjectOf(ClaimsPrincipal? principal) =>
-        principal?.FindFirstValue(JwtRegisteredClaimNames.Sub);
+    /// <summary>Maps register, login, refresh and the manage routes under /api/auth, plus logout.</summary>
+    public static IEndpointRouteBuilder MapStockPortfolioAuthentication(this IEndpointRouteBuilder app)
+    {
+        var group = app.MapGroup(AuthRoutePrefix).WithTags("Authentication");
+
+        group.MapIdentityApi<IdentityUser>();
+
+        // MapIdentityApi ships no logout route — verified against the endpoint list in Microsoft's own
+        // "Identity to secure a Web API backend for SPAs". This is the version those docs give.
+        //
+        // With bearer tokens rather than cookies it clears the cookie schemes and nothing else: the
+        // access and refresh tokens the caller holds stay valid until they expire. Ending a session
+        // early is now the client discarding its tokens, not the server retiring them.
+        group.MapPost("/logout", async (SignInManager<IdentityUser> signInManager) =>
+            {
+                await signInManager.SignOutAsync();
+
+                return TypedResults.Ok();
+            })
+            .RequireAuthorization()
+            .WithName("Logout")
+            .WithSummary("Signs the caller out of the cookie schemes.")
+            .Produces(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
+
+        return app;
+    }
 }

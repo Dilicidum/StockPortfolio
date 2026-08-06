@@ -1,13 +1,20 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Modules.Identity.Infrastructure.Persistence.Converters;
 
+// The framework's base class has the same short name as this one. Aliasing it is the only way to write
+// the base list without a fully-qualified type on the declaration line.
+using AspNetIdentityDbContext =
+    Microsoft.AspNetCore.Identity.EntityFrameworkCore.IdentityDbContext<Microsoft.AspNetCore.Identity.IdentityUser>;
+
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
-/// <summary>The Identity module's only DbContext.</summary>
-internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> options) : DbContext(options)
+/// <summary>The Identity module's only DbContext: the framework's seven tables plus this module's one.</summary>
+internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> options)
+    : AspNetIdentityDbContext(options)
 {
     /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "identity";
@@ -15,14 +22,14 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
     /// <summary>The migration history table name.</summary>
     internal const string MigrationsHistoryTableName = "__EFMigrationsHistory";
 
-    public DbSet<User> Users => Set<User>();
-
-    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
-
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // First, and not optional: this is what maps AspNetUsers and its six siblings. Skip it and the
+        // model builds with only user_preferences in it, and UserManager fails on the first query.
+        base.OnModelCreating(modelBuilder);
+
         modelBuilder.HasDefaultSchema(SchemaName);
         modelBuilder.ApplyConfigurationsFromAssembly(
             typeof(IdentityDbContext).Assembly,
@@ -37,12 +44,6 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        configurationBuilder.Properties<UserId>().HaveConversion<UserIdConverter>();
-        configurationBuilder.DefaultTypeMapping<UserId>().HasConversion<UserIdConverter>();
-
-        configurationBuilder.Properties<RefreshTokenId>().HaveConversion<RefreshTokenIdConverter>();
-        configurationBuilder.DefaultTypeMapping<RefreshTokenId>().HasConversion<RefreshTokenIdConverter>();
-
         configurationBuilder.Properties<ThemeChoice>().HaveConversion<ThemeChoiceConverter>();
         configurationBuilder.DefaultTypeMapping<ThemeChoice>().HasConversion<ThemeChoiceConverter>();
 

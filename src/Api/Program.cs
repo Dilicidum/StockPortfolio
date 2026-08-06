@@ -41,8 +41,9 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict;
 });
 
-// 2.
-builder.Services.AddStockPortfolioAuthentication(builder.Configuration);
+// 2. After AddIdentityModule below would be too late: nothing here needs the store, but the bearer
+// scheme must be the default before any endpoint calls RequireAuthorization.
+builder.Services.AddStockPortfolioAuthentication();
 builder.Services.AddAuthorization();
 
 // 3.
@@ -118,6 +119,7 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.MapStockPortfolioAuthentication();
 app.MapIdentityEndpoints();
 app.MapPortfolioEndpoints();
 app.MapMarketDataEndpoints();

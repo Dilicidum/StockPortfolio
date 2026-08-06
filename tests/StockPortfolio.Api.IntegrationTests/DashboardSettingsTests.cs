@@ -121,12 +121,15 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         using var client = _fixture.CreateClient();
         var token = await SignedInAsync(client, "dashboard-no-write");
 
-        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", token);
+        using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/manage/info", token);
         me.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(me));
 
         var user = await me.Content.ReadFromJsonAsync<UserPayload>(
             JsonSerializerOptions.Web, TestContext.Current.CancellationToken);
         user.ShouldNotBeNull();
+
+        // A uuid here: this row is Portfolio's, and Portfolio stores the owner as one.
+        var userId = Guid.Parse(await Wire.UserIdAsync(_fixture.Services, user.Email));
 
         using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.DashboardSettingsPath, token);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
@@ -137,7 +140,7 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         await using var command = new NpgsqlCommand(
             "SELECT count(*) FROM portfolio.dashboard_settings WHERE user_id = @userId",
             connection);
-        command.Parameters.AddWithValue("userId", user.Id);
+        command.Parameters.AddWithValue("userId", userId);
 
         var count = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
 

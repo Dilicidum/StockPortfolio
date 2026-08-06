@@ -50,7 +50,7 @@ beforeEach(() => {
  * issued on mount, so every GET a test observes is a deliberate refetch.
  */
 async function renderPortfolio(seed: Holding[] = [AAPL]) {
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  authStore.setUser({ email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), seed)
 
   // The ticker field searches as you type; every test below types into it. It is added
@@ -364,7 +364,7 @@ describe('portfolio', () => {
     )
 
     const user = userEvent.setup()
-    authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+    authStore.setUser({ email: 'holder@example.com' })
 
     // Deliberately NOT seeded, unlike renderPortfolio: the loader has to reach the
     // network for there to be a rejection to catch.

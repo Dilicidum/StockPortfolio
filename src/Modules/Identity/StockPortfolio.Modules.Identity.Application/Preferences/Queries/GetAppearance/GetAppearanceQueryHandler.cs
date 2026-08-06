@@ -1,5 +1,4 @@
 using StockPortfolio.Modules.Identity.Application.Abstractions;
-using StockPortfolio.Modules.Identity.Application.Preferences;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
@@ -10,8 +9,8 @@ public sealed class GetAppearanceQueryHandler(IUserPreferencesRepository reposit
 {
     public async Task<GetAppearanceResult> Handle(GetAppearanceQuery query, CancellationToken ct)
     {
-        var userId = new UserId(query.UserId);
-        var preferences = await repository.FindAsync(userId, ct) ?? UserPreferences.CreateDefault(userId);
+        var preferences = await repository.FindAsync(query.UserId, ct)
+            ?? UserPreferences.CreateDefault(query.UserId);
 
         return new GetAppearanceResult(Wire.Theme(preferences.Theme), Wire.Language(preferences.Language));
     }

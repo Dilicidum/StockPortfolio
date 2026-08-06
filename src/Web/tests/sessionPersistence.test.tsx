@@ -41,10 +41,10 @@ it('keeps a refreshable session on a hard load of /dashboard', async () => {
       HttpResponse.json({
         accessToken: 'fresh-token',
         refreshToken: 'rotated',
-        accessExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+        expiresIn: 900,
       }),
     ),
-    http.get('*/api/auth/me', () =>
+    http.get('*/api/auth/manage/info', () =>
       HttpResponse.json({ id: 'u-1', email: 'holder@example.com' }),
     ),
     // The route this test lands on fetches since Phase 3, and since Phase 4 its layout

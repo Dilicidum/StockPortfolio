@@ -173,9 +173,9 @@ public sealed class AlertStreamTests(ApiFixture fixture)
     private static async Task<string> SignedInAsync(HttpClient client, string prefix) =>
         (await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail(prefix))).AccessToken;
 
-    private static async Task<Guid> UserIdAsync(HttpClient client, string accessToken)
+    private async Task<Guid> UserIdAsync(HttpClient client, string accessToken)
     {
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", accessToken);
+        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/manage/info", accessToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -183,7 +183,8 @@ public sealed class AlertStreamTests(ApiFixture fixture)
 
         payload.ShouldNotBeNull();
 
-        return payload.Id;
+        // Alerts keys a fired alert on a uuid, so this parse matches what its endpoints do.
+        return Guid.Parse(await Wire.UserIdAsync(_fixture.Services, payload.Email));
     }
 
     private static async Task<string> TicketAsync(HttpClient client, string accessToken)

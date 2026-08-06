@@ -1,9 +1,13 @@
 import { useSyncExternalStore } from 'react'
 import { clearTokens } from '../lib/tokenStore'
 
+/**
+ * What GET /api/auth/manage/info returns. There is no id: the framework's route
+ * does not send one, and nothing in the UI needed it.
+ */
 export interface AuthUser {
-  id: string
   email: string
+  isEmailConfirmed?: boolean
 }
 
 export interface AuthState {

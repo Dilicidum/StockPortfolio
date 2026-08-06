@@ -60,7 +60,7 @@ beforeEach(() => {
 
 /** The fifth inline copy of the memory-router boilerplate, which is the convention here. */
 async function renderPortfolio(seed: Holding[] = [AAPL]) {
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  authStore.setUser({ email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), seed)
 
   // The authenticated layout opens the alert stream and the rows read their thresholds.
@@ -80,7 +80,7 @@ async function renderPortfolio(seed: Holding[] = [AAPL]) {
 }
 
 async function renderDashboard(data: GetDashboardResult) {
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  authStore.setUser({ email: 'holder@example.com' })
   server.use(
     marketDataHealthHandler,
     ...alertsHandlers,

@@ -28,7 +28,7 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
   let meCalls = 0
 
   server.use(
-    http.get('*/api/auth/me', ({ request }) => {
+    http.get('*/api/auth/manage/info', ({ request }) => {
       meCalls += 1
       if (request.headers.get('authorization') !== 'Bearer fresh-token') {
         return HttpResponse.json(
@@ -48,7 +48,7 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
       return HttpResponse.json({
         accessToken: 'fresh-token',
         refreshToken: 'rotated-refresh-token',
-        accessExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+        expiresIn: 900,
       })
     }),
   )
@@ -56,12 +56,12 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
   setTokens({
     accessToken: 'stale-token',
     refreshToken: 'original-refresh-token',
-    accessExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+    expiresIn: -1,
   })
 
   const CONCURRENCY = 10
   const results = await Promise.all(
-    Array.from({ length: CONCURRENCY }, () => apiFetch<{ email: string }>('/api/auth/me')),
+    Array.from({ length: CONCURRENCY }, () => apiFetch<{ email: string }>('/api/auth/manage/info')),
   )
 
   expect(refreshCalls).toBe(1)
@@ -78,7 +78,7 @@ it('starts a new refresh once the previous one has settled', async () => {
   let refreshCalls = 0
 
   server.use(
-    http.get('*/api/auth/me', ({ request }) =>
+    http.get('*/api/auth/manage/info', ({ request }) =>
       request.headers.get('authorization') === 'Bearer fresh-token'
         ? HttpResponse.json({ id: 'u-1', email: 'holder@example.com' })
         : HttpResponse.json({ status: 401 }, { status: 401 }),
@@ -88,18 +88,18 @@ it('starts a new refresh once the previous one has settled', async () => {
       return HttpResponse.json({
         accessToken: 'fresh-token',
         refreshToken: 'rotated',
-        accessExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+        expiresIn: 900,
       })
     }),
   )
 
-  setTokens({ accessToken: 'stale-token', refreshToken: 'r', accessExpiresAt: '' })
-  await apiFetch('/api/auth/me')
+  setTokens({ accessToken: 'stale-token', refreshToken: 'r', expiresIn: 0 })
+  await apiFetch('/api/auth/manage/info')
   expect(refreshCalls).toBe(1)
 
   // The slot must be released when the promise settles, or the second expiry
   // would reuse a resolved promise holding a token that is now stale too.
-  setTokens({ accessToken: 'stale-token', refreshToken: 'r', accessExpiresAt: '' })
-  await apiFetch('/api/auth/me')
+  setTokens({ accessToken: 'stale-token', refreshToken: 'r', expiresIn: 0 })
+  await apiFetch('/api/auth/manage/info')
   expect(refreshCalls).toBe(2)
 })

@@ -1,7 +1,6 @@
 using OneOf;
 
 using StockPortfolio.Modules.Identity.Application.Abstractions;
-using StockPortfolio.Modules.Identity.Application.Preferences;
 using StockPortfolio.Modules.Identity.Application.Preferences.Queries.GetAppearance;
 using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Kernel;
@@ -25,8 +24,9 @@ public sealed class SaveAppearanceCommandHandler(IUserPreferencesRepository repo
             return new InvalidInput("language", "Language must be en or uk.");
         }
 
-        var userId = new UserId(command.UserId);
-        var preferences = await repository.FindAsync(userId, ct) ?? UserPreferences.CreateDefault(userId);
+        var preferences = await repository.FindAsync(command.UserId, ct)
+            ?? UserPreferences.CreateDefault(command.UserId);
+
         preferences.ChangeAppearance(theme, language);
         await repository.SaveAsync(preferences, ct);
 

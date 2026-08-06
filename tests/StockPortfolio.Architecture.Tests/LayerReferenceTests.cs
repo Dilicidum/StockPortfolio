@@ -60,11 +60,11 @@ public sealed class LayerReferenceTests
 
         ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
-        var path = SolutionAssemblies.FindForbiddenReferencePath(assemblyName, IsAspNetCore);
+        var path = SolutionAssemblies.FindForbiddenReferencePath(assemblyName, IsAspNetCoreWebStack);
 
         path.ShouldBeNull(
             assemblyName
-                + " reaches ASP.NET Core:"
+                + " reaches the ASP.NET Core web stack:"
                 + Environment.NewLine
                 + "  - "
                 + path
@@ -181,6 +181,20 @@ public sealed class LayerReferenceTests
         IsPersistence("Npgsql").ShouldBeTrue();
         IsPersistence("Microsoft.EntityFrameworkCore.Relational").ShouldBeTrue();
         IsAspNetCore("Microsoft.AspNetCore.Http.Results").ShouldBeTrue();
+
+        // Rule 4's carve-out has to discriminate, or it is a hole rather than an exception.
+        IsAspNetCoreWebStack("Microsoft.AspNetCore.Identity.EntityFrameworkCore").ShouldBeFalse(
+            "The EF store for Identity is the one name rule 4 forgives.");
+
+        IsAspNetCoreWebStack("Microsoft.AspNetCore.Http.Results").ShouldBeTrue(
+            "Forgiving the EF store must not forgive the web stack it was carved out of.");
+
+        IsAspNetCoreWebStack("Microsoft.AspNetCore.Identity").ShouldBeTrue(
+            "Only the EntityFrameworkCore store is allowed. Microsoft.AspNetCore.Identity itself carries "
+                + "SignInManager and the API endpoints, and belongs to the host.");
+
+        IsAspNetCore("Microsoft.AspNetCore.Identity.EntityFrameworkCore").ShouldBeTrue(
+            "Rule 6 stays strict: Shared.Kernel may not reference the EF store either.");
     }
 
     private static TheoryData<string> AssembliesFor(string layer) =>
@@ -221,6 +235,17 @@ public sealed class LayerReferenceTests
 
     private static bool IsAspNetCore(string? name) =>
         name is not null && name.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal);
+
+    /// <summary>Rule 4's predicate: the name prefix, minus the data-access libraries it misfires on.</summary>
+    private static bool IsAspNetCoreWebStack(string? name) =>
+        IsAspNetCore(name) && !IsAspNetCoreDataAccess(name);
+
+    // The rule exists to keep HTTP out of Infrastructure, and the prefix is a proxy for that.
+    // Microsoft.AspNetCore.Identity.EntityFrameworkCore carries the prefix and is an EF store:
+    // it depends on EntityFrameworkCore.Relational and Microsoft.Extensions.Identity.Stores,
+    // and on no web framework. Only rule 4 forgives it; Shared.Kernel still may not reference it.
+    private static bool IsAspNetCoreDataAccess(string? name) =>
+        string.Equals(name, "Microsoft.AspNetCore.Identity.EntityFrameworkCore", StringComparison.Ordinal);
 
     private static bool IsFrameworkOrOneOf(string name) =>
         string.Equals(name, "OneOf", StringComparison.Ordinal)

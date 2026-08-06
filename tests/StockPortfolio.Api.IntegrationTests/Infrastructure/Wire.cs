@@ -2,19 +2,18 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
-/// <summary>The token pair returned by register, login and refresh.</summary>
-public sealed record AuthPayload(string AccessToken, string RefreshToken, DateTimeOffset AccessExpiresAt);
+/// <summary>AccessTokenResponse, as login and refresh return it. Not a JWT — an opaque Identity token.</summary>
+public sealed record AuthPayload(string TokenType, string AccessToken, long ExpiresIn, string RefreshToken);
 
-/// <summary>The body of GET /api/auth/me.</summary>
-public sealed record UserPayload(Guid Id, string Email);
+/// <summary>The body of GET /api/auth/manage/info, which replaced the hand-written /api/auth/me.</summary>
+public sealed record UserPayload(string Email, bool IsEmailConfirmed);
 
 // The body of GET and PUT /api/settings/appearance.
 public sealed record AppearancePayload(string Theme, string Language);
@@ -126,8 +125,11 @@ internal static class Wire
     /// <summary>Media type the API must use for RFC 7807 errors.</summary>
     public const string ProblemJson = "application/problem+json";
 
-    /// <summary>A password comfortably over the 12-character floor.</summary>
-    public const string ValidPassword = "correct-horse-battery-staple";
+    /// <summary>Satisfies ASP.NET Core Identity's DEFAULT password rules, which are not negotiable
+    /// here: a digit, an uppercase letter, a lowercase letter and a non-alphanumeric character.
+    /// The old value ("correct-horse-battery-staple") had neither a digit nor an uppercase letter
+    /// and is now rejected at /register with a 400.</summary>
+    public const string ValidPassword = "Correct-Horse-Battery-Staple9";
 
     /// <summary>Mints an address no other test can collide with.</summary>
     public static string UniqueEmail(string prefix) =>
@@ -161,22 +163,29 @@ internal static class Wire
     public static Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
         client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken });
 
-    /// <summary>Posts to /api/auth/logout, which needs the access token as well as the refresh token.</summary>
-    public static Task<HttpResponseMessage> LogoutAsync(
-        HttpClient client,
-        string accessToken,
-        string refreshToken) =>
-        SendAsync(client, HttpMethod.Post, "/api/auth/logout", accessToken, new { refreshToken });
+    /// <summary>Posts to /api/auth/logout. The framework's tokens are not revocable, so this only clears
+    /// the cookie schemes — it takes no refresh token because there is nothing to retire.</summary>
+    public static Task<HttpResponseMessage> LogoutAsync(HttpClient client, string accessToken) =>
+        SendAsync(client, HttpMethod.Post, "/api/auth/logout", accessToken);
 
-    /// <summary>Registers a new account and returns its tokens, asserting the 201 on the way.</summary>
+    /// <summary>Registers a new account and returns its tokens.</summary>
+    /// <remarks>
+    /// Two calls, not one. MapIdentityApi's /register answers 200 with an empty body and issues nothing,
+    /// so signing in is a separate step. The hand-written route it replaced returned 201 with a token pair.
+    /// </remarks>
     public static async Task<AuthPayload> RegisterSucceedsAsync(
         HttpClient client,
         string email,
         string password = ValidPassword)
     {
-        using var response = await RegisterAsync(client, email, password);
+        using (var registered = await RegisterAsync(client, email, password))
+        {
+            registered.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(registered));
+        }
 
-        response.StatusCode.ShouldBe(HttpStatusCode.Created, await Describe(response));
+        using var response = await LoginAsync(client, email, password);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Describe(response));
 
         return await ReadTokensAsync(response);
     }
@@ -361,23 +370,28 @@ internal static class Wire
         return new HashSet<string>(problem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>Signs an access token with the host's own key, carrying exactly the claims asked for and no others.</summary>
-    public static string MintAccessToken(
-        string signingKey,
-        string issuer,
-        string audience,
-        DateTimeOffset expiresAt,
-        IDictionary<string, object>? claims = null) =>
-        new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
-        {
-            Issuer = issuer,
-            Audience = audience,
-            Expires = expiresAt.UtcDateTime,
-            SigningCredentials = new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
-                SecurityAlgorithms.HmacSha256),
-            Claims = claims ?? new Dictionary<string, object>(StringComparer.Ordinal),
-        });
+    /// <summary>The caller's user id, read through UserManager.</summary>
+    /// <remarks>
+    /// /api/auth/manage/info carries the email and no id, so a test that needs the id — to assert on a
+    /// row keyed by user_id — asks the store rather than the wire. A string, because IdentityUser.Id is.
+    /// </remarks>
+    public static async Task<string> UserIdAsync(IServiceProvider services, string email)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        await using var scope = services.CreateAsyncScope();
+
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
+        var user = await users.FindByEmailAsync(email);
+
+        user.ShouldNotBeNull($"No account exists for {email}.");
+
+        return user.Id;
+    }
+
+    // MintAccessToken is gone with the JWT. An Identity bearer token is a Data Protection payload keyed
+    // by the running host's key ring, so a test cannot forge one from a signing key any more. The claims
+    // it used to assert on are now the framework's to produce.
 
     /// <summary>Sends a request carrying a bearer token.</summary>
     public static async Task<HttpResponseMessage> SendAsync(

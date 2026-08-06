@@ -21,22 +21,27 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         using var client = _fixture.CreateClient();
         var email = Wire.UniqueEmail("register-then-login");
 
+        // Registering creates the account and issues nothing: 200, empty body, no Location. The route
+        // this replaced answered 201 with a token pair, so signing in is now a separate call.
         using var registered = await Wire.RegisterAsync(client, email, Wire.ValidPassword);
-        registered.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(registered));
-
-        var fromRegister = await Wire.ReadTokensAsync(registered);
-        fromRegister.AccessExpiresAt.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
-
-        // 201 without a Location reads as an oversight.
-        registered.Headers.Location?.ToString().ShouldBe("/api/auth/me");
+        registered.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(registered));
+        registered.Headers.Location.ShouldBeNull();
 
         using var loggedIn = await Wire.LoginAsync(client, email, Wire.ValidPassword);
         loggedIn.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedIn));
 
         var fromLogin = await Wire.ReadTokensAsync(loggedIn);
 
+        fromLogin.TokenType.ShouldBe("Bearer");
+        fromLogin.ExpiresIn.ShouldBeGreaterThan(0);
+
+        using var again = await Wire.LoginAsync(client, email, Wire.ValidPassword);
+        again.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(again));
+
+        var fromSecondLogin = await Wire.ReadTokensAsync(again);
+
         // A second sign-in is a second session, not a re-issue of the first.
-        fromLogin.RefreshToken.ShouldNotBe(fromRegister.RefreshToken);
+        fromSecondLogin.RefreshToken.ShouldNotBe(fromLogin.RefreshToken);
     }
 
     /// <summary>The second registration of one address conflicts rather than overwriting.</summary>
@@ -160,7 +165,10 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         var tokens = await Wire.RegisterSucceedsAsync(client, email);
 
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
+        // manage/info replaced the hand-written /api/auth/me. It carries the email and no id, which is
+        // why anything needing the id now asks UserManager rather than the wire.
+        using var response = await Wire.SendAsync(
+            client, HttpMethod.Get, "/api/auth/manage/info", tokens.AccessToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -170,7 +178,8 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         user.ShouldNotBeNull();
         user.Email.ShouldBe(email);
-        user.Id.ShouldNotBe(Guid.Empty);
+
+        (await Wire.UserIdAsync(_fixture.Services, email)).ShouldNotBeNullOrWhiteSpace();
     }
 
     /// <summary>Signing out answers 204 and does not require a body.</summary>

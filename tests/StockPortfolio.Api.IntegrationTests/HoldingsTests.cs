@@ -435,10 +435,10 @@ public sealed class HoldingsTests(ApiFixture fixture)
     private static decimal Amount(MoneyPayload payload) =>
         decimal.Parse(payload.Amount, CultureInfo.InvariantCulture);
 
-    /// <summary>Reads the caller's own id the way AccessTokenSubjectTests does — off the running host.</summary>
-    private static async Task<Guid> SubjectOfAsync(HttpClient client, string accessToken)
+    /// <summary>Reads the caller's own id off the running host: manage/info for the email, store for the id.</summary>
+    private async Task<Guid> SubjectOfAsync(HttpClient client, string accessToken)
     {
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", accessToken);
+        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/manage/info", accessToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -446,7 +446,8 @@ public sealed class HoldingsTests(ApiFixture fixture)
 
         user.ShouldNotBeNull();
 
-        return user.Id;
+        // Portfolio stores the owner as a uuid, so the parse is the same one its endpoints do.
+        return Guid.Parse(await Wire.UserIdAsync(_fixture.Services, user.Email));
     }
 
     private static async Task AddSucceedsAsync(

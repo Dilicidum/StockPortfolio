@@ -23,7 +23,6 @@ import { server } from './msw/server'
  */
 
 const KEY = 'stockportfolio.refreshToken'
-const laterToday = new Date(Date.now() + 900_000).toISOString()
 
 let stop: (() => void) | null = null
 
@@ -64,7 +63,7 @@ afterEach(() => {
 })
 
 it('puts the refresh token where every tab can see it, not just this one', () => {
-  setTokens({ accessToken: 'a', refreshToken: 'shared-refresh', accessExpiresAt: laterToday })
+  setTokens({ accessToken: 'a', refreshToken: 'shared-refresh', expiresIn: 900 })
 
   expect(globalThis.localStorage.getItem(KEY)).toBe('shared-refresh')
   // The whole point. If this ever goes back to sessionStorage, a second tab has
@@ -74,8 +73,8 @@ it('puts the refresh token where every tab can see it, not just this one', () =>
 })
 
 it('signs this tab out the moment another tab signs out', async () => {
-  setTokens({ accessToken: 'a', refreshToken: 'shared-refresh', accessExpiresAt: laterToday })
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  setTokens({ accessToken: 'a', refreshToken: 'shared-refresh', expiresIn: 900 })
+  authStore.setUser({ email: 'holder@example.com' })
 
   expect(authStore.getState().isAuthenticated).toBe(true)
 
@@ -92,10 +91,10 @@ it('signs this tab in when a session appears in another tab', async () => {
       HttpResponse.json({
         accessToken: 'minted-here',
         refreshToken: 'shared-refresh',
-        accessExpiresAt: laterToday,
+        expiresIn: 900,
       }),
     ),
-    http.get('*/api/auth/me', () => HttpResponse.json({ id: 'u-1', email: 'holder@example.com' })),
+    http.get('*/api/auth/manage/info', () => HttpResponse.json({ email: 'holder@example.com', isEmailConfirmed: false })),
   )
 
   expect(authStore.getState().isAuthenticated).toBe(false)
@@ -128,13 +127,13 @@ it('ignores a rotation in another tab rather than racing it for the token', asyn
       return HttpResponse.json({
         accessToken: 'x',
         refreshToken: 'y',
-        accessExpiresAt: laterToday,
+        expiresIn: 900,
       })
     }),
   )
 
-  setTokens({ accessToken: 'a', refreshToken: 'first-token', accessExpiresAt: laterToday })
-  authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
+  setTokens({ accessToken: 'a', refreshToken: 'first-token', expiresIn: 900 })
+  authStore.setUser({ email: 'holder@example.com' })
 
   otherTabWrote('rotated-by-the-other-tab')
   await settle()
