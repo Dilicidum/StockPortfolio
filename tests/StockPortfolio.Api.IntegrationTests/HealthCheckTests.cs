@@ -34,10 +34,31 @@ public sealed class HealthCheckTests(ApiFixture fixture)
             .CheckHealthAsync(TestContext.Current.CancellationToken);
 
         report.Status.ShouldBe(HealthStatus.Healthy);
-        report.Entries.Keys.ShouldContain("postgres");
-        report.Entries.Keys.ShouldContain("redis");
-        report.Entries["postgres"].Status.ShouldBe(HealthStatus.Healthy);
-        report.Entries["redis"].Status.ShouldBe(HealthStatus.Healthy);
+
+        // One entry per database login, not one for "postgres". Readiness used to probe only the
+        // Identity role, so alerts_svc could be unreachable while this reported healthy — and nothing
+        // else would notice, because the poller runs on a timer rather than on a request.
+        string[] expected =
+        [
+            "postgres-identity",
+            "postgres-portfolio",
+            "postgres-alerts",
+            "postgres-marketdata",
+            "redis",
+        ];
+
+        foreach (var name in expected)
+        {
+            report.Entries.Keys.ShouldContain(name);
+            report.Entries[name].Status.ShouldBe(HealthStatus.Healthy);
+        }
+
+        // Pins the count as well as the names: a module wired nowhere contributes no check, and a
+        // per-name loop alone would never notice its absence.
+        report.Entries.Count.ShouldBe(
+            expected.Length,
+            "Every module registers its own Postgres check in its Add<M>Module. A count that drifts "
+                + "means a module stopped contributing one, or an unexpected check appeared.");
     }
 
     /// <summary>Liveness answers 200 with Postgres and Redis both unreachable.</summary>

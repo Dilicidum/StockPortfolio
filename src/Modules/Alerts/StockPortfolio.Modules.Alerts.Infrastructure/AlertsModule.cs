@@ -54,6 +54,11 @@ public static class AlertsModule
                 AlertsDbContext.MigrationsHistoryTableName,
                 AlertsDbContext.SchemaName)));
 
+        // This module's own readiness check. It lives here and not in the host because AlertsDbContext
+        // is internal, and it borrows the scoped context rather than opening a connection, which is
+        // what keeps four checks inside a Maximum Pool Size=2 budget.
+        services.AddHealthChecks().AddDbContextCheck<AlertsDbContext>("postgres-alerts");
+
         services.AddScoped<IAlertSettingRepository, AlertSettingRepository>();
         services.AddScoped<IFiredAlertRepository, FiredAlertRepository>();
 

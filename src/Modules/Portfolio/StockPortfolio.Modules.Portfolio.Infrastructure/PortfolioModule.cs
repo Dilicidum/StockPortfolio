@@ -42,6 +42,11 @@ public static class PortfolioModule
                 PortfolioDbContext.MigrationsHistoryTableName,
                 PortfolioDbContext.SchemaName)));
 
+        // This module's own readiness check. It lives here and not in the host because PortfolioDbContext
+        // is internal, and it borrows the scoped context rather than opening a connection, which is
+        // what keeps four checks inside a Maximum Pool Size=2 budget.
+        services.AddHealthChecks().AddDbContextCheck<PortfolioDbContext>("postgres-portfolio");
+
         services.AddScoped<IHoldingRepository, HoldingRepository>();
         services.AddScoped<IDashboardSettingsRepository, DashboardSettingsRepository>();
 

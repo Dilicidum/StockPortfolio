@@ -60,6 +60,11 @@ public static class MarketDataModule
                 MarketDataDbContext.MigrationsHistoryTableName,
                 MarketDataDbContext.SchemaName)));
 
+        // This module's own readiness check. It lives here and not in the host because MarketDataDbContext
+        // is internal, and it borrows the scoped context rather than opening a connection, which is
+        // what keeps four checks inside a Maximum Pool Size=2 budget.
+        services.AddHealthChecks().AddDbContextCheck<MarketDataDbContext>("postgres-marketdata");
+
         // KeyRingStore is internal to this assembly, so it is registered here rather than by the host,
         // which can only ever see it through IKeyRingStore.
         services.AddSingleton<IKeyRingStore, KeyRingStore>();

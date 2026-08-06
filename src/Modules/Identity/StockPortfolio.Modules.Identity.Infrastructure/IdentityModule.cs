@@ -37,6 +37,11 @@ public static class IdentityModule
                 IdentityDbContext.MigrationsHistoryTableName,
                 IdentityDbContext.SchemaName)));
 
+        // This module's own readiness check. It lives here and not in the host because IdentityDbContext
+        // is internal, and it borrows the scoped context rather than opening a connection, which is
+        // what keeps four checks inside a Maximum Pool Size=2 budget.
+        services.AddHealthChecks().AddDbContextCheck<IdentityDbContext>("postgres-identity");
+
         return services;
     }
 

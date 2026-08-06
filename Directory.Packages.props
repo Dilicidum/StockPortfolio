@@ -35,6 +35,10 @@
          above: it arrives transitively through Microsoft.Extensions.Http.Resilience, so without this the
          quote poller compiles against whatever that package's graph happens to resolve. -->
     <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.10" />
+    <!-- AddDbContextCheck. Lives in .Infrastructure with the DbContext it checks, because that type is
+         internal and the host cannot name it. The assembly is Microsoft.Extensions.*, not
+         Microsoft.AspNetCore.*, so it does not trip rule 4 — diagnostics over EF, not HTTP. -->
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup Label="Host">
@@ -47,6 +51,11 @@
     <PackageVersion Include="Microsoft.OpenApi" Version="2.11.0" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.10" />
     <PackageVersion Include="Scrutor" Version="7.0.0" />
+    <!-- 9.0.0 is the newest stable on nuget.org; there is no 10.x line yet. Verified 2026-08-06.
+         Its AddRedis takes a Func<IServiceProvider, IConnectionMultiplexer>, so it checks the very
+         multiplexer AddStockPortfolioRedis registered, and it pings the server as well as the
+         database. That is strictly more than the hand-written check it replaces. -->
+    <PackageVersion Include="AspNetCore.HealthChecks.Redis" Version="9.0.0" />
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.10" />
   </ItemGroup>
 
