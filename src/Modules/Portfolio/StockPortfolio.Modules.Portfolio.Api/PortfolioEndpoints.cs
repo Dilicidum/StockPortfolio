@@ -9,7 +9,9 @@ using OneOf.Types;
 using StockPortfolio.Modules.Portfolio.Api.Requests;
 using StockPortfolio.Modules.Portfolio.Api.Validators;
 using StockPortfolio.Modules.Portfolio.Application;
+using StockPortfolio.Modules.Portfolio.Application.Dashboard.Commands.SaveDashboardSettings;
 using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboard;
+using StockPortfolio.Modules.Portfolio.Application.Dashboard.Queries.GetDashboardSettings;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.AddHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
 using StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
@@ -20,7 +22,7 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Api;
 
-/// <summary>The Portfolio module's entire inbound HTTP surface: four routes under /api/holdings, the dashboard, and the one DI seam.</summary>
+/// <summary>The Portfolio module's entire inbound HTTP surface: four routes under /api/holdings, the dashboard, two under /api/settings, and the one DI seam.</summary>
 public static class PortfolioEndpoints
 {
     /// <summary>Where a position is addressable.</summary>
@@ -40,7 +42,7 @@ public static class PortfolioEndpoints
         return services;
     }
 
-    /// <summary>Maps the four holdings routes onto /api/holdings, and the dashboard beside them.</summary>
+    /// <summary>Maps the four holdings routes onto /api/holdings, the dashboard, and the /api/settings/dashboard pair.</summary>
     public static IEndpointRouteBuilder MapPortfolioEndpoints(this IEndpointRouteBuilder app)
     {
         // Every route needs a bearer token and every route can 500, so both are declared once here.
@@ -94,6 +96,25 @@ public static class PortfolioEndpoints
             .Produces<GetDashboardResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        var settings = app.MapGroup("/api/settings")
+            .WithTags("Settings")
+            .RequireAuthorization()
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        settings.MapGet("/dashboard", GetDashboardSettingsAsync)
+            .WithName("GetDashboardSettings")
+            .WithSummary("Returns the caller's dashboard refresh interval, defaulting to 60 seconds.")
+            .Produces<GetDashboardSettingsResult>(StatusCodes.Status200OK);
+
+        settings.MapPut("/dashboard", SaveDashboardSettingsAsync)
+            .AddEndpointFilter<ValidationFilter<SaveDashboardSettingsRequest>>()
+            .WithName("SaveDashboardSettings")
+            .WithSummary("Saves the caller's dashboard refresh interval.")
+            .Produces<GetDashboardSettingsResult>(StatusCodes.Status200OK)
+            .ProducesValidationProblem()
+            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
         return app;
     }
@@ -202,6 +223,43 @@ public static class PortfolioEndpoints
         return result.Match<IResult>(
             closed => TypedResults.NoContent(),
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
+    }
+
+    // Reads the caller's dashboard settings, creating the default row on first read.
+    private static async Task<IResult> GetDashboardSettingsAsync(
+        ClaimsPrincipal principal,
+        IQueryHandler<GetDashboardSettingsQuery, GetDashboardSettingsResult> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        return TypedResults.Ok(await handler.Handle(new GetDashboardSettingsQuery(userId), ct));
+    }
+
+    // Saves the caller's dashboard settings.
+    private static async Task<IResult> SaveDashboardSettingsAsync(
+        SaveDashboardSettingsRequest request,
+        ClaimsPrincipal principal,
+        ICommandHandler<SaveDashboardSettingsCommand, OneOf<GetDashboardSettingsResult, InvalidInput>> handler,
+        CancellationToken ct)
+    {
+        if (!TryReadUserId(principal, out var userId, out var rejection))
+        {
+            return rejection;
+        }
+
+        var result = await handler.Handle(
+            new SaveDashboardSettingsCommand(userId, request.RefreshIntervalSeconds),
+            ct);
+
+        return result.Match<IResult>(
+            saved => TypedResults.Ok(saved),
+
+            // Reachable only if the validator and RefreshInterval.Create disagree about the allowed range.
+            invalid => invalid.ToValidationProblem());
     }
 
     /// <summary>Reads the subject claim. Totality over a string?, not a security control.</summary>

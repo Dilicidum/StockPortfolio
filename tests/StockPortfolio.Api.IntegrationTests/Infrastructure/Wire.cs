@@ -19,6 +19,9 @@ public sealed record UserPayload(Guid Id, string Email);
 // The body of GET and PUT /api/settings/appearance.
 public sealed record AppearancePayload(string Theme, string Language);
 
+// The body of GET and PUT /api/settings/dashboard. A plain JSON number both ways: the user typed it.
+public sealed record DashboardSettingsPayload(int RefreshIntervalSeconds);
+
 /// <summary>An amount as the API serialises it. Amount is a string on purpose — see MoneyJsonConverter.</summary>
 public sealed record MoneyPayload(string Amount, string Currency);
 
@@ -107,6 +110,9 @@ internal static class Wire
 
     // The appearance settings pair: one GET, one PUT, both under /api/settings.
     public const string AppearancePath = "/api/settings/appearance";
+
+    // The dashboard settings pair: one GET, one PUT, both under /api/settings.
+    public const string DashboardSettingsPath = "/api/settings/dashboard";
 
     /// <summary>Fired-alert history, and the group root — the SPA calls it without a trailing slash.</summary>
     public const string AlertHistoryPath = "/api/alerts";

@@ -24,6 +24,14 @@ public sealed class EfModelTests
         return context.Model.FindEntityType(typeof(Holding))!;
     }
 
+    private static IEntityType DashboardSettingsEntity()
+    {
+        using var context = new PortfolioDbContext(
+            new DbContextOptionsBuilder<PortfolioDbContext>().UseNpgsql(ModelOnly).Options);
+
+        return context.Model.FindEntityType(typeof(DashboardSettings))!;
+    }
+
     // Renaming a constructor parameter without renaming its property leaves no bindable constructor,
     // and with no parameterless fallback the WHOLE model fails to build at startup.
     [Fact]
@@ -179,4 +187,72 @@ public sealed class EfModelTests
         currency.GetMaxLength().ShouldBe(3);
         currency.IsFixedLength().ShouldBe(true);
     }
+
+    // The same renamed-parameter hazard as Holding, now for the second entity this context maps.
+    [Fact]
+    public void DashboardSettings_BindsEveryScalarProperty_ThroughTheConstructor()
+    {
+        var bound = typeof(DashboardSettings)
+            .GetConstructors(BindingFlags.Instance | BindingFlags.NonPublic)
+            .ShouldHaveSingleItem()
+            .GetParameters()
+            .Select(parameter => parameter.Name!)
+            .ToList();
+
+        bound.ShouldBe(["userId", "refreshInterval"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void DashboardSettings_BindsThatConstructor_ForMaterialisation()
+    {
+        var binding = DashboardSettingsEntity().ConstructorBinding;
+
+        binding.ShouldNotBeNull(
+            "EF has no constructor binding for DashboardSettings. With no parameterless constructor to "
+                + "fall back on, every query would throw.");
+
+        binding.ParameterBindings
+            .SelectMany(parameter => parameter.ConsumedProperties)
+            .Select(property => property.Name)
+            .ShouldBe(["UserId", "RefreshInterval"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void DashboardSettings_HasNoParameterlessConstructor() =>
+        typeof(DashboardSettings)
+            .GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public,
+                Type.EmptyTypes)
+            .ShouldBeNull("A half-built DashboardSettings must not be representable; CreateDefault is the only way in.");
+
+    [Fact]
+    public void DashboardSettings_IsKeyedOnUserId() =>
+        DashboardSettingsEntity()
+            .FindPrimaryKey()!
+            .Properties
+            .Select(property => property.Name)
+            .ShouldBe(["UserId"]);
+
+    [Fact]
+    public void DashboardSettings_MapsToPortfolioDashboardSettings_WithSnakeCasedColumns()
+    {
+        var entity = DashboardSettingsEntity();
+
+        entity.GetSchema().ShouldBe("portfolio");
+        entity.GetTableName().ShouldBe("dashboard_settings");
+
+        var storeObject = StoreObjectIdentifier.Table("dashboard_settings", "portfolio");
+
+        entity.GetProperties()
+            .Select(property => property.GetColumnName(storeObject)!)
+            .ShouldBe(["user_id", "refresh_interval_seconds"], ignoreOrder: true);
+    }
+
+    // The RefreshInterval converter, registered as both Properties<T>() and DefaultTypeMapping<T>() —
+    // missing the second is the failure mode CLAUDE.md records under "Where Identity is not a safe template".
+    [Fact]
+    public void RefreshInterval_StoresAsAPlainInt() =>
+        DashboardSettingsEntity()
+            .FindProperty("RefreshInterval")!
+            .ClrType.ShouldBe(typeof(RefreshInterval));
 }

@@ -21,8 +21,17 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         // The /api/auth five, plus the /api/settings pair.
         ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser", "GetAppearance", "SaveAppearance"],
 
-        // Four under /api/holdings, plus the dashboard.
-        ["Portfolio"] = ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"],
+        // Four under /api/holdings, the dashboard, plus the /api/settings/dashboard pair.
+        ["Portfolio"] =
+        [
+            "GetHoldings",
+            "AddHolding",
+            "UpdateHolding",
+            "RemoveHolding",
+            "GetDashboard",
+            "GetDashboardSettings",
+            "SaveDashboardSettings",
+        ],
 
         // The two that ship in every environment; the dev nudge is not mapped in all.
         ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
@@ -56,7 +65,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>The Identity routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
-    /// <summary>The five Portfolio routes, as theory data.</summary>
+    /// <summary>The seven Portfolio routes, as theory data.</summary>
     public static TheoryData<string> PortfolioRoutes => [.. PortfolioRouteNames];
 
     /// <summary>The MarketData routes, as theory data.</summary>
@@ -71,7 +80,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheFivePortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
+    public void EndpointDataSource_ExposesTheSevenPortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
 
     /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]
@@ -148,6 +157,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("RemoveHolding", "missing", 404)]
     [InlineData("GetDashboard", "bearer", 200)]
     [InlineData("GetDashboard", "anonymous", 401)]
+    [InlineData("GetDashboardSettings", "bearer", 200)]
+    [InlineData("GetDashboardSettings", "anonymous", 401)]
+    [InlineData("SaveDashboardSettings", "valid", 200)]
+    [InlineData("SaveDashboardSettings", "out-of-range", 400)]
+    [InlineData("SaveDashboardSettings", "wrong-content-type", 415)]
+    [InlineData("SaveDashboardSettings", "anonymous", 401)]
     public async Task PortfolioRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
@@ -626,6 +641,85 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("GetDashboard", "anonymous"):
             {
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/dashboard");
+
+                return response.StatusCode;
+            }
+
+            case ("GetDashboardSettings", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-get");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.DashboardSettingsPath,
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetDashboardSettings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.DashboardSettingsPath);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "valid"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-save");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.DashboardSettingsPath,
+                    token,
+                    new { refreshIntervalSeconds = 120 });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "out-of-range"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-bad-range");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.DashboardSettingsPath,
+                    token,
+                    new { refreshIntervalSeconds = 5 });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-415");
+
+                using var request = new HttpRequestMessage(HttpMethod.Put, Wire.DashboardSettingsPath)
+                {
+                    Content = new StringContent(
+                        """{"refreshIntervalSeconds":120}""",
+                        Encoding.UTF8,
+                        "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.DashboardSettingsPath,
+                    accessToken: null,
+                    new { refreshIntervalSeconds = 120 });
 
                 return response.StatusCode;
             }

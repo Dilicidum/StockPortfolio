@@ -98,10 +98,10 @@ free-tier figure is inferred from a search result and is stated as inferred wher
 
 - **Sixty calls a minute on the free tier**, plus a thirty-calls-a-second burst cap on every plan. Over the
   limit is a 429.
-- **No batch endpoint.** N tickers is N calls. Twenty positions is twenty calls for one viewer. At a
-  sixty-second refresh that is a third of the minute's budget for a single viewer, and three concurrent
-  viewers exhaust it. That is a genuine property of the free tier rather than a bug to engineer around — but
-  it is why the refresh interval defaults to sixty seconds, and why changing that default is not free.
+- **No batch endpoint.** N tickers is N calls, so a twenty-position dashboard costs twenty calls per
+  refresh against this provider or any other. That is what sizes the token bucket and the concurrency cap
+  below, not the refresh interval — the interval is a per-user preference (Phase 5), sized for a sensible
+  dashboard cadence rather than against any one provider's quota.
 - Every field of a quote response is optional. A *missing* price must stay distinguishable from a price of
   zero.
 - **An all-zero response means "no price this cycle"**, identical to a fetch failure. It does not mean the

@@ -17,6 +17,8 @@ internal sealed class PortfolioDbContext(DbContextOptions<PortfolioDbContext> op
 
     public DbSet<Holding> Holdings => Set<Holding>();
 
+    public DbSet<DashboardSettings> DashboardSettings => Set<DashboardSettings>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema(SchemaName);
@@ -40,5 +42,8 @@ internal sealed class PortfolioDbContext(DbContextOptions<PortfolioDbContext> op
         // property - a LINQ closure, say - has no mapping and throws long after model building succeeded.
         configurationBuilder.Properties<Ticker>().HaveConversion<TickerConverter>();
         configurationBuilder.DefaultTypeMapping<Ticker>().HasConversion<TickerConverter>();
+
+        configurationBuilder.Properties<RefreshInterval>().HaveConversion<RefreshIntervalConverter>();
+        configurationBuilder.DefaultTypeMapping<RefreshInterval>().HasConversion<RefreshIntervalConverter>();
     }
 }

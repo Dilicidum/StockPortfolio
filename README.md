@@ -355,13 +355,13 @@ The published limits, and how confident we are in each:
 Taking 60/minute as read, the arithmetic is unkind and worth stating plainly rather than hiding:
 
 - Twenty positions is **twenty calls for one viewer, per refresh**.
-- The dashboard's default refresh is **60 seconds**, so one viewer with twenty positions spends a third of the
-  minute's budget.
-- **Three concurrent viewers exhaust it.**
+- At a fifteen-second refresh, one viewer with twenty positions spends a third of the minute's budget.
+- **Three concurrent viewers at that interval exhaust it.**
 
-That is a property of the free tier, not a bug to engineer around, and the 60-second default is a real
-choice rather than an arbitrary one — picking 15s multiplies the figure by four. The interval control offers
-15s / 30s / 60s / 5m and the shorter options are the user's to spend.
+That is a property of the free tier, not a bug to engineer around — and it is not what the refresh interval
+is sized against. The interval is a per-user preference, 60 seconds by default because that is a sensible
+cadence for a stock dashboard regardless of which provider answers it, not because of any one provider's
+quota. The interval control offers 15s / 30s / 60s / 5m and the faster options are the user's to spend.
 
 Two things bound the damage rather than fix it. Outbound calls go through a single process-wide token bucket
 (25 tokens, refilling at 1/second) with fan-out capped at 4 concurrent requests, so twenty tickers resolve in

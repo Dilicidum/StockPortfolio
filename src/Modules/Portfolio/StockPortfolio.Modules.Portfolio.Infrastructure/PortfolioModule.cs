@@ -43,6 +43,7 @@ public static class PortfolioModule
                 PortfolioDbContext.SchemaName)));
 
         services.AddScoped<IHoldingRepository, HoldingRepository>();
+        services.AddScoped<IDashboardSettingsRepository, DashboardSettingsRepository>();
 
         // The one read another module makes of Portfolio: does this user hold this ticker?
         services.AddScoped<IUserHoldsTicker, HoldingQueries>();
