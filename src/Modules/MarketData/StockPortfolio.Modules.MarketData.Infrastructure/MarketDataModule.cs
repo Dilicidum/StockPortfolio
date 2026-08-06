@@ -50,6 +50,10 @@ public static class MarketDataModule
                 MarketDataDbContext.MigrationsHistoryTableName,
                 MarketDataDbContext.SchemaName)));
 
+        // KeyRingStore is internal to this assembly, so it is registered here rather than by the host,
+        // which can only ever see it through IKeyRingStore.
+        services.AddSingleton<IKeyRingStore, KeyRingStore>();
+
         return services;
     }
 
