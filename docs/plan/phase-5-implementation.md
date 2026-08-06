@@ -854,10 +854,35 @@ public async Task GetQuotes_WhenTheProviderReturnsMalformedJson_OmitsTheTickerRa
 }
 ```
 
-Both go **red** first — that is the bug. Fix them by adding `NotSupportedException` and `JsonException` to
-the per-ticker catch at `FinnhubQuoteProvider.cs:56-58`, and to the equivalent catches in
-`SymbolExistsAsync` (`:79`) and `SearchSymbolsAsync` (`:101`), both of which must keep failing **open** —
-a provider serving an error page must not block someone recording a purchase.
+Both go **red** first — that is the bug.
+
+**Fix the boundary, not the two exceptions.** `bounded-contexts.md:58` records this edge as an
+Anticorruption Layer and marks it built, and by that document's own test — *is there a translation layer?* —
+it is. But the arrow's label reads *"their vocabulary stops here"*, and the code matches the label rather
+than the idea: their vocabulary stops, their malfunctions do not. The whole point of the boundary is that
+**nothing from out there gets in here**, and an enumerated catch inverts that — it is closed against the
+three types someone happened to see and open against everything else. Adding two more types leaves the same
+hole open for the fourth surprise.
+
+So at all three sites — `GetQuotesAsync:56-58`, `SymbolExistsAsync:81-83`, `SearchSymbolsAsync:103-105` —
+replace the three enumerated catches with one broad catch that lets cancellation through:
+
+```csharp
+catch (Exception ex) when (ex is not OperationCanceledException)
+{
+    LogQuoteFailed(logger, ex, ticker.Value);
+}
+```
+
+The `when` clause is not optional. Swallowing `OperationCanceledException` would make a cancelled request
+look like a failed ticker, and would stop the poller's own shutdown token from ending a cycle.
+
+The degraded answers do not change: omit the ticker for a quote, **true** for the existence check (a
+provider serving an error page must not block someone recording a purchase), empty for search.
+
+`AnalysisLevel` is `10.0-recommended`, which does not include `CA1031`, so this should build clean — but run
+`dotnet build` and confirm rather than assume. If it does fire, suppress it at these three sites with the
+justification that this is an anticorruption boundary, not in `Directory.Build.props`.
 
 Then rename `Dashboard_ProviderReturns429_Returns200NotError`. It does not return a 429 and never did;
 `Dashboard_ProviderOmitsSomeSymbols_Returns200NotError` is what it tests. A test whose name overstates what
@@ -1931,6 +1956,11 @@ deployed.
 - `docs/plan/00-overview.md` — the Phase 4 deployment status, which still says not deployed.
 - `docs/plan/phase-3-live-prices.md` — the free-tier capacity arithmetic, which D3 retired.
 - `docs/reference/service-interactions.md` — the per-user key on the dashboard read path.
+- `docs/reference/bounded-contexts.md` — the arrow at line 20 reads *"their vocabulary stops here"*. Once
+  Task 3B lands, widen it: their vocabulary **and their failures** stop here. The row at line 58 already
+  says the layer is built and that is still true; what changed is that the containment now matches the
+  claim. Record in the same edit that an enumerated catch at a trust boundary is closed against the list and
+  open against everything else, so this edge catches broadly and rethrows only cancellation.
 
 - [ ] **Step 3: the README**
 
