@@ -12,6 +12,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Contracts\StockPortfolio.Modules.Alerts.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Domain\StockPortfolio.Modules.Alerts.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Application\StockPortfolio.Modules.Alerts.Application.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Infrastructure\StockPortfolio.Modules.Alerts.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Modules\Alerts\StockPortfolio.Modules.Alerts.Api\StockPortfolio.Modules.Alerts.Api.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Contracts\StockPortfolio.Modules.Identity.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Domain\StockPortfolio.Modules.Identity.Domain.csproj" />
     <ProjectReference Include="..\..\src\Modules\Identity\StockPortfolio.Modules.Identity.Application\StockPortfolio.Modules.Identity.Application.csproj" />

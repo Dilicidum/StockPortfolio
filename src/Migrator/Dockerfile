@@ -25,6 +25,12 @@ COPY src/Shared.Kernel/StockPortfolio.Shared.Kernel.csproj                 src/S
 COPY src/Shared.Api/StockPortfolio.Shared.Api.csproj     src/Shared.Api/
 COPY src/Migrator/StockPortfolio.Migrator.csproj                           src/Migrator/
 
+COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/StockPortfolio.Modules.Alerts.Contracts.csproj                   src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/
+COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/StockPortfolio.Modules.Alerts.Domain.csproj                         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/
+COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/StockPortfolio.Modules.Alerts.Application.csproj               src/Modules/Alerts/StockPortfolio.Modules.Alerts.Application/
+COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/StockPortfolio.Modules.Alerts.Infrastructure.csproj         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Infrastructure/
+COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/StockPortfolio.Modules.Alerts.Api.csproj             src/Modules/Alerts/StockPortfolio.Modules.Alerts.Api/
+
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Contracts/StockPortfolio.Modules.Identity.Contracts.csproj             src/Modules/Identity/StockPortfolio.Modules.Identity.Contracts/
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Domain/StockPortfolio.Modules.Identity.Domain.csproj                   src/Modules/Identity/StockPortfolio.Modules.Identity.Domain/
 COPY src/Modules/Identity/StockPortfolio.Modules.Identity.Application/StockPortfolio.Modules.Identity.Application.csproj         src/Modules/Identity/StockPortfolio.Modules.Identity.Application/

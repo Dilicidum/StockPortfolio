@@ -14,8 +14,8 @@ public sealed class ModuleBoundaryTests
     public void ExpectedAssemblies_AllLoadByName_SoNoRuleScansAnEmptySet()
     {
         SolutionAssemblies.ExpectedNames.Length.ShouldBe(
-            17,
-            "Three modules times five layers, plus Shared.Kernel and Shared.Api. "
+            22,
+            "Four modules times five layers, plus Shared.Kernel and Shared.Api. "
                 + "If the project count changed, this list — and the rules below — must change with it.");
 
         var missing = SolutionAssemblies.ExpectedNames
@@ -49,7 +49,9 @@ public sealed class ModuleBoundaryTests
             SolutionAssemblies.NameOf("Portfolio", "Infrastructure"),
             SolutionAssemblies.NameOf("Portfolio", "Api"),
 
-            // Phase 3 populates MarketData one layer at a time; this list grows with each.
+            // Phase 4 populates Alerts one layer at a time; this list grows with each.
+            SolutionAssemblies.NameOf("Alerts", "Contracts"),
+
             SolutionAssemblies.NameOf("MarketData", "Domain"),
             SolutionAssemblies.NameOf("MarketData", "Contracts"),
             SolutionAssemblies.NameOf("MarketData", "Application"),
@@ -73,8 +75,14 @@ public sealed class ModuleBoundaryTests
     public void EmptyShells_AreExactlyThePhasesNotYetBuilt()
     {
         // Hard-coded on purpose: this is the list of rules currently not enforced, so it must change by hand.
+        // Ordinal order, because the assertion below compares the two lists in order.
         string[] expected =
         [
+            // Phase 4 builds Alerts one layer at a time; a name leaves this list the commit its layer lands.
+            "StockPortfolio.Modules.Alerts.Api",
+            "StockPortfolio.Modules.Alerts.Application",
+            "StockPortfolio.Modules.Alerts.Domain",
+            "StockPortfolio.Modules.Alerts.Infrastructure",
             "StockPortfolio.Modules.Identity.Contracts",
         ];
 
