@@ -793,6 +793,37 @@ dotnet ef migrations add InitialAlerts --context AlertsDbContext --output-dir Pe
     confirm the migrator reports three contexts and `/health/ready` is green.
 13. Commit: `feat(alerts): persistence, the alerts schema and the first migration (closes E1)`.
 
+**TASKS 4 AND 6 DONE** — commits `37a8623` and `5e69a65`. Build 0 warnings; suite **584 passed, 2 skipped**;
+`docker compose down -v && up` from a clean volume reports `migrator: complete, 3 context(s) checked` with
+`InitialAlerts` applied and `/health/ready` green; `psql -U alerts_svc` reads `alerts.alert_settings`.
+**E1 is proven, not asserted** — Task 16 still owns ticking it off in the register.
+
+Seven more corrections, four of which every later task inherits:
+
+- **415 is not what an absent body returns — it is 400.** Only a *wrong* `Content-Type` produces 415.
+  Tasks 11, 12 and 13 must declare accordingly. Worth knowing more widely: `POST /api/holdings` has declared
+  415 since Phase 2 and **no test in the repo has ever driven it**; the Alerts settings pair is the first
+  route where that declaration is actually demonstrated against a real request.
+- **A generated migration does not compile here.** `CA1861` under `TreatWarningsAsErrors` rejects EF's inline
+  `new[] { … }` for composite indexes — three of them in `InitialAlerts`, including the `descending:` array.
+  `InitialPortfolio` carries the same hand-edit and no document mentioned it. **Regenerating any migration
+  breaks the build until it is re-applied.**
+- **§2.8's "empty or `0` placeholders in `appsettings.json`" is actively dangerous for
+  `Alerts:MaxWindowMinutes`.** A `0` there overrides the code default and rejects every window a user could
+  ask for. The real value (`60`) is in `appsettings.json` — it is not a secret, which is the only reason the
+  neighbouring values are placeholders — and `AlertsModule` falls back to the code default on a missing or
+  non-positive value. Task 15 must not "tidy" it back to a placeholder.
+- **There are six converters, not the five §3.1 names.** `AlertDirection` needs an `EnumToStringConverter`,
+  because `er-diagram.md` stores `direction` as `text "fall | rise"`. Register it with both `Properties<T>()`
+  and `DefaultTypeMapping<T>()` like the rest.
+
+Three smaller ones: Task 4 also owns the `Program.cs` wire-up and the `ProjectReference` from `src/Api` and
+`src/Migrator`, without which `dotnet ef migrations add --startup-project src/Api` cannot see the context at
+all; `ListEnabledTickersAsync` cannot be one query, because EF cannot see inside a value-converted type, so
+`.Select(t => t.Value)` happens after materialising; and `AlertsModule` was **not** split the way Identity
+was in Task 5, because nothing in it validates a runtime concern eagerly — the next module-level eager check
+reopens that seam.
+
 ---
 
 ### Task 5 — Split `AddIdentityPersistence` out (closes C8)
