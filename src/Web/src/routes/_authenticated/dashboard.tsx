@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { AlertPanel } from '../../alerts/AlertPanel'
 import { PANEL_ROWS } from '../../alerts/alertsApi'
 import { Alert } from '../../components/Alert'
@@ -32,11 +33,11 @@ export const Route = createFileRoute('/_authenticated/dashboard')({
  * for one viewer — assumes it, and 15s quadruples that figure for anyone who picks it.
  */
 const INTERVALS = [
-  { label: 'every 15s', value: 15_000 },
-  { label: 'every 30s', value: 30_000 },
-  { label: 'every 60s', value: 60_000 },
-  { label: 'every 5m', value: 300_000 },
-]
+  { labelKey: 'refresh.every15s', value: 15_000 },
+  { labelKey: 'refresh.every30s', value: 30_000 },
+  { labelKey: 'refresh.every60s', value: 60_000 },
+  { labelKey: 'refresh.every5m', value: 300_000 },
+] as const
 
 const DEFAULT_INTERVAL_MS = 60_000
 
@@ -55,6 +56,7 @@ function isTrailing(position: DashboardPosition, newestObservedAt: number, stale
 
 function DashboardPage() {
   const { user } = useAuth()
+  const { t } = useTranslation('dashboard')
   const [intervalMs, setIntervalMs] = useState(DEFAULT_INTERVAL_MS)
 
   // The app's first `useQuery` — every other query is a `useSuspenseQuery` behind a
@@ -78,18 +80,21 @@ function DashboardPage() {
   const unpriced = totals ? totals.positionCount - totals.pricedPositionCount : 0
 
   const columns: Array<Column<DashboardPosition>> = [
-    { header: 'Asset', cell: (position) => <TickerCell ticker={position.ticker} name={position.name} /> },
-    { header: 'Qty', cell: (position) => position.quantity, numeric: true },
-    { header: 'Buy', cell: (position) => formatMoney(position.averagePrice), numeric: true },
     {
-      header: 'Price',
+      header: t('columns.asset'),
+      cell: (position) => <TickerCell ticker={position.ticker} name={position.name} />,
+    },
+    { header: t('columns.qty'), cell: (position) => position.quantity, numeric: true },
+    { header: t('columns.buy'), cell: (position) => formatMoney(position.averagePrice), numeric: true },
+    {
+      header: t('columns.price'),
       numeric: true,
       // The per-row stamp §3 asks for: a single headline figure hides the one thinly
       // traded ticker that is minutes behind everything else on the page.
       cell: (position) => {
         if (!position.currentPrice) {
           return (
-            <span className="text-mu" title="Awaiting a price for this position">
+            <span className="text-mu" title={t('priceCell.awaitingPrice')}>
               {NO_VALUE}
             </span>
           )
@@ -98,7 +103,9 @@ function DashboardPage() {
         const trailing = isTrailing(position, newestObservedAt, intervalMs)
 
         return (
-          <span title={position.observedAt ? `Observed at ${position.observedAt}` : undefined}>
+          <span
+            title={position.observedAt ? t('priceCell.observedAtTitle', { observedAt: position.observedAt }) : undefined}
+          >
             {formatMoney(position.currentPrice)}
             {trailing && position.observedAt ? (
               <span className="text-warn ml-1.5 text-[11.5px]">
@@ -109,9 +116,9 @@ function DashboardPage() {
         )
       },
     },
-    { header: 'Value', cell: (position) => formatMoney(position.marketValue), numeric: true },
+    { header: t('columns.value'), cell: (position) => formatMoney(position.marketValue), numeric: true },
     {
-      header: 'P/L',
+      header: t('columns.pl'),
       numeric: true,
       cell: (position) => (
         <span className={position.profit ? (isNegative(position.profit) ? 'text-dn' : 'text-up') : 'text-mu'}>
@@ -120,7 +127,7 @@ function DashboardPage() {
       ),
     },
     {
-      header: 'P/L %',
+      header: t('columns.plPercent'),
       numeric: true,
       cell: (position) => (
         <span className={position.profit ? (isNegative(position.profit) ? 'text-dn' : 'text-up') : 'text-mu'}>
@@ -128,31 +135,31 @@ function DashboardPage() {
         </span>
       ),
     },
-    { header: 'Weight', cell: (position) => formatPercent(position.weight), numeric: true },
+    { header: t('columns.weight'), cell: (position) => formatPercent(position.weight), numeric: true },
   ]
 
   return (
-    <AppShell title="Dashboard" subtitle={user ? `Signed in as ${user.email}` : undefined}>
+    <AppShell title={t('title')} subtitle={user ? t('subtitleSignedIn', { email: user.email }) : undefined}>
       {isError ? (
-        <Alert tone="error" title="Could not refresh prices">
-          {error instanceof Error && error.message ? error.message : 'The server did not answer.'}
-          {data ? ' Showing the last figures that arrived.' : ''}
+        <Alert tone="error" title={t('error.title')}>
+          {error instanceof Error && error.message ? error.message : t('error.fallback')}
+          {data ? t('error.showingLastKnown') : ''}
         </Alert>
       ) : null}
 
       <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
-        <StatTile label="Total value" value={formatMoney(totals?.value)} />
-        <StatTile label="Invested" value={formatMoney(totals?.cost)} />
+        <StatTile label={t('stats.totalValue')} value={formatMoney(totals?.value)} />
+        <StatTile label={t('stats.invested')} value={formatMoney(totals?.cost)} />
         <StatTile
-          label="Unrealised P&L"
+          label={t('stats.unrealisedPl')}
           value={formatMoney(totals?.profit)}
           hint={totals ? formatPercent(totals.profitPercent) : undefined}
           tone={toneOf(totals?.profit)}
         />
         <StatTile
-          label="Positions"
+          label={t('stats.positions')}
           value={totals ? totals.positionCount : NO_VALUE}
-          hint={totals ? `${totals.pricedPositionCount} priced` : undefined}
+          hint={totals ? t('stats.pricedHint', { count: totals.pricedPositionCount }) : undefined}
         />
       </div>
 
@@ -165,7 +172,7 @@ function DashboardPage() {
       <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-[minmax(0,1fr)_minmax(0,330px)]">
         <div className="flex min-w-0 flex-col gap-3.5">
           <Card
-            title="Holdings"
+            title={t('holdings.cardTitle')}
             action={
               <div className="flex flex-wrap items-center justify-end gap-3">
                 <Freshness
@@ -175,7 +182,7 @@ function DashboardPage() {
                   staleAfterMs={intervalMs * 2}
                 />
                 <label className="text-mu flex items-center gap-2 text-[12.5px]">
-                  Refresh
+                  {t('holdings.refreshLabel')}
                   <select
                     className="border-bd bg-panel-2 text-tx rounded-lg border px-2 py-1 text-[12.5px]"
                     value={intervalMs}
@@ -183,7 +190,7 @@ function DashboardPage() {
                   >
                     {INTERVALS.map((option) => (
                       <option key={option.value} value={option.value}>
-                        {option.label}
+                        {t(option.labelKey)}
                       </option>
                     ))}
                   </select>
@@ -192,17 +199,16 @@ function DashboardPage() {
             }
           >
             <Table
-              caption="Your positions, priced"
+              caption={t('holdings.caption')}
               columns={columns}
               rows={positions}
               rowKey={(position) => position.id}
-              empty={isPending ? 'Fetching prices…' : 'No positions yet. Add one on the Portfolio page.'}
+              empty={isPending ? t('holdings.loading') : t('holdings.empty')}
             />
 
             {unpriced > 0 ? (
               <p className="text-mu mt-3 text-[11.5px]">
-                {unpriced} of {totals?.positionCount} positions have no price yet and are excluded
-                from the totals above.
+                {t('holdings.unpricedNote', { unpriced, total: totals?.positionCount })}
               </p>
             ) : null}
           </Card>

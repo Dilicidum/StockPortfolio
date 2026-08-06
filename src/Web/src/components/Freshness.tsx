@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { formatAge } from '../lib/format'
 
 export interface FreshnessProps {
@@ -16,6 +17,7 @@ export interface FreshnessProps {
  * that is minutes behind the rest.
  */
 export function Freshness({ asOf, stalestObservedAt, staleAfterMs }: FreshnessProps) {
+  const { t } = useTranslation('dashboard')
   const [now, setNow] = useState(() => Date.now())
 
   // React 19 StrictMode double-invokes effects, so the clear is what stops a second
@@ -26,7 +28,7 @@ export function Freshness({ asOf, stalestObservedAt, staleAfterMs }: FreshnessPr
   }, [])
 
   if (!asOf) {
-    return <span className="text-mu text-[12.5px]">Waiting for the first response…</span>
+    return <span className="text-mu text-[12.5px]">{t('freshness.waiting')}</span>
   }
 
   const priceAge = stalestObservedAt ? now - Date.parse(stalestObservedAt) : null
@@ -36,11 +38,11 @@ export function Freshness({ asOf, stalestObservedAt, staleAfterMs }: FreshnessPr
     <span
       role="status"
       className={`text-[12.5px] ${stale ? 'text-warn' : 'text-mu'}`}
-      title={stalestObservedAt ? `Oldest price observed at ${stalestObservedAt}` : undefined}
+      title={stalestObservedAt ? t('freshness.oldestPriceTitle', { stalestObservedAt }) : undefined}
     >
       {stale
-        ? `Prices up to ${formatAge(priceAge)} old`
-        : `Updated ${formatAge(now - Date.parse(asOf))} ago`}
+        ? t('freshness.staleLabel', { age: formatAge(priceAge) })
+        : t('freshness.updatedLabel', { age: formatAge(now - Date.parse(asOf)) })}
     </span>
   )
 }

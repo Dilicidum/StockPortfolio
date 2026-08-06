@@ -1,1 +1,58 @@
-{}
+{
+  "title": "Панель приладів",
+  "subtitleSignedIn": "Ви увійшли як {{email}}",
+  "error": {
+    "title": "Не вдалося оновити ціни",
+    "fallback": "Сервер не відповів.",
+    "showingLastKnown": " Показано останні отримані дані."
+  },
+  "stats": {
+    "totalValue": "Вартість портфеля",
+    "invested": "Інвестовано",
+    "unrealisedPl": "Нереалізований прибуток/збиток",
+    "positions": "Позиції",
+    "pricedHint": "{{count}} з ціною"
+  },
+  "holdings": {
+    "cardTitle": "Позиції",
+    "refreshLabel": "Оновлення",
+    "caption": "Ваші позиції з цінами",
+    "loading": "Отримання цін…",
+    "empty": "Поки немає жодної позиції. Додайте її на сторінці «Портфель».",
+    "unpricedNote": "{{unpriced}} з {{total}} позицій ще без ціни й не враховані в підсумках вище."
+  },
+  "columns": {
+    "asset": "Актив",
+    "qty": "Кіл-сть",
+    "buy": "Купівля",
+    "price": "Ціна",
+    "value": "Вартість",
+    "pl": "П/З",
+    "plPercent": "П/З %",
+    "weight": "Частка"
+  },
+  "priceCell": {
+    "awaitingPrice": "Очікування ціни для цієї позиції",
+    "observedAtTitle": "Дані отримано о {{observedAt}}"
+  },
+  "refresh": {
+    "every15s": "кожні 15с",
+    "every30s": "кожні 30с",
+    "every60s": "кожні 60с",
+    "every5m": "кожні 5хв"
+  },
+  "freshness": {
+    "waiting": "Очікування першої відповіді…",
+    "oldestPriceTitle": "Найстаріша ціна отримана о {{stalestObservedAt}}",
+    "staleLabel": "Ціни застаріли до {{age}}",
+    "updatedLabel": "Оновлено {{age}} тому"
+  },
+  "apiHealth": {
+    "title": "Стан API",
+    "quoteProvider": "Постачальник котирувань",
+    "latency": "Затримка",
+    "quotaUsed": "Використана квота",
+    "futurePhaseNote": "Фаза 6",
+    "unreachable": "Недоступний"
+  }
+}

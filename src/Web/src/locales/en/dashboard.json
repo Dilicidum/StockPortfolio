@@ -1,1 +1,58 @@
-{}
+{
+  "title": "Dashboard",
+  "subtitleSignedIn": "Signed in as {{email}}",
+  "error": {
+    "title": "Could not refresh prices",
+    "fallback": "The server did not answer.",
+    "showingLastKnown": " Showing the last figures that arrived."
+  },
+  "stats": {
+    "totalValue": "Total value",
+    "invested": "Invested",
+    "unrealisedPl": "Unrealised P&L",
+    "positions": "Positions",
+    "pricedHint": "{{count}} priced"
+  },
+  "holdings": {
+    "cardTitle": "Holdings",
+    "refreshLabel": "Refresh",
+    "caption": "Your positions, priced",
+    "loading": "Fetching prices…",
+    "empty": "No positions yet. Add one on the Portfolio page.",
+    "unpricedNote": "{{unpriced}} of {{total}} positions have no price yet and are excluded from the totals above."
+  },
+  "columns": {
+    "asset": "Asset",
+    "qty": "Qty",
+    "buy": "Buy",
+    "price": "Price",
+    "value": "Value",
+    "pl": "P/L",
+    "plPercent": "P/L %",
+    "weight": "Weight"
+  },
+  "priceCell": {
+    "awaitingPrice": "Awaiting a price for this position",
+    "observedAtTitle": "Observed at {{observedAt}}"
+  },
+  "refresh": {
+    "every15s": "every 15s",
+    "every30s": "every 30s",
+    "every60s": "every 60s",
+    "every5m": "every 5m"
+  },
+  "freshness": {
+    "waiting": "Waiting for the first response…",
+    "oldestPriceTitle": "Oldest price observed at {{stalestObservedAt}}",
+    "staleLabel": "Prices up to {{age}} old",
+    "updatedLabel": "Updated {{age}} ago"
+  },
+  "apiHealth": {
+    "title": "API health",
+    "quoteProvider": "Quote provider",
+    "latency": "Latency",
+    "quotaUsed": "Quota used",
+    "futurePhaseNote": "Phase 6",
+    "unreachable": "Unreachable"
+  }
+}
