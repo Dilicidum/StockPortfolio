@@ -283,8 +283,8 @@ public static class IdentityEndpoints
         var result = await handler.Handle(
             new SaveAppearanceCommand(userId, request.Theme, request.Language), ct);
 
-        return result.Match<IResult>(
-            saved => TypedResults.Ok(saved),
+        return result.Match(
+            saved => Results.Ok(saved),
 
             // Reachable only if the validator and the handler disagree about the allowed set.
             invalid => invalid.ToValidationProblem());

@@ -99,11 +99,6 @@ builder.Services.ValidateAlertWindowFitsRetention(builder.Configuration);
 // so a missing registration must fail loudly here rather than on the first key someone saves.
 builder.Services.ValidateSecretProtectorIsRegistered();
 
-// Must come AFTER the modules: a decorator only applies to descriptors that already exist.
-// Not load-bearing for MarketData, which registers no ICommandHandler or IQueryHandler at all -
-// the dashboard handler this phase adds is Portfolio's.
-builder.Services.DecorateHandlers();
-
 builder.Services.AddStockPortfolioHealthChecks();
 
 var app = builder.Build();

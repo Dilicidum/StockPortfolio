@@ -76,7 +76,8 @@ Requests/<UseCase>Request.cs             what binds off the wire
 Validators/<UseCase>RequestValidator.cs  shape only — no I/O
 ```
 
-Then the endpoint: `Task<IResult>`, `.Match<IResult>` with **every lambda parameter named**, the command
+Then the endpoint: `Task<IResult>`, `.Match` with **every lambda parameter named** and no type argument —
+arms call `Results.X(...)`, not `TypedResults.X(...)`, which is what lets the type argument go — the command
 built with `new`. Route parameters stay their own delegate parameters. Declare every status the route can
 emit; put a status on the group only when it is genuinely universal.
 

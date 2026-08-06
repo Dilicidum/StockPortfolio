@@ -4,24 +4,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 
-using OneOf;
-using OneOf.Types;
-
 using StockPortfolio.Modules.MarketData.Application;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
-using StockPortfolio.Modules.MarketData.Application.Keys.Commands.RemoveApiKey;
-using StockPortfolio.Modules.MarketData.Application.Keys.Commands.SaveApiKey;
-using StockPortfolio.Modules.MarketData.Application.Keys.Queries.GetApiKeyStatus;
 using StockPortfolio.Modules.MarketData.Application.Names;
 using StockPortfolio.Modules.MarketData.Application.Prices;
-using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
 using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Infrastructure.Names;
 using StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 using StockPortfolio.Modules.MarketData.Infrastructure.Polling;
 using StockPortfolio.Modules.MarketData.Infrastructure.Prices;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
-using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure;
 
@@ -126,11 +118,7 @@ public static class MarketDataModule
         services.AddScoped<ISymbolValidator, SymbolValidator>();
         services.AddScoped<ICompanyNameReader, CompanyNameReader>();
 
-        // Program.cs calls DecorateHandlers() after every module has registered, so each handler below
-        // is wrapped in the logging decorator like every other one in the host.
-        services.AddScoped<
-            IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>>,
-            SearchTickersQueryHandler>();
+        services.AddMarketDataHandlers();
 
         AddKeys(services, config);
 
@@ -139,27 +127,13 @@ public static class MarketDataModule
         return services;
     }
 
-    /// <summary>BYOK: the feature switch, the repository, the reader QuoteReader uses, and the three handlers.</summary>
+    /// <summary>BYOK: the feature switch, the repository, and the reader QuoteReader uses.</summary>
     private static void AddKeys(IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton(ReadByokOptions(config));
 
         services.AddScoped<IUserProviderKeyRepository, UserProviderKeyRepository>();
         services.AddScoped<IUserProviderKeyReader, UserProviderKeyReader>();
-
-        services.AddScoped<
-            ICommandHandler<
-                SaveApiKeyCommand,
-                OneOf<SaveApiKeyResult, ProviderRejectedTheKey, ProviderCouldNotAnswer, ByokDisabled>>,
-            SaveApiKeyCommandHandler>();
-
-        services.AddScoped<
-            ICommandHandler<RemoveApiKeyCommand, OneOf<Success, NotFound>>,
-            RemoveApiKeyCommandHandler>();
-
-        services.AddScoped<
-            IQueryHandler<GetApiKeyStatusQuery, GetApiKeyStatusResult>,
-            GetApiKeyStatusQueryHandler>();
     }
 
     /// <summary>A blank, unparseable value or a missing key is a file that has not been told, not a "no".</summary>

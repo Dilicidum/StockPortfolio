@@ -124,10 +124,10 @@ public static class AlertsEndpoints
 
         var result = await handler.Handle(new SimulateAlertCommand(userId, request.Ticker), ct);
 
-        return result.Match<IResult>(
+        return result.Match(
             // 202, not 200: the row is written here but the arrival happens on a connection this
             // request knows nothing about, and there is no body worth inventing.
-            simulated => TypedResults.Accepted((string?)null),
+            simulated => Results.Accepted((string?)null),
 
             nothing => ProblemDetailsExtensions.ConflictProblem(Describe(nothing)));
     }
@@ -161,7 +161,7 @@ public static class AlertsEndpoints
     {
         var redeemed = await handler.Handle(new RedeemStreamTicketCommand(ticket ?? string.Empty), ct);
 
-        return redeemed.Match<IResult>(
+        return redeemed.Match(
             userId => AlertFeed.Result(userId, subscriber, clock, ct),
 
             // Expired, spent and never-issued get the same answer on purpose: a caller who can tell
@@ -225,8 +225,8 @@ public static class AlertsEndpoints
                 request.Enabled),
             ct);
 
-        return result.Match<IResult>(
-            saved => TypedResults.Ok(saved),
+        return result.Match(
+            saved => Results.Ok(saved),
 
             // 409 rather than 400: the body is well formed and the request is refused by the state of
             // the portfolio, which the caller can fix by buying the position.

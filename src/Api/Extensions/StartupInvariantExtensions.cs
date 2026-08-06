@@ -2,15 +2,15 @@ using System.Globalization;
 
 namespace StockPortfolio.Api.Extensions;
 
-/// <summary>Refuses to start when the price window is trimmed shorter than the longest alert a user may set.</summary>
-internal static class PollingConsistencyExtensions
+/// <summary>Cross-module configuration checks the host runs at startup, before any request can arrive.</summary>
+internal static class StartupInvariantExtensions
 {
     private const string RetentionKey = "MarketData:Polling:RetentionMinutes";
     private const string MaxWindowKey = "Alerts:MaxWindowMinutes";
     private const int DefaultRetentionMinutes = 75;
     private const int DefaultMaxWindowMinutes = 60;
 
-    /// <summary>Compares the two numbers no module can see together, and throws before a request can arrive.</summary>
+    /// <summary>Refuses to start when the price window is trimmed shorter than the longest alert a user may set.</summary>
     public static IServiceCollection ValidateAlertWindowFitsRetention(
         this IServiceCollection services,
         IConfiguration configuration)

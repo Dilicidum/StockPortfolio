@@ -4,24 +4,14 @@ using Microsoft.AspNetCore.Http;
 namespace StockPortfolio.Api.Middleware;
 
 /// <summary>Turns any unhandled exception into an RFC 7807 application/problem+json response.</summary>
-internal sealed partial class ApiExceptionHandler(
-    IProblemDetailsService problemDetailsService,
-    ILogger<ApiExceptionHandler> logger) : IExceptionHandler
+internal sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsService) : IExceptionHandler
 {
-    // Source-generated: CA1848 is an error in this repo.
-    [LoggerMessage(
-        EventId = 5000,
-        Level = LogLevel.Error,
-        Message = "Unhandled exception for {Method} {Path}")]
-    private static partial void LogUnhandled(ILogger logger, Exception exception, string method, string path);
-
     public async ValueTask<bool> TryHandleAsync(
         HttpContext httpContext,
         Exception exception,
         CancellationToken cancellationToken)
     {
-        LogUnhandled(logger, exception, httpContext.Request.Method, httpContext.Request.Path);
-
+        // No logging here: ExceptionHandlerMiddleware logs the exception before it calls this.
         httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
 
         return await problemDetailsService.TryWriteAsync(new ProblemDetailsContext

@@ -173,12 +173,12 @@ public static class PortfolioEndpoints
             new AddHoldingCommand(userId, request.Ticker, request.Quantity, request.Price),
             ct);
 
-        return result.Match<IResult>(
+        return result.Match(
             // 201 with a Location, because this position did not exist a moment ago.
-            created => TypedResults.Created($"{BasePath}/{created.Holding.Id}", created.Holding),
+            created => Results.Created($"{BasePath}/{created.Holding.Id}", created.Holding),
 
             // 200 and no Location: the position already existed and this purchase changed it.
-            merged => TypedResults.Ok(merged.Holding),
+            merged => Results.Ok(merged.Holding),
 
             // The handler's own InvalidInput case, not the filter's.
             invalid => invalid.ToValidationProblem(),
@@ -207,8 +207,8 @@ public static class PortfolioEndpoints
             new UpdateHoldingCommand(userId, id, request.Quantity, request.Price),
             ct);
 
-        return result.Match<IResult>(
-            corrected => TypedResults.Ok(corrected),
+        return result.Match(
+            corrected => Results.Ok(corrected),
 
             // 404 and never 403: a 403 would confirm to a stranger that this id exists.
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."),
@@ -231,8 +231,8 @@ public static class PortfolioEndpoints
 
         var result = await handler.Handle(new SetHoldingVisibilityCommand(userId, id, request.IsVisible), ct);
 
-        return result.Match<IResult>(
-            hidden => TypedResults.NoContent(),
+        return result.Match(
+            hidden => Results.NoContent(),
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
     }
 
@@ -250,8 +250,8 @@ public static class PortfolioEndpoints
 
         var result = await handler.Handle(new RemoveHoldingCommand(userId, id), ct);
 
-        return result.Match<IResult>(
-            closed => TypedResults.NoContent(),
+        return result.Match(
+            closed => Results.NoContent(),
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
     }
 
@@ -285,8 +285,8 @@ public static class PortfolioEndpoints
             new SaveDashboardSettingsCommand(userId, request.RefreshIntervalSeconds),
             ct);
 
-        return result.Match<IResult>(
-            saved => TypedResults.Ok(saved),
+        return result.Match(
+            saved => Results.Ok(saved),
 
             // Reachable only if the validator and RefreshInterval.Create disagree about the allowed range.
             invalid => invalid.ToValidationProblem());

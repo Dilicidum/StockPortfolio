@@ -185,8 +185,8 @@ public static partial class MarketDataEndpoints
 
         var result = await handler.Handle(new SaveApiKeyCommand(userId, request.ApiKey), ct);
 
-        return result.Match<IResult>(
-            saved => TypedResults.Ok(new GetApiKeyStatusResult(true, saved.LastFour, false)),
+        return result.Match(
+            saved => Results.Ok(new GetApiKeyStatusResult(true, saved.LastFour, false)),
 
             // The handler's own failure case, not the filter's — the request was well-shaped, the
             // provider just said no to this exact key.
@@ -214,8 +214,8 @@ public static partial class MarketDataEndpoints
 
         var result = await handler.Handle(new RemoveApiKeyCommand(userId), ct);
 
-        return result.Match<IResult>(
-            removed => TypedResults.NoContent(),
+        return result.Match(
+            removed => Results.NoContent(),
             missing => ProblemDetailsExtensions.NotFoundProblem("No provider key is configured."));
     }
 

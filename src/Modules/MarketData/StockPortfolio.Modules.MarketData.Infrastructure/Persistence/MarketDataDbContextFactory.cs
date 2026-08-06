@@ -8,7 +8,7 @@ internal sealed class MarketDataDbContextFactory : IDesignTimeDbContextFactory<M
 {
     /// <summary>Matches the compose stack in docker-compose.yml, so the fallback is usable rather than decorative.</summary>
     private const string FallbackConnectionString =
-        "Host=localhost;Port=5432;Database=stockportfolio;Username=migrator;Password=migrator;Maximum Pool Size=2";
+        "Host=localhost;Port=5432;Database=stockportfolio;Username=migrator;Password=migrator_dev_only;Maximum Pool Size=2";
 
     private const string ConnectionStringEnvironmentVariable = "ConnectionStrings__MarketData";
 
