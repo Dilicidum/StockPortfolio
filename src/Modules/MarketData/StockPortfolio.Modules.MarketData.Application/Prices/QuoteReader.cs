@@ -8,9 +8,13 @@ namespace StockPortfolio.Modules.MarketData.Application.Prices;
 public sealed class QuoteReader(
     IQuoteProvider provider,
     ILastKnownPriceStore store,
+    IUserProviderKeyReader keyReader,
+    IUserProviderKeyRepository keyRepository,
+    ByokOptions byokOptions,
     TimeProvider clock) : IQuoteReader
 {
     public async Task<IReadOnlyDictionary<string, QuotedPrice>> GetCurrentPricesAsync(
+        Guid userId,
         IReadOnlyCollection<string> tickers,
         CancellationToken ct)
     {
@@ -32,7 +36,20 @@ public sealed class QuoteReader(
             return prices;
         }
 
-        var fetched = await provider.GetQuotesAsync(requested, ct);
+        // Resolved once per call, before the fan-out: one database read and one decrypt for a whole
+        // dashboard load, never one per ticker. Skipped entirely while the switch is off, so a stored key
+        // is never read, decrypted or sent to the provider once BYOK is disabled - a saved key stays on
+        // file, but stops being used.
+        var apiKeyOverride = byokOptions.Enabled ? await keyReader.ReadPlaintextAsync(userId, ct) : null;
+
+        var fetched = await provider.GetQuotesAsync(requested, apiKeyOverride, ct);
+
+        if (apiKeyOverride is not null && fetched.Count == 0)
+        {
+            // Every fetch using this key came back empty. That is also what a provider outage looks
+            // like, so ask the provider directly rather than guessing from the shape of the miss.
+            await MarkKeyIfRejectedAsync(userId, apiKeyOverride, ct);
+        }
 
         // The write lives here and in the poller, never in a provider: with no API key the fake is the only
         // provider, so a write inside FinnhubQuoteProvider would leave marketdata:last:* empty on the whole
@@ -66,5 +83,14 @@ public sealed class QuoteReader(
         }
 
         return prices;
+    }
+
+    /// <summary>Confirms a rejection before recording one: an outage must degrade quietly, not brand the key bad.</summary>
+    private async Task MarkKeyIfRejectedAsync(Guid userId, string apiKeyOverride, CancellationToken ct)
+    {
+        if (await provider.VerifyKeyAsync(apiKeyOverride, ct) == KeyVerdict.Rejected)
+        {
+            await keyRepository.MarkRejectedAsync(userId, ct);
+        }
     }
 }

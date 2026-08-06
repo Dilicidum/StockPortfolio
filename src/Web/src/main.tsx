@@ -1,9 +1,11 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createRouter, RouterProvider } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
 import { bootstrapSession } from './auth/bootstrapSession'
 import { authStore } from './auth/authStore'
 import { Spinner } from './components/Spinner'
+import './lib/i18n'
 import { queryClient } from './lib/queryClient'
 import { routeTree } from './routeTree.gen'
 import './index.css'
@@ -29,9 +31,13 @@ declare module '@tanstack/react-router' {
 }
 
 function Splash() {
+  // Safe to translate already: './lib/i18n' above has run its synchronous init with the
+  // pre-sign-in cached language by the time this ever renders — see lib/i18n.ts.
+  const { t } = useTranslation('common')
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg">
-      <Spinner size={22} label="Restoring session" />
+      <Spinner size={22} label={t('splashLabel')} />
     </div>
   )
 }

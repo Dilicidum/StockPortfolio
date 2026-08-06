@@ -28,10 +28,6 @@
          both current. -->
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.10" />
     <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.8.0" />
-    <!-- Pinned explicitly: it arrives transitively only via Polly.RateLimiting, which asks for
-         >= 8.0.0, so without this line the resolved version is Polly's floor rather than a
-         number recorded here. -->
-    <PackageVersion Include="System.Threading.RateLimiting" Version="10.0.10" />
     <!-- Phase 4. BackgroundService and AddHostedService live here. Pinned for the same reason as the line
          above: it arrives transitively through Microsoft.Extensions.Http.Resilience, so without this the
          quote poller compiles against whatever that package's graph happens to resolve. -->

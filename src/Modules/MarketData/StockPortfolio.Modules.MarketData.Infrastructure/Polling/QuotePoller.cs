@@ -91,9 +91,11 @@ internal sealed partial class QuotePoller(
             return;
         }
 
+        // null: the poller has no user, so it has no key to pass. The shared window is shared, and a
+        // user's own quota must not be spent filling it.
         var quotes = await scope.ServiceProvider
             .GetRequiredService<IQuoteProvider>()
-            .GetQuotesAsync(tickers, ct);
+            .GetQuotesAsync(tickers, apiKeyOverride: null, ct);
 
         if (quotes.Count == 0)
         {

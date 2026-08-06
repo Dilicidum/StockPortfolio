@@ -1,0 +1,38 @@
+{
+  "time": {
+    "secondsShort": "{{count}}s",
+    "minutesShort": "{{count}}m",
+    "hoursShort": "{{count}}h"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "saved": "Saved",
+    "tryAgain": "Try again"
+  },
+  "nav": {
+    "mainLabel": "Main",
+    "dashboard": "Dashboard",
+    "portfolio": "Portfolio",
+    "notifications": "Notifications",
+    "settings": "Settings"
+  },
+  "signOut": "Sign out",
+  "notFound": {
+    "heading": "That page does not exist.",
+    "backLink": "Back to the app"
+  },
+  "search": {
+    "matchesCount_one": "{{count}} match",
+    "matchesCount_few": "{{count}} matches",
+    "matchesCount_many": "{{count}} matches",
+    "matchesCount_other": "{{count}} matches",
+    "suggestionsFor": "{{label}} suggestions"
+  },
+  "loading": "Loading",
+  "emptyTableFallback": "Nothing here yet.",
+  "splashLabel": "Restoring session",
+  "fallbackError": "Something went wrong. Please try again.",
+  "requestFailed": "Request failed."
+}

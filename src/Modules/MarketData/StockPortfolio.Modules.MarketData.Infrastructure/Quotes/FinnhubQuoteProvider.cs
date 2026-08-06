@@ -2,12 +2,8 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
-using System.Threading.RateLimiting;
 
 using Microsoft.Extensions.Logging;
-
-using Polly.CircuitBreaker;
-using Polly.Timeout;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Domain;
@@ -17,16 +13,21 @@ namespace StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 /// <summary>The live provider. Fetches and returns; recording what was fetched belongs to QuoteReader.</summary>
 internal sealed partial class FinnhubQuoteProvider(
     HttpClient client,
-    RateLimiter budget,
+    IHttpClientFactory httpClientFactory,
     TimeProvider clock,
     ILogger<FinnhubQuoteProvider> logger) : IQuoteProvider
 {
-    /// <summary>Four in flight: the shared bucket serialises the excess anyway, so more only holds sockets.</summary>
+    /// <summary>Four in flight, to bound sockets rather than to pace requests — that is Finnhub's job now.</summary>
     private const int MaxDegreeOfParallelism = 4;
+
+    /// <summary>The second named client MarketDataModule registers, so a revoked user key trips a breaker
+    /// that is theirs alone rather than the one every dashboard and the poller share.</summary>
+    internal const string ByokClientName = "FinnhubByok";
 
     public string Name => "Finnhub";
 
-    public async Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct)
+    public async Task<IReadOnlyList<Quote>> GetQuotesAsync(
+        IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tickers);
 
@@ -40,22 +41,15 @@ internal sealed partial class FinnhubQuoteProvider(
             {
                 try
                 {
-                    using var lease = await budget.AcquireAsync(1, token);
-
-                    if (!lease.IsAcquired)
-                    {
-                        LogBudgetExhausted(logger, ticker.Value);
-                        return;
-                    }
-
-                    if (await FetchOneAsync(ticker, token) is { } quote)
+                    if (await FetchOneAsync(ticker, apiKeyOverride, token) is { } quote)
                     {
                         quotes.Add(quote);
                     }
                 }
-                catch (HttpRequestException ex) { LogQuoteFailed(logger, ex, ticker.Value); }
-                catch (TimeoutRejectedException ex) { LogQuoteFailed(logger, ex, ticker.Value); }
-                catch (BrokenCircuitException ex) { LogQuoteFailed(logger, ex, ticker.Value); }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    LogQuoteFailed(logger, ex, ticker.Value);
+                }
             });
 
         return [.. quotes];
@@ -66,21 +60,16 @@ internal sealed partial class FinnhubQuoteProvider(
     {
         try
         {
-            using var lease = await budget.AcquireAsync(1, ct);
-
-            if (!lease.IsAcquired)
-            {
-                return true;
-            }
-
             // /quote answers c:0 for a symbol that does not exist AND for a healthy one Finnhub blipped
             // on, so it cannot tell the two apart and would answer "known" to everything. /search can,
             // and null still means the provider could not answer, so an outage never rejects a purchase.
             return await SearchAsync(ticker.Value, ct) is not { } matches || matches.Contains(ticker.Value);
         }
-        catch (HttpRequestException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
-        catch (TimeoutRejectedException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
-        catch (BrokenCircuitException ex) { LogSymbolCheckFailed(logger, ex, ticker.Value); return true; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSymbolCheckFailed(logger, ex, ticker.Value);
+            return true;
+        }
     }
 
     /// <summary>The same /search call the existence check makes, keeping the names instead of discarding them.</summary>
@@ -88,41 +77,83 @@ internal sealed partial class FinnhubQuoteProvider(
     {
         try
         {
-            using var lease = await budget.AcquireAsync(1, ct);
-
-            if (!lease.IsAcquired)
-            {
-                LogSearchBudgetExhausted(logger, query);
-                return [];
-            }
-
             // Empty rather than a throw on every failure below: search is a convenience over a field that
             // still accepts a typed symbol, so an outage must degrade to no suggestions and nothing else.
             return await SearchAsync(query, ct) is { } response ? response.Suggestions() : [];
         }
-        catch (HttpRequestException ex) { LogSearchFailed(logger, ex, query); return []; }
-        catch (TimeoutRejectedException ex) { LogSearchFailed(logger, ex, query); return []; }
-        catch (BrokenCircuitException ex) { LogSearchFailed(logger, ex, query); return []; }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogSearchFailed(logger, ex, query);
+            return [];
+        }
+    }
+
+    /// <summary>Checks a CANDIDATE key, never the app's own. Unlike every method above, this does not
+    /// fail open: a timeout, a 5xx or an open circuit is Unknown, never Accepted.</summary>
+    public async Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("search?q=AAPL", UriKind.Relative));
+
+            // Overrides the client's default X-Finnhub-Token for this one request: HttpClient only
+            // copies a default header onto the outgoing request when the request has not already set it.
+            request.Headers.Add("X-Finnhub-Token", apiKey);
+
+            // The BYOK client, not the shared one: a candidate key must not trip the breaker every
+            // dashboard and the poller share, and must not be told the provider is unreachable because
+            // that unrelated breaker happens to be open.
+            using var response = await httpClientFactory.CreateClient(ByokClientName).SendAsync(request, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return KeyVerdict.Accepted;
+            }
+
+            if (IsUnauthorised(response.StatusCode))
+            {
+                return KeyVerdict.Rejected;
+            }
+
+            LogVerifyUnexpectedStatus(logger, (int)response.StatusCode);
+            return KeyVerdict.Unknown;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogVerifyFailed(logger, ex);
+            return KeyVerdict.Unknown;
+        }
     }
 
     /// <summary>401 and 403 carry the same body and mean the same thing here; neither is ever retried.</summary>
     internal static bool IsUnauthorised(HttpStatusCode status) =>
         status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
-    private async Task<Quote?> FetchOneAsync(Ticker ticker, CancellationToken ct)
+    private async Task<Quote?> FetchOneAsync(Ticker ticker, string? apiKeyOverride, CancellationToken ct)
     {
         // ObservedAt is when this app fetched, never Finnhub's t: t freezes at Friday's close, which would
         // render every weekend dashboard amber while the provider is perfectly healthy.
-        return await GetQuoteAsync(ticker, ct) is { Price: { } price }
+        return await GetQuoteAsync(ticker, apiKeyOverride, ct) is { Price: { } price }
             ? new Quote(ticker, price, clock.GetUtcNow())
             : null;
     }
 
-    private async Task<FinnhubQuoteResponse?> GetQuoteAsync(Ticker ticker, CancellationToken ct)
+    private async Task<FinnhubQuoteResponse?> GetQuoteAsync(Ticker ticker, string? apiKeyOverride, CancellationToken ct)
     {
         var path = string.Create(CultureInfo.InvariantCulture, $"quote?symbol={Uri.EscapeDataString(ticker.Value)}");
 
-        using var response = await client.GetAsync(new Uri(path, UriKind.Relative), ct);
+        using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(path, UriKind.Relative));
+
+        // A header on the request wins over the client's default, so the key travels per request rather
+        // than per client — and the client itself is a separate one, so a revoked key trips its own breaker.
+        if (apiKeyOverride is not null)
+        {
+            request.Headers.Add("X-Finnhub-Token", apiKeyOverride);
+        }
+
+        var httpClient = apiKeyOverride is null ? client : httpClientFactory.CreateClient(ByokClientName);
+
+        using var response = await httpClient.SendAsync(request, ct);
 
         if (IsUnauthorised(response.StatusCode))
         {
@@ -159,12 +190,6 @@ internal sealed partial class FinnhubQuoteProvider(
     private static partial void LogQuoteFailed(ILogger logger, Exception exception, string ticker);
 
     [LoggerMessage(
-        EventId = 5101,
-        Level = LogLevel.Warning,
-        Message = "Finnhub call budget exhausted before {Ticker} could be fetched")]
-    private static partial void LogBudgetExhausted(ILogger logger, string ticker);
-
-    [LoggerMessage(
         EventId = 5102,
         Level = LogLevel.Error,
         Message = "Finnhub rejected the API key with {StatusCode} while fetching {Ticker}; not retried")]
@@ -185,6 +210,12 @@ internal sealed partial class FinnhubQuoteProvider(
     [LoggerMessage(
         EventId = 5105,
         Level = LogLevel.Warning,
-        Message = "Finnhub call budget exhausted before '{Query}' could be searched")]
-    private static partial void LogSearchBudgetExhausted(ILogger logger, string query);
+        Message = "Finnhub key verification failed transport-side; treated as unanswerable, never as rejected")]
+    private static partial void LogVerifyFailed(ILogger logger, Exception exception);
+
+    [LoggerMessage(
+        EventId = 5106,
+        Level = LogLevel.Warning,
+        Message = "Finnhub key verification got unexpected status {StatusCode}; treated as unanswerable")]
+    private static partial void LogVerifyUnexpectedStatus(ILogger logger, int statusCode);
 }

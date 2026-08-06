@@ -24,6 +24,21 @@ namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("StockPortfolio.Modules.Portfolio.Domain.DashboardSettings", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<int>("RefreshInterval")
+                        .HasColumnType("integer")
+                        .HasColumnName("refresh_interval_seconds");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("dashboard_settings", "portfolio");
+                });
+
             modelBuilder.Entity("StockPortfolio.Modules.Portfolio.Domain.Holding", b =>
                 {
                     b.Property<Guid>("Id")

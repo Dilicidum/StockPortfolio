@@ -1,3 +1,5 @@
+import i18n from './i18n'
+
 /**
  * Money crosses the wire as a string and is formatted as one. `Number(money.amount)`
  * would reintroduce exactly the IEEE-754 loss the string serialisation exists to
@@ -17,7 +19,10 @@ export function formatMoney(money: Money | null | undefined): string {
   // render $0.00, so a missing price would be indistinguishable from a worthless one.
   if (!money || money.amount === '') return NO_VALUE
 
-  return new Intl.NumberFormat(undefined, {
+  // The chosen UI language, never `undefined` ("browser default") — a Ukrainian-language
+  // reader gets Ukrainian grouping and symbol placement even on an English-locale OS. The
+  // CURRENCY stays USD either way; only how the figure is written changes.
+  return new Intl.NumberFormat(i18n.language, {
     style: 'currency',
     currency: money.currency,
     // The wire type is `string`; the ES2023 overload asks for the literal form of it.
@@ -34,12 +39,12 @@ export function formatPercent(percent: string | null | undefined): string {
 /** Coarse on purpose: a freshness line that ticks every second is noise, not information. */
 export function formatAge(milliseconds: number): string {
   const seconds = Math.max(0, Math.round(milliseconds / 1000))
-  if (seconds < 60) return `${seconds}s`
+  if (seconds < 60) return i18n.t('common:time.secondsShort', { count: seconds })
 
   const minutes = Math.round(seconds / 60)
-  if (minutes < 60) return `${minutes}m`
+  if (minutes < 60) return i18n.t('common:time.minutesShort', { count: minutes })
 
-  return `${Math.round(minutes / 60)}h`
+  return i18n.t('common:time.hoursShort', { count: Math.round(minutes / 60) })
 }
 
 /** Sign read off the string, because comparing money in the browser is still arithmetic on money. */

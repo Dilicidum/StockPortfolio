@@ -257,9 +257,37 @@ public sealed class DashboardTests(ApiFixture fixture)
             + "against the fake provider that CreateHostWithQuoteProvider removed");
     }
 
-    /// <summary>Some symbols rate-limited is the common failure, and it is a 200 with a gap, not an error.</summary>
+    /// <summary>The point of the whole task: a user's own key prices their own dashboard, end to end.</summary>
     [Fact]
-    public async Task Dashboard_ProviderReturns429_Returns200NotError()
+    public async Task Dashboard_ForAUserWithTheirOwnKey_UsesThatKey()
+    {
+        const string OwnKey = "d1v3rs3-k3y-a1b2";
+
+        var ticker = Wire.UniqueTicker();
+        var provider = ScriptedQuoteProvider.Serving((ticker, ScriptedPrice));
+
+        await using var host = _fixture.CreateHostWithQuoteProvider(provider);
+        using var client = host.CreateClient();
+
+        var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("dashboard-byok"));
+
+        using var saved = await Wire.SaveApiKeyAsync(client, tokens.AccessToken, OwnKey);
+        saved.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(saved));
+
+        await AddSucceedsAsync(client, tokens.AccessToken, ticker, 1m, 10m);
+
+        var dashboard = await Wire.GetDashboardAsync(client, tokens.AccessToken);
+
+        Amount(Position(dashboard, ticker).CurrentPrice!).ShouldBe(ScriptedPrice);
+
+        provider.ApiKeyOverridesSeen.ShouldContain(
+            OwnKey,
+            "the dashboard fetch never carried the caller's own key to the provider");
+    }
+
+    /// <summary>Some symbols refused is the common failure, and it is a 200 with a gap, not an error.</summary>
+    [Fact]
+    public async Task Dashboard_ProviderOmitsSomeSymbols_Returns200NotError()
     {
         // The double omits the refused symbol rather than emitting a literal 429: IQuoteProvider's
         // contract is "fetches what it can", so the status code never leaves FinnhubQuoteProvider's own

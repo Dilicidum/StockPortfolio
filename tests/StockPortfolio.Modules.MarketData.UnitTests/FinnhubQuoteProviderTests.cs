@@ -1,10 +1,10 @@
 using System.Net;
-using System.Threading.RateLimiting;
 
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 
+using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Domain;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 
@@ -14,22 +14,10 @@ public sealed class FinnhubQuoteProviderTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
 
-    // AutoReplenishment off: its timer takes no TimeProvider, so FakeTimeProvider cannot advance it.
-    private static TokenBucketRateLimiter FullBucket() =>
-        new(new TokenBucketRateLimiterOptions
-        {
-            TokenLimit = 25,
-            TokensPerPeriod = 1,
-            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-            AutoReplenishment = false,
-            QueueLimit = 256,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-        });
-
-    private static FinnhubQuoteProvider Build(CountingHandler handler, TokenBucketRateLimiter bucket) =>
+    private static FinnhubQuoteProvider Build(CountingHandler handler) =>
         new(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
+            new StaticHttpClientFactory(new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") }),
             new FakeTimeProvider(Now),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
@@ -39,11 +27,11 @@ public sealed class FinnhubQuoteProviderTests
     public async Task Finnhub401And403_AreNotRetried(HttpStatusCode status)
     {
         var handler = new CountingHandler(status, """{"error":"You don't have access to this resource."}""");
-        using var bucket = FullBucket();
-        var provider = Build(handler, bucket);
+        var provider = Build(handler);
 
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         quotes.ShouldBeEmpty();
@@ -55,8 +43,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task SymbolExists_WhenTheKeyIsRejected_FailsOpen(HttpStatusCode status)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(status), bucket);
+        var provider = Build(new CountingHandler(status));
 
         var exists = await provider.SymbolExistsAsync(
             Ticker.Create("AAPL").AsT0,
@@ -73,8 +60,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData("""{"count":0,"result":[]}""", false)]
     public async Task SymbolExists_IsAnExactMatchOnSymbol_NeverACountOfFuzzyHits(string body, bool expected)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, body));
 
         var exists = await provider.SymbolExistsAsync(
             Ticker.Create("AAPL").AsT0,
@@ -86,13 +72,7 @@ public sealed class FinnhubQuoteProviderTests
     [Fact]
     public async Task SymbolExists_WhenTheSearchTransportFails_FailsOpen()
     {
-        using var bucket = FullBucket();
-
-        var provider = new FinnhubQuoteProvider(
-            new HttpClient(new FlakyHandler("AAPL")) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
-            new FakeTimeProvider(Now),
-            NullLogger<FinnhubQuoteProvider>.Instance);
+        var provider = BuildWithFlaky(new FlakyHandler("AAPL"));
 
         var exists = await provider.SymbolExistsAsync(
             Ticker.Create("AAPL").AsT0,
@@ -112,8 +92,7 @@ public sealed class FinnhubQuoteProviderTests
               {"symbol":"APLE","description":"APPLE HOSPITALITY REIT INC"}]}
             """;
 
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body));
 
         var matches = await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken);
 
@@ -136,8 +115,7 @@ public sealed class FinnhubQuoteProviderTests
               {"symbol":"NONAME","description":"   "}]}
             """;
 
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, Body));
 
         var matches = await provider.SearchSymbolsAsync("aapl", TestContext.Current.CancellationToken);
 
@@ -152,8 +130,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData(HttpStatusCode.Forbidden)]
     public async Task Search_WhenTheKeyIsRejected_IsEmptyNotAThrow(HttpStatusCode status)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(status), bucket);
+        var provider = Build(new CountingHandler(status));
 
         (await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
@@ -161,13 +138,7 @@ public sealed class FinnhubQuoteProviderTests
     [Fact]
     public async Task Search_WhenTheTransportFails_IsEmptyNotAThrow()
     {
-        using var bucket = FullBucket();
-
-        var provider = new FinnhubQuoteProvider(
-            new HttpClient(new FlakyHandler("appl")) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
-            new FakeTimeProvider(Now),
-            NullLogger<FinnhubQuoteProvider>.Instance);
+        var provider = BuildWithFlaky(new FlakyHandler("appl"));
 
         (await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
@@ -179,8 +150,7 @@ public sealed class FinnhubQuoteProviderTests
     [InlineData("{}")]
     public async Task Search_EmptyOrShapelessBody_IsAnEmptyList(string body)
     {
-        using var bucket = FullBucket();
-        var provider = Build(new CountingHandler(HttpStatusCode.OK, body), bucket);
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, body));
 
         (await provider.SearchSymbolsAsync("zzzz", TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
@@ -189,11 +159,11 @@ public sealed class FinnhubQuoteProviderTests
     public async Task Fetch_StampsObservedAtWithOurClock_NotFinnhubsTradeTime()
     {
         var handler = new CountingHandler(HttpStatusCode.OK, """{"c":187.42,"t":1000000000}""");
-        using var bucket = FullBucket();
-        var provider = Build(handler, bucket);
+        var provider = Build(handler);
 
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         quotes.ShouldHaveSingleItem().ObservedAt.ShouldBe(Now);
@@ -203,13 +173,7 @@ public sealed class FinnhubQuoteProviderTests
     [Fact]
     public async Task Fetch_OneTickerFailing_DoesNotDiscardTheOthers()
     {
-        var handler = new FlakyHandler("MSFT");
-        using var bucket = FullBucket();
-        var provider = new FinnhubQuoteProvider(
-            new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
-            bucket,
-            new FakeTimeProvider(Now),
-            NullLogger<FinnhubQuoteProvider>.Instance);
+        var provider = BuildWithFlaky(new FlakyHandler("MSFT"));
 
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker>
@@ -218,9 +182,236 @@ public sealed class FinnhubQuoteProviderTests
                 Ticker.Create("MSFT").AsT0,
                 Ticker.Create("TSLA").AsT0,
             },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         quotes.Select(quote => quote.Ticker.Value).Order(StringComparer.Ordinal).ShouldBe(["AAPL", "TSLA"]);
+    }
+
+    /// <summary>Requirement 10's second gap: a WAF/CDN page must degrade the ticker, not crash the request.</summary>
+    [Fact]
+    public async Task GetQuotes_WhenTheProviderReturnsHtmlWithA200_OmitsTheTickerRatherThanThrowing()
+    {
+        var handler = new CountingHandler(HttpStatusCode.OK, body: "<html>Access denied</html>", contentType: "text/html");
+        var provider = Build(handler);
+
+        var quotes = await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        quotes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task GetQuotes_WhenTheProviderReturnsMalformedJson_OmitsTheTickerRatherThanThrowing()
+    {
+        var handler = new CountingHandler(HttpStatusCode.OK, body: "{ not json", contentType: "application/json");
+        var provider = Build(handler);
+
+        var quotes = await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        quotes.ShouldBeEmpty();
+    }
+
+    /// <summary>The test this task exists for: a per-user key must trip a breaker that belongs to it alone,
+    /// which is only true if it travels over a different client than the one the app's own key and the
+    /// poller share. A header alone on the shared client would not give that isolation.</summary>
+    [Fact]
+    public async Task GetQuotes_WithAnApiKeyOverride_RoutesThroughTheByokNamedClient()
+    {
+        var sharedHandler = new CountingHandler(HttpStatusCode.OK, """{"c":1.23,"t":1000000000}""");
+        var byokHandler = new CountingHandler(HttpStatusCode.OK, """{"c":4.56,"t":1000000000}""");
+
+        var sharedClient = new HttpClient(sharedHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+        var byokClient = new HttpClient(byokHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        var factory = new StaticHttpClientFactory(byokClient);
+        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+
+        var quotes = await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            "a-users-own-key",
+            TestContext.Current.CancellationToken);
+
+        sharedHandler.Calls.ShouldBe(0, "an override key must never touch the client every dashboard and the poller share");
+        byokHandler.Calls.ShouldBe(1);
+        quotes.ShouldHaveSingleItem().Price.ShouldBe(4.56m);
+        factory.RequestedName.ShouldBe(FinnhubQuoteProvider.ByokClientName);
+    }
+
+    /// <summary>The header carries the key, not the client: a stale default on the shared client must never leak.</summary>
+    [Fact]
+    public async Task GetQuotes_WithAnApiKeyOverride_SendsItOnTheRequest_NeverTheSharedClientsDefault()
+    {
+        var headerHandler = new HeaderCapturingHandler();
+        var byokClient = new HttpClient(headerHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        var sharedClient = new HttpClient(new CountingHandler(HttpStatusCode.OK, """{"c":1.23,"t":1000000000}"""))
+        {
+            BaseAddress = new Uri("https://api.finnhub.io/api/v1/"),
+        };
+        sharedClient.DefaultRequestHeaders.Add("X-Finnhub-Token", "the-apps-own-key");
+
+        var provider = new FinnhubQuoteProvider(
+            sharedClient,
+            new StaticHttpClientFactory(byokClient),
+            new FakeTimeProvider(Now),
+            NullLogger<FinnhubQuoteProvider>.Instance);
+
+        await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            "a-users-own-key",
+            TestContext.Current.CancellationToken);
+
+        headerHandler.LastTokenHeader.ShouldBe("a-users-own-key");
+    }
+
+    /// <summary>With no override, the byok client is never even asked for — the app's own key path is untouched.</summary>
+    [Fact]
+    public async Task GetQuotes_WithNoApiKeyOverride_NeverAsksTheFactoryForTheByokClient()
+    {
+        var sharedHandler = new CountingHandler(HttpStatusCode.OK, """{"c":1.23,"t":1000000000}""");
+        var sharedClient = new HttpClient(sharedHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        var factory = new StaticHttpClientFactory(new HttpClient(new CountingHandler(HttpStatusCode.OK)));
+        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+
+        await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        sharedHandler.Calls.ShouldBe(1);
+        factory.RequestedName.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task VerifyKey_WhenTheProviderAccepts_IsAccepted()
+    {
+        var provider = Build(new CountingHandler(HttpStatusCode.OK, """{"count":1,"result":[{"symbol":"AAPL"}]}"""));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Accepted);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task VerifyKey_WhenTheProviderRejects_IsRejectedNotUnknown(HttpStatusCode status)
+    {
+        var provider = Build(new CountingHandler(status));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Rejected);
+    }
+
+    /// <summary>The check this test exists for: an unanswerable provider must never be read as a bad key.</summary>
+    [Fact]
+    public async Task VerifyKey_WhenTheProviderCannotAnswer_IsUnknownNotRejected()
+    {
+        var provider = Build(new CountingHandler(HttpStatusCode.InternalServerError));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Unknown);
+    }
+
+    [Fact]
+    public async Task VerifyKey_WhenTheTransportFails_IsUnknown()
+    {
+        var provider = BuildWithFlaky(new FlakyHandler("AAPL"));
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Unknown);
+    }
+
+    /// <summary>The reason the BYOK client exists at all: verifying a candidate key must not contribute to,
+    /// or be blocked by, the breaker every dashboard and the poller share. Before this test, VerifyKeyAsync
+    /// used the shared client - a user saving a perfectly good key could be told the provider was
+    /// unreachable because that unrelated breaker happened to be open.</summary>
+    [Fact]
+    public async Task VerifyKey_RoutesThroughTheByokNamedClient()
+    {
+        var sharedHandler = new CountingHandler(HttpStatusCode.OK, """{"count":1,"result":[{"symbol":"AAPL"}]}""");
+        var byokHandler = new CountingHandler(HttpStatusCode.OK, """{"count":1,"result":[{"symbol":"AAPL"}]}""");
+
+        var sharedClient = new HttpClient(sharedHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+        var byokClient = new HttpClient(byokHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        var factory = new StaticHttpClientFactory(byokClient);
+        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Accepted);
+        sharedHandler.Calls.ShouldBe(0, "verifying a candidate key must never touch the client every dashboard and the poller share");
+        byokHandler.Calls.ShouldBe(1);
+        factory.RequestedName.ShouldBe(FinnhubQuoteProvider.ByokClientName);
+    }
+
+    /// <summary>The app's own key must never leak into a check of someone else's candidate key.</summary>
+    [Fact]
+    public async Task VerifyKey_SendsTheCandidateKey_NotTheClientsOwn()
+    {
+        var handler = new HeaderCapturingHandler();
+        var client = new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        // Mimics MarketDataModule.cs, which adds the app's own key as a default header on this client.
+        client.DefaultRequestHeaders.Add("X-Finnhub-Token", "the-apps-own-key");
+
+        var provider = new FinnhubQuoteProvider(
+            client,
+            new StaticHttpClientFactory(client),
+            new FakeTimeProvider(Now),
+            NullLogger<FinnhubQuoteProvider>.Instance);
+
+        await provider.VerifyKeyAsync("candidate-key", TestContext.Current.CancellationToken);
+
+        handler.LastTokenHeader.ShouldBe("candidate-key");
+    }
+
+    private static FinnhubQuoteProvider BuildWithFlaky(FlakyHandler handler) =>
+        new(
+            new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
+            new StaticHttpClientFactory(new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") }),
+            new FakeTimeProvider(Now),
+            NullLogger<FinnhubQuoteProvider>.Instance);
+
+    /// <summary>Always hands back the one client it was built with, and records the name it was asked for.</summary>
+    private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
+    {
+        public string? RequestedName { get; private set; }
+
+        public HttpClient CreateClient(string name)
+        {
+            RequestedName = name;
+
+            return client;
+        }
+    }
+
+    private sealed class HeaderCapturingHandler : HttpMessageHandler
+    {
+        public string? LastTokenHeader { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            LastTokenHeader = request.Headers.TryGetValues("X-Finnhub-Token", out var values)
+                ? values.FirstOrDefault()
+                : null;
+
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"count":1,"result":[{"symbol":"AAPL"}]}""", System.Text.Encoding.UTF8, "application/json"),
+            });
+        }
     }
 
     private sealed class FlakyHandler(string failingSymbol) : HttpMessageHandler

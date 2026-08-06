@@ -1,5 +1,7 @@
 import { createFileRoute, Outlet, redirect } from '@tanstack/react-router'
 import { useAlertStream } from '../alerts/useAlertStream'
+import { useSyncServerLanguage } from '../settings/useSyncServerLanguage'
+import { useSyncServerTheme } from '../settings/useSyncServerTheme'
 
 /**
  * THE GUARD.
@@ -38,9 +40,15 @@ export const Route = createFileRoute('/_authenticated')({
  *
  * This layout is the exact set of pages that are both signed in and long-lived, and
  * navigating between them does not remount it — so one connection covers the whole session.
+ *
+ * `useSyncServerLanguage` and `useSyncServerTheme` live beside it for the same reason: both
+ * need a session to ask GET /api/settings/appearance, and this is the exact set of pages
+ * that has one.
  */
 function AuthenticatedLayout() {
   useAlertStream()
+  useSyncServerLanguage()
+  useSyncServerTheme()
 
   return <Outlet />
 }

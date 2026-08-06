@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
 import { Logo } from './Logo'
 
 export interface AuthLayoutProps {
@@ -17,6 +18,7 @@ export interface AuthLayoutProps {
  * URL that back/forward moves between, not a piece of component state.
  */
 export function AuthLayout({ mode, redirectTo, children }: AuthLayoutProps) {
+  const { t } = useTranslation('auth')
   const tabClass =
     'flex-1 rounded-[7px] py-[9px] text-center text-[13px] font-medium transition-colors'
   const activeTab = 'bg-panel text-tx shadow-sm'
@@ -30,7 +32,7 @@ export function AuthLayout({ mode, redirectTo, children }: AuthLayoutProps) {
       <div className="flex w-full max-w-[344px] flex-col gap-5">
         <div
           role="tablist"
-          aria-label="Authentication"
+          aria-label={t('tabs.listLabel')}
           className="flex gap-1 rounded-[10px] border border-bd bg-panel-2 p-1"
         >
           <Link
@@ -40,7 +42,7 @@ export function AuthLayout({ mode, redirectTo, children }: AuthLayoutProps) {
             aria-selected={mode === 'login'}
             className={`${tabClass} ${mode === 'login' ? activeTab : idleTab}`}
           >
-            Sign in
+            {t('tabs.signIn')}
           </Link>
           <Link
             to="/register"
@@ -49,7 +51,7 @@ export function AuthLayout({ mode, redirectTo, children }: AuthLayoutProps) {
             aria-selected={mode === 'register'}
             className={`${tabClass} ${mode === 'register' ? activeTab : idleTab}`}
           >
-            Create account
+            {t('tabs.createAccount')}
           </Link>
         </div>
 

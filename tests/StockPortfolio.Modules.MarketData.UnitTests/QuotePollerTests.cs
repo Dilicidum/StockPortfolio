@@ -77,6 +77,20 @@ public sealed class QuotePollerTests
     }
 
     [Fact]
+    public async Task Cycle_Always_LeavesTheProviderOnTheApplicationKey()
+    {
+        // The shared window is shared. A user's own key must never spend a user's quota filling it, and
+        // the poller has no user to have resolved one from in the first place.
+        using var harness = new Harness(
+            new StubSource("AAPL"),
+            new Quote(T("AAPL"), 187.42m, Now));
+
+        await harness.Poller.RunCycleAsync(Ct);
+
+        harness.Provider.ApiKeyOverridesSeen.ShouldAllBe(overrideKey => overrideKey == null);
+    }
+
+    [Fact]
     public async Task Cycle_TargetsThatAreNotTickers_AreDroppedBeforeTheProvider()
     {
         using var harness = new Harness(
@@ -260,10 +274,14 @@ public sealed class QuotePollerTests
 
         public List<Ticker> Requested { get; } = [];
 
-        public Task<IReadOnlyList<Quote>> GetQuotesAsync(IReadOnlySet<Ticker> tickers, CancellationToken ct)
+        public List<string?> ApiKeyOverridesSeen { get; } = [];
+
+        public Task<IReadOnlyList<Quote>> GetQuotesAsync(
+            IReadOnlySet<Ticker> tickers, string? apiKeyOverride, CancellationToken ct)
         {
             Calls++;
             Requested.AddRange(tickers);
+            ApiKeyOverridesSeen.Add(apiKeyOverride);
 
             return Throws
                 ? throw new InvalidOperationException("the provider fell over")
@@ -271,6 +289,9 @@ public sealed class QuotePollerTests
         }
 
         public Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct) => Task.FromResult(true);
+
+        public Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct) =>
+            Task.FromResult(KeyVerdict.Accepted);
 
         public Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct) =>
             Task.FromResult<IReadOnlyList<SymbolMatch>>([]);

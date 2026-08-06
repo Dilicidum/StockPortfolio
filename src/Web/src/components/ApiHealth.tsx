@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { Card } from './Card'
 import { NO_VALUE } from '../lib/format'
 import { fetchMarketDataHealth, marketDataKeys } from '../marketdata/dashboardApi'
@@ -27,20 +28,22 @@ function Row({ label, value, note }: RowProps) {
  * Phase 6 half of the panel and are labelled as such rather than left blank.
  */
 export function ApiHealth() {
+  const { t } = useTranslation('dashboard')
+
   const { data, isError } = useQuery({
     queryKey: marketDataKeys.health(),
     queryFn: ({ signal }) => fetchMarketDataHealth(signal),
     staleTime: 300_000,
   })
 
-  const provider = data?.provider ?? (isError ? 'Unreachable' : NO_VALUE)
+  const provider = data?.provider ?? (isError ? t('apiHealth.unreachable') : NO_VALUE)
 
   return (
-    <Card title="API health">
+    <Card title={t('apiHealth.title')}>
       <dl className="flex flex-col gap-2">
-        <Row label="Quote provider" value={provider} />
-        <Row label="Latency" value={NO_VALUE} note="Phase 6" />
-        <Row label="Quota used" value={NO_VALUE} note="Phase 6" />
+        <Row label={t('apiHealth.quoteProvider')} value={provider} />
+        <Row label={t('apiHealth.latency')} value={NO_VALUE} note={t('apiHealth.futurePhaseNote')} />
+        <Row label={t('apiHealth.quotaUsed')} value={NO_VALUE} note={t('apiHealth.futurePhaseNote')} />
       </dl>
     </Card>
   )

@@ -9,6 +9,7 @@ import type { Money } from '../lib/format'
  *   POST   /api/holdings       {ticker,quantity,price}     -> 201 Holding (created)
  *                                                          -> 200 Holding (merged into an existing position)
  *   PATCH  /api/holdings/{id}  {quantity,price}            -> 200 Holding | 404 | 400
+ *   PATCH  /api/holdings/{id}/visibility {isVisible}       -> 204 | 404
  *   DELETE /api/holdings/{id}  bearer                      -> 204 | 404
  *
  * The user is never in a request body — the bearer's `sub` claim is the owner.
@@ -83,3 +84,7 @@ export const updateHolding = (id: string, body: UpdateHoldingBody): Promise<Hold
 
 export const removeHolding = (id: string): Promise<void> =>
   apiFetch<void>(`/api/holdings/${id}`, { method: 'DELETE' })
+
+/** The settings screen's visibility toggle — a display filter, not a correction. */
+export const setHoldingVisibility = (id: string, isVisible: boolean): Promise<void> =>
+  apiFetch<void>(`/api/holdings/${id}/visibility`, { method: 'PATCH', body: { isVisible } })

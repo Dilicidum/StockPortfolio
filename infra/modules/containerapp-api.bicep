@@ -57,6 +57,9 @@ param jwtAudience string
 @secure()
 param finnhubApiKey string = ''
 
+@description('Whether a signed-in user may bring their own provider key. Not a secret — a plain feature switch.')
+param byokEnabled bool = true
+
 @description('Minimum replicas. Must stay at 1 — see comment below.')
 param minReplicas int = 1
 
@@ -147,6 +150,11 @@ var baseEnv = [
   {
     name: 'Cors__Origins__0'
     value: corsOrigin
+  }
+  // Not a secret and not a placeholder: the real value. string() because ACA env values are strings.
+  {
+    name: 'MarketData__Byok__Enabled'
+    value: string(byokEnabled)
   }
 ]
 

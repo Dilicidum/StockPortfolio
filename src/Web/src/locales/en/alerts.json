@@ -1,0 +1,40 @@
+{
+  "settingsForm": {
+    "heading": "Alert on {{ticker}}",
+    "description": "Tell me when {{ticker}} moves by more than this much, either way, inside the window. Repeat alerts on the same move are held back for a few minutes.",
+    "thresholdLabel": "Move of at least (%)",
+    "windowLabel": "Within",
+    "windowOption": "{{minutes}} minutes",
+    "enabledLabel": "Alerting on",
+    "submit": "Save alert"
+  },
+  "direction": {
+    "fall": "Fall",
+    "rise": "Rise"
+  },
+  "simulatedBadge": "Simulated",
+  "panel": {
+    "title": "Recent activity",
+    "listLabel": "Recent alerts",
+    "simulate": "Simulate",
+    "simulateFailure": "Set a threshold on one of your positions first.",
+    "loadFailure": "Could not load recent alerts. They are saved either way — this list will fill in on the next refresh.",
+    "loading": "Loading recent alerts…",
+    "empty": "Nothing has crossed a threshold yet. Set one on a position, then use Simulate.",
+    "seeAll": "See all {{count}}",
+    "fromPrice": " from {{price}}",
+    "agoLabel": "{{age}} ago"
+  },
+  "liveBadge": {
+    "connecting": "Connecting…",
+    "live": "Live (SSE)",
+    "reconnecting": "Reconnecting…",
+    "offline": "Offline",
+    "liveTitle": "Alerts are streaming from the server",
+    "offlineTitle": "Alerts will be listed as soon as the connection is back"
+  },
+  "notificationsPage": {
+    "title": "Notifications",
+    "subtitle": "Thresholds that have been crossed recently, newest first"
+  }
+}

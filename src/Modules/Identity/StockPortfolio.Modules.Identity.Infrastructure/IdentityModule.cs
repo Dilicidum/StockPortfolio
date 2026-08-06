@@ -53,6 +53,7 @@ public static class IdentityModule
 
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IRefreshTokenRepository, RefreshTokenRepository>();
+        services.AddScoped<IUserPreferencesRepository, UserPreferencesRepository>();
 
         // Singletons: both are stateless and hold expensive pre-computed state.
         services.AddSingleton<IPasswordHasher, Argon2PasswordHasher>();

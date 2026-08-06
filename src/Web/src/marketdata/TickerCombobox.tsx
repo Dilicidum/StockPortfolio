@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent, type Ref } from 'react'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { useDebouncedValue } from '../lib/useDebouncedValue'
 import { MIN_SEARCH_LENGTH, tickerSearchQuery, type TickerSuggestion } from './tickerSearchApi'
 
@@ -42,6 +43,7 @@ export function TickerCombobox({
   error,
   placeholder,
 }: TickerComboboxProps) {
+  const { t } = useTranslation('common')
   const id = useId()
   const listboxId = `${id}-listbox`
   const errorId = `${id}-error`
@@ -174,7 +176,7 @@ export function TickerCombobox({
           <ul
             id={listboxId}
             role="listbox"
-            aria-label={`${label} suggestions`}
+            aria-label={t('search.suggestionsFor', { label })}
             className="border-bd bg-panel absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-[9px] border py-1 shadow-lg"
           >
             {suggestions.map((suggestion, index) => (
@@ -208,7 +210,7 @@ export function TickerCombobox({
        * carries no role at all.
        */}
       <div aria-live="polite" className="sr-only">
-        {expanded ? `${suggestions.length} ${suggestions.length === 1 ? 'match' : 'matches'}` : ''}
+        {expanded ? t('search.matchesCount', { count: suggestions.length }) : ''}
       </div>
 
       {error ? (

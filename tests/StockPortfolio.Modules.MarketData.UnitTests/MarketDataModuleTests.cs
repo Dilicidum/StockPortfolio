@@ -13,8 +13,16 @@ namespace StockPortfolio.Tests;
 
 public sealed class MarketDataModuleTests
 {
+    // AddMarketDataModule now calls AddMarketDataPersistence, which throws without a connection string.
+    // None of these tests open a real connection, so a syntactically-valid placeholder is all AddDbContext
+    // needs; AddInMemoryCollection is called twice so a caller-supplied value below still overrides it.
+    private const string FallbackConnectionString =
+        "Host=localhost;Database=marketdata-unit-tests;Username=none;Password=none";
+
     private static IConfiguration Config(params (string Key, string Value)[] settings) =>
         new ConfigurationBuilder()
+            .AddInMemoryCollection(
+                new[] { new KeyValuePair<string, string?>("ConnectionStrings:MarketData", FallbackConnectionString) })
             .AddInMemoryCollection(settings.Select(s => new KeyValuePair<string, string?>(s.Key, s.Value)))
             .Build();
 
@@ -105,15 +113,6 @@ public sealed class MarketDataModuleTests
     }
 
     [Fact]
-    public void Module_TokenBucket_IsOneInstanceForTheProcess()
-    {
-        using var provider = Build(Config());
-
-        provider.GetRequiredService<System.Threading.RateLimiting.RateLimiter>()
-            .ShouldBeSameAs(provider.GetRequiredService<System.Threading.RateLimiting.RateLimiter>());
-    }
-
-    [Fact]
     public async Task Finnhub401_IsNotRetriedByTheResiliencePipeline()
     {
         var handler = new CountingHandler(HttpStatusCode.Unauthorized);
@@ -128,10 +127,31 @@ public sealed class MarketDataModuleTests
 
         var quotes = await services.GetRequiredService<IQuoteProvider>().GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
         quotes.ShouldBeEmpty();
         handler.Calls.ShouldBe(1);
+    }
+
+    /// <summary>The provider's own signal is the only pacing left once the client-side bucket is gone.</summary>
+    [Fact]
+    public async Task GetQuotes_WhenTheProviderReturns429_RetriesRatherThanFailing()
+    {
+        var handler = new CountingHandler(HttpStatusCode.TooManyRequests, thenOk: true);
+
+        using var services = Build(
+            Config(("Finnhub:ApiKey", "a-real-looking-key")),
+            extra => extra
+                .AddHttpClient<IQuoteProvider, StockPortfolio.Modules.MarketData.Infrastructure.Quotes.FinnhubQuoteProvider>()
+                .ConfigurePrimaryHttpMessageHandler(() => handler));
+
+        await services.GetRequiredService<IQuoteProvider>().GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        handler.Calls.ShouldBeGreaterThan(1);
     }
 
     [Fact]

@@ -3,6 +3,7 @@ import { createFileRoute, useRouter, type ErrorComponentProps } from '@tanstack/
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Controller, useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { AlertSettingsForm, type AlertSettingValues } from '../../alerts/AlertSettingsForm'
 import { alertKeys, alertSettingsQuery, saveAlertSetting } from '../../alerts/alertsApi'
@@ -16,7 +17,8 @@ import { TextField } from '../../components/TextField'
 import { TickerCell } from '../../components/TickerCell'
 import { TickerCombobox } from '../../marketdata/TickerCombobox'
 import { formatMoney } from '../../lib/format'
-import { applyServerErrors } from '../../lib/formErrors'
+import { applyServerErrors, translateFieldError } from '../../lib/formErrors'
+import i18n from '../../lib/i18n'
 import { EditHoldingForm, type EditHoldingValues } from '../../portfolio/EditHoldingForm'
 import { holdingsQuery, type Holding } from '../../portfolio/holdingsApi'
 import { useAddHolding, useRemoveHolding, useUpdateHolding } from '../../portfolio/useHoldingMutations'
@@ -52,17 +54,18 @@ export const Route = createFileRoute('/_authenticated/portfolio')({
  */
 function PortfolioError({ error }: ErrorComponentProps) {
   const router = useRouter()
+  const { t } = useTranslation(['portfolio', 'common'])
 
   return (
-    <AppShell title="Portfolio" subtitle="Positions you hold, and what you paid for them">
-      <Alert tone="error" title="Could not load your positions">
-        {error.message || 'The server did not answer.'}
+    <AppShell title={t('title')} subtitle={t('subtitle')}>
+      <Alert tone="error" title={t('error.title')}>
+        {error.message || t('error.fallback')}
       </Alert>
 
       {/* `router.invalidate()` re-runs the loader, which re-runs `ensureQueryData`
           against a query that holds an error and no data — so it refetches. */}
       <div className="sm:max-w-[200px]">
-        <Button onClick={() => void router.invalidate()}>Try again</Button>
+        <Button onClick={() => void router.invalidate()}>{t('common:actions.tryAgain')}</Button>
       </div>
     </AppShell>
   )
@@ -108,13 +111,16 @@ type AddHoldingValues = z.output<typeof addHoldingSchema>
 function totalInvested(holdings: Holding[]): string {
   const total = holdings.reduce((sum, holding) => sum + Number(holding.invested.amount), 0)
 
-  return total.toLocaleString(undefined, {
+  // `i18n.language`, not `undefined` ("browser default") — same reasoning as
+  // `lib/format.ts`'s `formatMoney`, which this figure deliberately does not go through.
+  return total.toLocaleString(i18n.language, {
     style: 'currency',
     currency: holdings[0]?.invested.currency ?? 'USD',
   })
 }
 
 export function PortfolioPage() {
+  const { t } = useTranslation(['portfolio', 'common'])
   const { data: holdings } = useSuspenseQuery(holdingsQuery)
   const queryClient = useQueryClient()
 
@@ -224,11 +230,18 @@ export function PortfolioPage() {
   }
 
   const columns: Array<Column<Holding>> = [
-    { header: 'Asset', cell: (holding) => <TickerCell ticker={holding.ticker} name={holding.name} /> },
-    { header: 'Qty', cell: (holding) => holding.quantity, numeric: true },
-    { header: 'Buy', cell: (holding) => formatMoney(holding.averagePrice), numeric: true },
     {
-      header: 'Actions',
+      header: t('positions.columns.asset'),
+      cell: (holding) => <TickerCell ticker={holding.ticker} name={holding.name} />,
+    },
+    { header: t('positions.columns.qty'), cell: (holding) => holding.quantity, numeric: true },
+    {
+      header: t('positions.columns.buy'),
+      cell: (holding) => formatMoney(holding.averagePrice),
+      numeric: true,
+    },
+    {
+      header: t('positions.columns.actions'),
       // `numeric` only for its right alignment; `font-sans` puts the word "Edit" back
       // into the body face, because the monospace half of that flag is for figures.
       numeric: true,
@@ -245,15 +258,18 @@ export function PortfolioPage() {
           <Button
             variant="ghost"
             size="sm"
-            aria-label={`Set an alert on ${holding.ticker}`}
+            aria-label={t('rowActions.setAlertAria', { ticker: holding.ticker })}
             onClick={() => openAlerts(holding)}
           >
             {setting && setting.enabled ? (
               <span className="text-ac font-mono">
-                {setting.thresholdPercent}% / {setting.windowMinutes}m
+                {t('rowActions.thresholdLabel', {
+                  threshold: setting.thresholdPercent,
+                  window: setting.windowMinutes,
+                })}
               </span>
             ) : (
-              'Alert'
+              t('rowActions.setAlert')
             )}
           </Button>
           <Button
@@ -261,17 +277,17 @@ export function PortfolioPage() {
             size="sm"
             // Same shape as Remove below: the accessible name names the row, because
             // "Edit" repeated once per position tells a screen-reader user nothing.
-            aria-label={`Edit ${holding.ticker}`}
+            aria-label={t('rowActions.editAria', { ticker: holding.ticker })}
             onClick={() => openEditor(holding)}
           >
-            Edit
+            {t('rowActions.edit')}
           </Button>
           <Button
             variant="ghost"
             size="sm"
             // The visible label is a glyph; the accessible name says which row it acts on,
             // because "×" repeated once per position tells a screen-reader user nothing.
-            aria-label={`Remove ${holding.ticker}`}
+            aria-label={t('rowActions.removeAria', { ticker: holding.ticker })}
             onClick={() => setRemoving(holding)}
           >
             <span aria-hidden="true">×</span>
@@ -283,7 +299,7 @@ export function PortfolioPage() {
   ]
 
   return (
-    <AppShell title="Portfolio" subtitle="Positions you hold, and what you paid for them">
+    <AppShell title={t('title')} subtitle={t('subtitle')}>
       {formError ? <Alert tone="error">{formError}</Alert> : null}
 
       {/*
@@ -293,12 +309,15 @@ export function PortfolioPage() {
        */}
       {merged ? (
         <Alert tone="success">
-          Merged into your {merged.ticker} position — {merged.quantity} shares, average{' '}
-          {formatMoney(merged.averagePrice)}.
+          {t('mergedNotice', {
+            ticker: merged.ticker,
+            quantity: merged.quantity,
+            price: formatMoney(merged.averagePrice),
+          })}
         </Alert>
       ) : null}
 
-      <Card title="Add a position">
+      <Card title={t('addForm.title')}>
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {/*
@@ -312,32 +331,32 @@ export function PortfolioPage() {
               name="ticker"
               render={({ field, fieldState }) => (
                 <TickerCombobox
-                  label="Ticker"
-                  placeholder="AAPL"
+                  label={t('fields.tickerLabel')}
+                  placeholder={t('fields.tickerPlaceholder')}
                   value={field.value ?? ''}
                   onChange={field.onChange}
                   onBlur={field.onBlur}
                   inputRef={field.ref}
-                  error={fieldState.error?.message}
+                  error={translateFieldError(t, fieldState.error?.message)}
                 />
               )}
             />
             <TextField
-              label="Quantity"
+              label={t('fields.quantityLabel')}
               type="number"
               step="any"
               inputMode="decimal"
-              placeholder="10"
-              error={errors.quantity?.message}
+              placeholder={t('fields.quantityPlaceholder')}
+              error={translateFieldError(t, errors.quantity?.message)}
               {...register('quantity')}
             />
             <TextField
-              label="Price"
+              label={t('fields.priceLabel')}
               type="number"
               step="any"
               inputMode="decimal"
-              placeholder="100.00"
-              error={errors.price?.message}
+              placeholder={t('fields.pricePlaceholder')}
+              error={translateFieldError(t, errors.price?.message)}
               {...register('price')}
             />
           </div>
@@ -350,17 +369,17 @@ export function PortfolioPage() {
            */}
           <div className="sm:max-w-[200px]">
             <Button type="submit" size="lg" disabled={add.isPending}>
-              {add.isPending ? 'Adding…' : 'Add position'}
+              {add.isPending ? t('addForm.submitting') : t('addForm.submit')}
             </Button>
           </div>
         </form>
       </Card>
 
       <Card
-        title="Positions"
+        title={t('positions.title')}
         action={
           <span className="text-mu text-[12.5px]">
-            Invested <span className="text-tx font-mono">{totalInvested(holdings)}</span>
+            {t('positions.invested')} <span className="text-tx font-mono">{totalInvested(holdings)}</span>
           </span>
         }
       >
@@ -395,23 +414,19 @@ export function PortfolioPage() {
         {/* No price and no P&L columns on purpose: the dashboard owns them. Adding them here would
             make a CRUD screen pay MarketData's one-call-per-position fan-out on every render. */}
         <Table
-          caption="Your positions"
+          caption={t('positions.caption')}
           columns={columns}
           rows={holdings}
           rowKey={(holding) => holding.id}
-          empty="No positions yet. Add one above."
+          empty={t('positions.empty')}
         />
       </Card>
 
       <ConfirmDialog
         open={removing !== null}
-        title="Remove position"
-        body={
-          removing
-            ? `This removes your ${removing.ticker} position and everything recorded against it.`
-            : ''
-        }
-        confirmLabel="Remove"
+        title={t('removeDialog.title')}
+        body={removing ? t('removeDialog.body', { ticker: removing.ticker }) : ''}
+        confirmLabel={t('removeDialog.confirm')}
         onCancel={() => setRemoving(null)}
         // No `busy`: the removal is optimistic, so the row is already gone by the time
         // the request is in flight. Holding a spinner over a table that has already
@@ -428,7 +443,7 @@ export function PortfolioPage() {
           // That reads as a rendering glitch and invites a second click at a server
           // that just failed. `mutateAsync` + catch is what the add path already does.
           void remove.mutateAsync(target.id).catch(() => {
-            setFormError(`Could not remove ${target.ticker}. Please try again.`)
+            setFormError(t('removeDialog.failure', { ticker: target.ticker }))
           })
         }}
       />

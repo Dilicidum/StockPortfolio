@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
+using StockPortfolio.Modules.MarketData.Infrastructure;
 using StockPortfolio.Modules.Portfolio.Infrastructure;
 
 namespace StockPortfolio.Migrator;
@@ -22,6 +23,7 @@ public static class MigratedModules
         services.AddIdentityPersistence(configuration);
         services.AddPortfolioModule(configuration);
         services.AddAlertsModule(configuration);
+        services.AddMarketDataPersistence(configuration);
 
         return services;
     }

@@ -1,10 +1,11 @@
 import { useId } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { Button } from '../components/Button'
 import { TextField } from '../components/TextField'
-import { applyServerErrors } from '../lib/formErrors'
+import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import type { Holding } from './holdingsApi'
 
 /**
@@ -42,6 +43,7 @@ export interface EditHoldingFormProps {
  */
 export function EditHoldingForm({ holding, pending, onSave, onError, onCancel }: EditHoldingFormProps) {
   const headingId = useId()
+  const { t } = useTranslation(['portfolio', 'common'])
 
   const {
     register,
@@ -77,32 +79,29 @@ export function EditHoldingForm({ holding, pending, onSave, onError, onCancel }:
     >
       <div className="flex flex-col gap-1">
         <h3 id={headingId} className="text-tx text-[13px] font-semibold">
-          Correct {holding.ticker}
+          {t('editForm.heading', { ticker: holding.ticker })}
         </h3>
         {/* Says REPLACES out loud. The add form averages; this one does not, and the two
             sit on the same screen, so the difference has to be stated rather than inferred. */}
-        <p className="text-mu text-[11.5px] leading-relaxed">
-          These values replace the position outright — nothing is averaged with what is
-          recorded now. To add to it instead, buy it again above.
-        </p>
+        <p className="text-mu text-[11.5px] leading-relaxed">{t('editForm.description')}</p>
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <TextField
-          label="Quantity"
+          label={t('fields.quantityLabel')}
           type="number"
           step="any"
           inputMode="decimal"
           autoFocus
-          error={errors.quantity?.message}
+          error={translateFieldError(t, errors.quantity?.message)}
           {...register('quantity')}
         />
         <TextField
-          label="Price"
+          label={t('fields.priceLabel')}
           type="number"
           step="any"
           inputMode="decimal"
-          error={errors.price?.message}
+          error={translateFieldError(t, errors.price?.message)}
           {...register('price')}
         />
       </div>
@@ -111,10 +110,10 @@ export function EditHoldingForm({ holding, pending, onSave, onError, onCancel }:
           click would fire against a row the table already shows as corrected. */}
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={pending}>
-          {pending ? 'Saving…' : 'Save'}
+          {pending ? t('common:actions.saving') : t('common:actions.save')}
         </Button>
         <Button type="button" variant="secondary" size="sm" onClick={onCancel}>
-          Cancel
+          {t('common:actions.cancel')}
         </Button>
       </div>
     </form>

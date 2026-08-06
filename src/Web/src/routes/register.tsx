@@ -2,13 +2,14 @@ import { useState } from 'react'
 import { createFileRoute, redirect, useRouter } from '@tanstack/react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 import { Alert } from '../components/Alert'
 import { AuthLayout } from '../components/AuthLayout'
 import { Button } from '../components/Button'
 import { TextField } from '../components/TextField'
 import { useAuth } from '../auth/useAuth'
-import { applyServerErrors } from '../lib/formErrors'
+import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import { safeRedirect } from '../lib/safeRedirect'
 
 /**
@@ -19,20 +20,23 @@ import { safeRedirect } from '../lib/safeRedirect'
  *
  * `confirmPassword` is client-only. The API contract takes {email, password};
  * a confirmation field is a UI affordance and is stripped before submit.
+ *
+ * Message KEYS, not sentences — see `login.tsx`'s equivalent comment. This form was the
+ * other holdout `portfolio.tsx`'s convention had not yet reached.
  */
 const schema = z
   .object({
-    email: z.email('Enter a valid email address.'),
+    email: z.email('errors.email.format'),
     password: z
       .string()
-      .min(8, 'Use at least 8 characters.')
-      .regex(/[A-Za-z]/, 'Include at least one letter.')
-      .regex(/[0-9]/, 'Include at least one digit.'),
-    confirmPassword: z.string().min(1, 'Repeat your password.'),
+      .min(8, 'errors.password.tooShort')
+      .regex(/[A-Za-z]/, 'errors.password.needsLetter')
+      .regex(/[0-9]/, 'errors.password.needsDigit'),
+    confirmPassword: z.string().min(1, 'errors.confirmPassword.required'),
   })
   .refine((values) => values.password === values.confirmPassword, {
     path: ['confirmPassword'],
-    message: 'Passwords do not match.',
+    message: 'errors.confirmPassword.mismatch',
   })
 
 type RegisterForm = z.infer<typeof schema>
@@ -52,6 +56,7 @@ function RegisterPage() {
   const { redirect: redirectParam } = Route.useSearch()
   const { register: signUp } = useAuth()
   const router = useRouter()
+  const { t } = useTranslation('auth')
   const [formError, setFormError] = useState('')
 
   const {
@@ -84,34 +89,34 @@ function RegisterPage() {
 
         <div className="flex flex-col gap-3">
           <TextField
-            label="Email"
+            label={t('fields.emailLabel')}
             type="email"
             autoComplete="email"
-            placeholder="you@example.com"
-            error={errors.email?.message}
+            placeholder={t('fields.emailPlaceholder')}
+            error={translateFieldError(t, errors.email?.message)}
             {...register('email')}
           />
           <TextField
-            label="Password"
+            label={t('fields.passwordLabel')}
             type="password"
             autoComplete="new-password"
-            placeholder="••••••••"
-            hint="At least 8 characters, with a letter and a digit."
-            error={errors.password?.message}
+            placeholder={t('fields.passwordPlaceholder')}
+            hint={t('register.passwordHint')}
+            error={translateFieldError(t, errors.password?.message)}
             {...register('password')}
           />
           <TextField
-            label="Confirm password"
+            label={t('fields.confirmPasswordLabel')}
             type="password"
             autoComplete="new-password"
-            placeholder="••••••••"
-            error={errors.confirmPassword?.message}
+            placeholder={t('fields.passwordPlaceholder')}
+            error={translateFieldError(t, errors.confirmPassword?.message)}
             {...register('confirmPassword')}
           />
         </div>
 
         <Button type="submit" size="lg" loading={isSubmitting}>
-          Create account
+          {t('register.submit')}
         </Button>
       </form>
     </AuthLayout>

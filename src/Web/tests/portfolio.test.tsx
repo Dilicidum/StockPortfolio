@@ -326,7 +326,10 @@ describe('portfolio', () => {
     await user.type(screen.getByLabelText(/price/i), '1')
     await user.click(screen.getByRole('button', { name: /add position/i }))
 
-    expect(await screen.findByText('errors.ticker.format')).toBeInTheDocument()
+    // Translated text, not the raw "errors.ticker.format" key — i18n now turns the
+    // message-key convention into what a user actually sees. See tests/i18n.test.tsx for
+    // the Ukrainian side of that same conversion.
+    expect(await screen.findByText(/enter a valid ticker/i)).toBeInTheDocument()
 
     // A request COUNTER, not just a visible message: asserting the message alone would
     // pass even if the POST had ALSO been sent. Mirrors refreshDedupe.test.ts.

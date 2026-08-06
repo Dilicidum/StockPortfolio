@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
+import { useTranslation } from 'react-i18next'
 import { LiveBadge } from '../alerts/LiveBadge'
 import { useAuth } from '../auth/useAuth'
 import { Button } from './Button'
@@ -7,7 +8,9 @@ import { Logo } from './Logo'
 
 interface NavItem {
   to: string
-  label: string
+  /** A `common.json` key, not the label itself — this array is module scope, where no
+   * `t()` exists yet, so translation happens where it is rendered. */
+  labelKey: string
 }
 
 /**
@@ -19,9 +22,10 @@ interface NavItem {
  * Every entry below must be verified against `routeTree.gen.ts` by hand.
  */
 const NAV: NavItem[] = [
-  { to: '/dashboard', label: 'Dashboard' },
-  { to: '/portfolio', label: 'Portfolio' },
-  { to: '/notifications', label: 'Notifications' },
+  { to: '/dashboard', labelKey: 'nav.dashboard' },
+  { to: '/portfolio', labelKey: 'nav.portfolio' },
+  { to: '/notifications', labelKey: 'nav.notifications' },
+  { to: '/settings', labelKey: 'nav.settings' },
 ]
 
 function initialsOf(email: string): string {
@@ -43,6 +47,7 @@ export interface AppShellProps {
  * would be pure ceremony.
  */
 export function AppShell({ title, subtitle, children }: AppShellProps) {
+  const { t } = useTranslation('common')
   const { user, logout, isSigningOut } = useAuth()
   const email = user?.email ?? ''
 
@@ -53,12 +58,12 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           <Logo />
           <div className="lg:hidden">
             <Button variant="ghost" size="sm" onClick={() => void logout()} loading={isSigningOut}>
-              Sign out
+              {t('signOut')}
             </Button>
           </div>
         </div>
 
-        <nav aria-label="Main" className="-mx-1 flex gap-1 overflow-x-auto px-1 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0">
+        <nav aria-label={t('nav.mainLabel')} className="-mx-1 flex gap-1 overflow-x-auto px-1 lg:mx-0 lg:flex-col lg:gap-0.5 lg:overflow-visible lg:px-0">
           {NAV.map((item) => (
             <Link
               key={item.to}
@@ -72,7 +77,7 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
                     aria-hidden="true"
                     className={`h-1.5 w-1.5 rounded-full ${isActive ? 'bg-ac' : 'bg-bd'}`}
                   />
-                  {item.label}
+                  {t(item.labelKey)}
                 </>
               )}
             </Link>
@@ -87,7 +92,7 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
             onClick={() => void logout()}
             loading={isSigningOut}
           >
-            Sign out
+            {t('signOut')}
           </Button>
         </div>
       </aside>

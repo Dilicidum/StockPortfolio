@@ -31,8 +31,8 @@ days. Phases 1 to 3 cover every gate item, so the gate is passed a little over h
 | 1 | Sign in | Register and log in, locally and on the public URL | Built and deployed |
 | 2 | My portfolio | Add, merge, edit and delete holdings | Built and deployed |
 | 3 | Live prices & P&L | Dashboard with real prices, totals, profit and loss | Built and deployed |
-| 4 | Alerts | Threshold alerts pushed live, and the price poller behind them | Built and verified locally; **not deployed, so not done** |
-| 5 | Make it mine | Theme, language, refresh interval, thresholds, row visibility, bring-your-own API key | Not started |
+| 4 | Alerts | Threshold alerts pushed live, and the price poller behind them | Built and deployed |
+| 5 | Make it mine | Theme, language, refresh interval, thresholds, row visibility, bring-your-own API key | Built |
 | 6 | Doesn't break | Visible, honest degradation when a dependency fails | Not started |
 
 One plan file per phase: [phase 1](phase-1-sign-in.md), [phase 2](phase-2-my-portfolio.md),
@@ -207,9 +207,7 @@ Cut on purpose. Don't reintroduce without asking.
 
 ## Known gaps
 
-- **Phase 4 has not been deployed.** It is green locally. Two of its conditions can only be checked against
-  the public URL: an alert arriving there, and a stream still alive after four minutes.
-- **Readiness checks one database login of three.** The probe opens Identity's connection and answers for
+- **Readiness checks one database login of four.** The probe opens Identity's connection and answers for
   the database as a whole, so the portfolio or alerts login could be unreachable while the app reports
   itself healthy. It matters more now that alerts run on a timer rather than on a request, because nothing
   outside the process would notice. Tracked in [deferred-work.md](../deferred-work.md).

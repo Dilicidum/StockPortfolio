@@ -138,6 +138,9 @@ services:
       # warning. Finnhub killed its sandbox in 2022, so the demo must work
       # without a key.
       Finnhub__ApiKey: ${FINNHUB_API_KEY:-}
+      # Whether a signed-in user may save their own provider key. A real value, not a placeholder -
+      # 0-or-blank here would silently override the code default and reject every key.
+      MarketData__Byok__Enabled: ${BYOK_ENABLED:-true}
       # Polling and alerting. RetentionMinutes must stay ABOVE Alerts__MaxWindowMinutes or the
       # host refuses to start: a window longer than the history kept stops alerts firing silently.
       # With no thresholds configured the poller finds an empty list and does nothing.

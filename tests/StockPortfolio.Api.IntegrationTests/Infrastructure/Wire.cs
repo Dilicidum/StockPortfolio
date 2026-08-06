@@ -16,6 +16,15 @@ public sealed record AuthPayload(string AccessToken, string RefreshToken, DateTi
 /// <summary>The body of GET /api/auth/me.</summary>
 public sealed record UserPayload(Guid Id, string Email);
 
+// The body of GET and PUT /api/settings/appearance.
+public sealed record AppearancePayload(string Theme, string Language);
+
+// The body of GET and PUT /api/settings/dashboard. A plain JSON number both ways: the user typed it.
+public sealed record DashboardSettingsPayload(int RefreshIntervalSeconds);
+
+// The body of GET and POST /api/settings/api-key. The key itself is never a member of this type.
+public sealed record ApiKeyStatusPayload(bool Configured, string? LastFour, bool Rejected);
+
 /// <summary>An amount as the API serialises it. Amount is a string on purpose — see MoneyJsonConverter.</summary>
 public sealed record MoneyPayload(string Amount, string Currency);
 
@@ -101,6 +110,15 @@ internal static class Wire
 
     /// <summary>Thresholds: one GET for the lot, one PUT per position.</summary>
     public const string AlertSettingsPath = "/api/alerts/settings";
+
+    // The appearance settings pair: one GET, one PUT, both under /api/settings.
+    public const string AppearancePath = "/api/settings/appearance";
+
+    // The dashboard settings pair: one GET, one PUT, both under /api/settings.
+    public const string DashboardSettingsPath = "/api/settings/dashboard";
+
+    // The BYOK settings trio: GET the status, POST to save, DELETE to forget.
+    public const string ApiKeySettingsPath = "/api/settings/api-key";
 
     /// <summary>Fired-alert history, and the group root — the SPA calls it without a trailing slash.</summary>
     public const string AlertHistoryPath = "/api/alerts";
@@ -263,6 +281,10 @@ internal static class Wire
 
         return payload;
     }
+
+    /// <summary>Posts a candidate key to /api/settings/api-key.</summary>
+    public static Task<HttpResponseMessage> SaveApiKeyAsync(HttpClient client, string? accessToken, string apiKey) =>
+        SendAsync(client, HttpMethod.Post, ApiKeySettingsPath, accessToken, new { apiKey });
 
     /// <summary>Calls /api/marketdata/search. The query is sent raw so an empty one can be exercised.</summary>
     public static Task<HttpResponseMessage> SearchTickersAsync(

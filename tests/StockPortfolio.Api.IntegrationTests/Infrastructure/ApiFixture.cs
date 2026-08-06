@@ -40,6 +40,9 @@ public sealed class ApiFixture : IAsyncLifetime
     /// <summary>The Alerts module's DML role — the one E1 was waiting for a consumer of.</summary>
     public const string AlertsRole = "alerts_svc";
 
+    /// <summary>The MarketData module's DML role — unused until this module owned a table.</summary>
+    public const string MarketDataRole = "marketdata_svc";
+
     private const string RolePassword = "role_test_only";
 
     /// <summary>A 46-byte key.</summary>
@@ -110,6 +113,9 @@ public sealed class ApiFixture : IAsyncLifetime
     /// <summary>Gets the connection string for the Alerts role, which must not see identity either.</summary>
     public string AlertsConnectionString => ConnectionStringFor(AlertsRole, RolePassword);
 
+    /// <summary>Gets the connection string for the MarketData role, which must not see any other schema.</summary>
+    public string MarketDataConnectionString => ConnectionStringFor(MarketDataRole, RolePassword);
+
     /// <summary>Gets the configuration the module list is registered against, shaped like the Migrator's own.</summary>
     public IConfiguration MigratorConfiguration => new ConfigurationBuilder()
         .AddInMemoryCollection(new Dictionary<string, string?>(StringComparer.Ordinal)
@@ -118,6 +124,7 @@ public sealed class ApiFixture : IAsyncLifetime
             ["ConnectionStrings:Identity"] = MigratorConnectionString,
             ["ConnectionStrings:Portfolio"] = MigratorConnectionString,
             ["ConnectionStrings:Alerts"] = MigratorConnectionString,
+            ["ConnectionStrings:MarketData"] = MigratorConnectionString,
         })
         .Build();
 
@@ -138,11 +145,12 @@ public sealed class ApiFixture : IAsyncLifetime
         ArgumentNullException.ThrowIfNull(clock);
 
         return new ApiFactory(
-            SettingsFor(
+            SettingsFor(new ModuleConnectionStrings(
                 IdentityConnectionString,
                 PortfolioConnectionString,
                 AlertsConnectionString,
-                _redis.GetConnectionString()),
+                MarketDataConnectionString,
+                _redis.GetConnectionString())),
             services =>
             {
                 services.RemoveAll<TimeProvider>();
@@ -156,11 +164,12 @@ public sealed class ApiFixture : IAsyncLifetime
         ArgumentNullException.ThrowIfNull(provider);
 
         return new ApiFactory(
-            SettingsFor(
+            SettingsFor(new ModuleConnectionStrings(
                 IdentityConnectionString,
                 PortfolioConnectionString,
                 AlertsConnectionString,
-                _redis.GetConnectionString()),
+                MarketDataConnectionString,
+                _redis.GetConnectionString())),
             services =>
             {
                 services.RemoveAll<IQuoteProvider>();
@@ -175,17 +184,33 @@ public sealed class ApiFixture : IAsyncLifetime
             });
     }
 
+    /// <summary>Builds a second host with the BYOK feature switched off, so 404 can be driven for real.</summary>
+    public ApiFactory CreateHostWithByokDisabled()
+    {
+        var settings = SettingsFor(new ModuleConnectionStrings(
+            IdentityConnectionString,
+            PortfolioConnectionString,
+            AlertsConnectionString,
+            MarketDataConnectionString,
+            _redis.GetConnectionString()));
+
+        settings["MarketData:Byok:Enabled"] = "false";
+
+        return new ApiFactory(settings);
+    }
+
     /// <summary>Builds a host whose Redis cannot answer while its quote provider still can.</summary>
-    public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(
+    public ApiFactory CreateHostWithRedisDown() => new(SettingsFor(new ModuleConnectionStrings(
         IdentityConnectionString,
         PortfolioConnectionString,
         AlertsConnectionString,
+        MarketDataConnectionString,
 
         // A port nothing listens on, per host and reversible. Stopping the _redis container instead would
         // mutate shared fixture state with no guarantee this class runs last. abortConnect=false stops
         // Connect throwing at first resolve; the bounded timeout is because the default 5000 ms would
         // otherwise be paid on every call.
-        "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1"));
+        "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1")));
 
     /// <summary>Builds a host pointed at dependencies that cannot possibly answer.</summary>
     public static ApiFactory CreateHostWithUnreachableDependencies()
@@ -193,11 +218,12 @@ public sealed class ApiFixture : IAsyncLifetime
         const string Nowhere = "Host=127.0.0.1;Port=1;Database=nowhere;Username=nobody;Password=nothing;"
             + "Timeout=2;Command Timeout=2;Maximum Pool Size=2";
 
-        return new ApiFactory(SettingsFor(
+        return new ApiFactory(SettingsFor(new ModuleConnectionStrings(
             Nowhere,
             Nowhere,
             Nowhere,
-            "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1"));
+            Nowhere,
+            "127.0.0.1:1,abortConnect=false,connectTimeout=500,connectRetry=1")));
     }
 
     /// <inheritdoc/>
@@ -208,17 +234,19 @@ public sealed class ApiFixture : IAsyncLifetime
         await ApplyMigrationsAsync();
 
         _api = new ApiFactory(
-            SettingsFor(
+            SettingsFor(new ModuleConnectionStrings(
                 IdentityConnectionString,
                 PortfolioConnectionString,
                 AlertsConnectionString,
-                _redis.GetConnectionString()),
+                MarketDataConnectionString,
+                _redis.GetConnectionString())),
             services =>
             {
                 // Both, or ParameterisationTests' assembly-wide proof silently stops covering holdings.
                 ModuleDbContextInterceptors.AddToIdentity(services, RecordedCommands);
                 ModuleDbContextInterceptors.AddToPortfolio(services, RecordedCommands);
                 ModuleDbContextInterceptors.AddToAlerts(services, RecordedCommands);
+                ModuleDbContextInterceptors.AddToMarketData(services, RecordedCommands);
 
                 // ConfigureTestServices runs after the app's own registrations, so this is the whole
                 // collection - which is what makes it comparable with the Migrator's.
@@ -243,17 +271,14 @@ public sealed class ApiFixture : IAsyncLifetime
         await _postgres.DisposeAsync();
     }
 
-    private static Dictionary<string, string?> SettingsFor(
-        string identity,
-        string portfolio,
-        string alerts,
-        string redis) =>
+    private static Dictionary<string, string?> SettingsFor(ModuleConnectionStrings connections) =>
         new Dictionary<string, string?>(StringComparer.Ordinal)
         {
-            ["ConnectionStrings:Identity"] = identity,
-            ["ConnectionStrings:Portfolio"] = portfolio,
-            ["ConnectionStrings:Alerts"] = alerts,
-            ["ConnectionStrings:Redis"] = redis,
+            ["ConnectionStrings:Identity"] = connections.Identity,
+            ["ConnectionStrings:Portfolio"] = connections.Portfolio,
+            ["ConnectionStrings:Alerts"] = connections.Alerts,
+            ["ConnectionStrings:MarketData"] = connections.MarketData,
+            ["ConnectionStrings:Redis"] = connections.Redis,
             ["Jwt:SigningKey"] = SigningKey,
             ["Jwt:Issuer"] = "StockPortfolio",
             ["Jwt:Audience"] = "StockPortfolio",
@@ -330,3 +355,7 @@ public sealed class ApiFixture : IAsyncLifetime
         }
     }
 }
+
+/// <summary>One host's worth of connection strings. A fifth positional SettingsFor argument was the last one; the next module needs a sixth.</summary>
+internal sealed record ModuleConnectionStrings(
+    string Identity, string Portfolio, string Alerts, string MarketData, string Redis);

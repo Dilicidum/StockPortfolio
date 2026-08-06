@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { formatAge, formatMoney, formatPercent } from '../lib/format'
@@ -22,6 +23,7 @@ interface AlertPanelProps {
 }
 
 function DirectionChip({ direction }: { direction: FiredAlert['direction'] }) {
+  const { t } = useTranslation('alerts')
   const falling = direction === 'Fall'
 
   return (
@@ -30,12 +32,13 @@ function DirectionChip({ direction }: { direction: FiredAlert['direction'] }) {
         falling ? 'bg-dn/12 text-dn' : 'bg-up/12 text-up'
       }`}
     >
-      {falling ? 'Fall' : 'Rise'}
+      {falling ? t('direction.fall') : t('direction.rise')}
     </span>
   )
 }
 
 export function AlertRow({ alert }: { alert: FiredAlert }) {
+  const { t } = useTranslation('alerts')
   const falling = alert.direction === 'Fall'
   const firedAt = Date.parse(alert.firedAt)
 
@@ -52,7 +55,7 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
          */}
         {alert.isSimulated ? (
           <span className="border-bd text-mu rounded-full border px-1.5 py-px text-[10.5px] tracking-[0.03em] uppercase">
-            Simulated
+            {t('simulatedBadge')}
           </span>
         ) : null}
 
@@ -61,17 +64,23 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
         </span>
       </div>
 
+      {/* Server-written (see AlertNotification.reason), so it renders in whatever
+          language the server produced it in — the API does not localize this text.  */}
       <p className="text-mu text-[12px] leading-snug">{alert.reason}</p>
 
       <div className="text-mu flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 text-[11.5px]">
         <span className="font-mono">
           {formatMoney(alert.triggerPrice)}
-          <span className="text-mu/80"> from {formatMoney(alert.referencePrice)}</span>
+          <span className="text-mu/80">
+            {t('panel.fromPrice', { price: formatMoney(alert.referencePrice) })}
+          </span>
         </span>
 
         {/* Every row is stamped. `title` carries the exact instant for anyone who needs it. */}
         <time dateTime={alert.firedAt} title={alert.firedAt}>
-          {Number.isNaN(firedAt) ? alert.firedAt : `${formatAge(Date.now() - firedAt)} ago`}
+          {Number.isNaN(firedAt)
+            ? alert.firedAt
+            : t('panel.agoLabel', { age: formatAge(Date.now() - firedAt) })}
         </time>
       </div>
     </li>
@@ -79,6 +88,7 @@ export function AlertRow({ alert }: { alert: FiredAlert }) {
 }
 
 export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
+  const { t } = useTranslation('alerts')
   const queryClient = useQueryClient()
   const [message, setMessage] = useState('')
 
@@ -88,7 +98,7 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
     mutationFn: () => simulateAlert(),
     onSuccess: () => setMessage(''),
     // 409 is the only expected failure: nothing to simulate against yet.
-    onError: () => setMessage('Set a threshold on one of your positions first.'),
+    onError: () => setMessage(t('panel.simulateFailure')),
     // The alert also arrives on the stream. This is what makes Simulate work with the
     // stream down, which is exactly the case the persist-then-publish rule exists for.
     onSettled: () => queryClient.invalidateQueries({ queryKey: alertKeys.history() }),
@@ -99,7 +109,7 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
 
   return (
     <Card
-      title="Recent activity"
+      title={t('panel.title')}
       action={
         compact ? (
           <Button
@@ -108,7 +118,7 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
             onClick={() => simulate.mutate()}
             loading={simulate.isPending}
           >
-            Simulate
+            {t('panel.simulate')}
           </Button>
         ) : null
       }
@@ -121,19 +131,14 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
 
       {isError ? (
         <p role="status" className="text-mu text-[12.5px]">
-          Could not load recent alerts. They are saved either way — this list will fill in on
-          the next refresh.
+          {t('panel.loadFailure')}
         </p>
       ) : null}
 
       {shown.length === 0 && !isError ? (
-        <p className="text-mu text-[12.5px]">
-          {isPending
-            ? 'Loading recent alerts…'
-            : 'Nothing has crossed a threshold yet. Set one on a position, then use Simulate.'}
-        </p>
+        <p className="text-mu text-[12.5px]">{isPending ? t('panel.loading') : t('panel.empty')}</p>
       ) : (
-        <ul aria-label="Recent alerts" className="flex flex-col">
+        <ul aria-label={t('panel.listLabel')} className="flex flex-col">
           {shown.map((alert) => (
             <AlertRow key={alert.id} alert={alert} />
           ))}
@@ -142,7 +147,7 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
 
       {compact && alerts.length > shown.length ? (
         <Link to="/notifications" className="text-ac mt-3 inline-block text-[12px] hover:underline">
-          See all {alerts.length}
+          {t('panel.seeAll', { count: alerts.length })}
         </Link>
       ) : null}
     </Card>

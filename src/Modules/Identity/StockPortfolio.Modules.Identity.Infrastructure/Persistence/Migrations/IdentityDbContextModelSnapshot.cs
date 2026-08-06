@@ -98,6 +98,29 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
                     b.ToTable("users", "identity");
                 });
 
+            modelBuilder.Entity("StockPortfolio.Modules.Identity.Domain.UserPreferences", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.Property<string>("Language")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("language");
+
+                    b.Property<string>("Theme")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("theme");
+
+                    b.HasKey("UserId");
+
+                    b.ToTable("user_preferences", "identity");
+                });
+
             modelBuilder.Entity("StockPortfolio.Modules.Identity.Domain.RefreshToken", b =>
                 {
                     b.HasOne("StockPortfolio.Modules.Identity.Domain.User", null)
@@ -106,6 +129,15 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_refresh_tokens_user_id");
+                });
+
+            modelBuilder.Entity("StockPortfolio.Modules.Identity.Domain.UserPreferences", b =>
+                {
+                    b.HasOne("StockPortfolio.Modules.Identity.Domain.User", null)
+                        .WithOne()
+                        .HasForeignKey("StockPortfolio.Modules.Identity.Domain.UserPreferences", "UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 #pragma warning restore 612, 618
         }

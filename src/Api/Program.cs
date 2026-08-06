@@ -73,6 +73,10 @@ builder.Services.AddPortfolioApi();
 builder.Services.AddMarketDataModule(builder.Configuration);
 builder.Services.AddMarketDataApi();
 
+// After AddMarketDataModule: the protector depends on MarketData's key-ring store. No eager warm-up:
+// see CLAUDE.md, key ring vs migration job.
+builder.Services.AddStockPortfolioDataProtection();
+
 builder.Services.AddAlertsModule(builder.Configuration);
 builder.Services.AddAlertsApi();
 
@@ -89,6 +93,10 @@ builder.Services.AddScoped<IPriceSampleObserver, AlertsPriceSampleObserver>();
 // Retention belongs to MarketData and the window cap to Alerts, so this is the only place both are
 // visible. A window longer than retention stops alerts firing and reports nothing.
 builder.Services.ValidateAlertWindowFitsRetention(builder.Configuration);
+
+// TryAdd cannot give ISecretProtector a default: a module's TryAdd always wins the race to be first,
+// so a missing registration must fail loudly here rather than on the first key someone saves.
+builder.Services.ValidateSecretProtectorIsRegistered();
 
 // Must come AFTER the modules: a decorator only applies to descriptors that already exist.
 // Not load-bearing for MarketData, which registers no ICommandHandler or IQueryHandler at all -

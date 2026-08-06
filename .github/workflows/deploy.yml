@@ -221,7 +221,8 @@ jobs:
               marketDataPassword:    { value: env.MARKETDATA_PW },
               alertsPassword:        { value: env.ALERTS_PW },
               jwtSigningKey:         { value: env.JWT_SIGNING_KEY },
-              finnhubApiKey:         { value: (env.FINNHUB_API_KEY // "") }
+              finnhubApiKey:         { value: (env.FINNHUB_API_KEY // "") },
+              byokEnabled:           { value: true }
             }
           }' > "$RUNNER_TEMP/deploy-params.json"
 

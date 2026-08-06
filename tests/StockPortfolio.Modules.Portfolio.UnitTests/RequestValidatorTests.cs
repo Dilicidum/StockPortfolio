@@ -9,6 +9,7 @@ public sealed class RequestValidatorTests
 {
     private static readonly AddHoldingRequestValidator Add = new();
     private static readonly UpdateHoldingRequestValidator Update = new();
+    private static readonly SaveDashboardSettingsRequestValidator SaveDashboardSettings = new();
 
     [Theory]
     [InlineData("AAPL", 10, 100)]
@@ -92,4 +93,21 @@ public sealed class RequestValidatorTests
             .GetProperties()
             .Select(property => property.Name)
             .ShouldBe(["Ticker", "Quantity", "Price"], ignoreOrder: true);
+
+    [Theory]
+    [InlineData(10)]
+    [InlineData(60)]
+    [InlineData(300)]
+    public void SaveDashboardSettings_AcceptsAnInRangeInterval(int seconds) =>
+        SaveDashboardSettings.Validate(new SaveDashboardSettingsRequest(seconds)).IsValid.ShouldBeTrue();
+
+    [Theory]
+    [InlineData(9)]
+    [InlineData(301)]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void SaveDashboardSettings_RejectsAnOutOfRangeInterval(int seconds) =>
+        SaveDashboardSettings.Validate(new SaveDashboardSettingsRequest(seconds))
+            .Errors.Select(error => error.PropertyName)
+            .ShouldContain("RefreshIntervalSeconds");
 }

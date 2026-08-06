@@ -1,0 +1,38 @@
+{
+  "time": {
+    "secondsShort": "{{count}}с",
+    "minutesShort": "{{count}}хв",
+    "hoursShort": "{{count}}год"
+  },
+  "actions": {
+    "cancel": "Скасувати",
+    "save": "Зберегти",
+    "saving": "Збереження…",
+    "saved": "Збережено",
+    "tryAgain": "Спробувати ще раз"
+  },
+  "nav": {
+    "mainLabel": "Основна",
+    "dashboard": "Панель приладів",
+    "portfolio": "Портфель",
+    "notifications": "Сповіщення",
+    "settings": "Налаштування"
+  },
+  "signOut": "Вийти",
+  "notFound": {
+    "heading": "Такої сторінки не існує.",
+    "backLink": "Повернутися до застосунку"
+  },
+  "search": {
+    "matchesCount_one": "Знайдено {{count}} збіг",
+    "matchesCount_few": "Знайдено {{count}} збіги",
+    "matchesCount_many": "Знайдено {{count}} збігів",
+    "matchesCount_other": "Знайдено {{count}} збігів",
+    "suggestionsFor": "Підказки для поля «{{label}}»"
+  },
+  "loading": "Завантаження",
+  "emptyTableFallback": "Поки що нічого немає.",
+  "splashLabel": "Відновлення сеансу",
+  "fallbackError": "Щось пішло не так. Спробуйте ще раз.",
+  "requestFailed": "Запит не вдався."
+}

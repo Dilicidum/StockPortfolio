@@ -18,14 +18,25 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>The names WithName gives each module's routes, keyed by the module that ships them.</summary>
     private static readonly Dictionary<string, string[]> ExpectedRouteNames = new(StringComparer.Ordinal)
     {
-        // The /api/auth five.
-        ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"],
+        // The /api/auth five, plus the /api/settings pair.
+        ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser", "GetAppearance", "SaveAppearance"],
 
-        // Four under /api/holdings, plus the dashboard.
-        ["Portfolio"] = ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"],
+        // Five under /api/holdings, the dashboard, plus the /api/settings/dashboard pair.
+        ["Portfolio"] =
+        [
+            "GetHoldings",
+            "AddHolding",
+            "UpdateHolding",
+            "RemoveHolding",
+            "SetHoldingVisibility",
+            "GetDashboard",
+            "GetDashboardSettings",
+            "SaveDashboardSettings",
+        ],
 
-        // The two that ship in every environment; the dev nudge is not mapped in all.
-        ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
+        // The two that ship in every environment, plus the BYOK settings trio; the dev nudge is not
+        // mapped in all.
+        ["MarketData"] = ["GetMarketDataHealth", "SearchTickers", "GetApiKeyStatus", "SaveApiKey", "RemoveApiKey"],
 
         // The settings pair, history, and the two-step handshake the stream needs.
         ["Alerts"] =
@@ -41,7 +52,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The five names WithName gives the /api/auth routes.</summary>
+    /// <summary>The names WithName gives the /api/auth and /api/settings routes.</summary>
     private static string[] AuthRouteNames => ExpectedRouteNames["Identity"];
 
     /// <summary>The five names WithName gives Portfolio's routes.</summary>
@@ -53,10 +64,10 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>Alerts' names.</summary>
     private static string[] AlertsRouteNames => ExpectedRouteNames["Alerts"];
 
-    /// <summary>The five routes, as theory data.</summary>
+    /// <summary>The Identity routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
-    /// <summary>The five Portfolio routes, as theory data.</summary>
+    /// <summary>The eight Portfolio routes, as theory data.</summary>
     public static TheoryData<string> PortfolioRoutes => [.. PortfolioRouteNames];
 
     /// <summary>The MarketData routes, as theory data.</summary>
@@ -67,11 +78,11 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
 
     /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheFiveAuthRoutes() => ShouldExposeExactly(AuthRouteNames);
+    public void EndpointDataSource_ExposesTheIdentityRoutes() => ShouldExposeExactly(AuthRouteNames);
 
     /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
     [Fact]
-    public void EndpointDataSource_ExposesTheFivePortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
+    public void EndpointDataSource_ExposesTheEightPortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
 
     /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]
@@ -124,6 +135,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("Logout", "anonymous", 401)]
     [InlineData("GetCurrentUser", "bearer", 200)]
     [InlineData("GetCurrentUser", "anonymous", 401)]
+    [InlineData("GetAppearance", "bearer", 200)]
+    [InlineData("GetAppearance", "anonymous", 401)]
+    [InlineData("SaveAppearance", "valid", 200)]
+    [InlineData("SaveAppearance", "bad-theme", 400)]
+    [InlineData("SaveAppearance", "wrong-content-type", 415)]
+    [InlineData("SaveAppearance", "anonymous", 401)]
     public async Task AuthRoute_DeclaresTheStatusItReturned(string routeName, string scenario, int expectedStatus)
     {
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
@@ -142,6 +159,12 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("RemoveHolding", "missing", 404)]
     [InlineData("GetDashboard", "bearer", 200)]
     [InlineData("GetDashboard", "anonymous", 401)]
+    [InlineData("GetDashboardSettings", "bearer", 200)]
+    [InlineData("GetDashboardSettings", "anonymous", 401)]
+    [InlineData("SaveDashboardSettings", "valid", 200)]
+    [InlineData("SaveDashboardSettings", "out-of-range", 400)]
+    [InlineData("SaveDashboardSettings", "wrong-content-type", 415)]
+    [InlineData("SaveDashboardSettings", "anonymous", 401)]
     public async Task PortfolioRoute_DeclaresTheStatusItReturned(
         string routeName,
         string scenario,
@@ -424,6 +447,81 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 return response.StatusCode;
             }
 
+            case ("GetAppearance", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-get");
+
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath, token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetAppearance", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.AppearancePath);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "valid"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-save");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.AppearancePath,
+                    token,
+                    new { theme = "dark", language = "uk" });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "bad-theme"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-bad-theme");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.AppearancePath,
+                    token,
+                    new { theme = "purple", language = "en" });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-appearance-415");
+
+                using var request = new HttpRequestMessage(HttpMethod.Put, Wire.AppearancePath)
+                {
+                    Content = new StringContent(
+                        """{"theme":"dark","language":"uk"}""",
+                        Encoding.UTF8,
+                        "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveAppearance", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.AppearancePath,
+                    accessToken: null,
+                    new { theme = "dark", language = "uk" });
+
+                return response.StatusCode;
+            }
+
             case ("GetHoldings", "bearer"):
             {
                 var token = await SignedInAsync(client, "metadata-holdings");
@@ -545,6 +643,85 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             case ("GetDashboard", "anonymous"):
             {
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/dashboard");
+
+                return response.StatusCode;
+            }
+
+            case ("GetDashboardSettings", "bearer"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-get");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Get,
+                    Wire.DashboardSettingsPath,
+                    token);
+
+                return response.StatusCode;
+            }
+
+            case ("GetDashboardSettings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.DashboardSettingsPath);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "valid"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-save");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.DashboardSettingsPath,
+                    token,
+                    new { refreshIntervalSeconds = 120 });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "out-of-range"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-bad-range");
+
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.DashboardSettingsPath,
+                    token,
+                    new { refreshIntervalSeconds = 5 });
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "wrong-content-type"):
+            {
+                var token = await SignedInAsync(client, "metadata-dashboard-settings-415");
+
+                using var request = new HttpRequestMessage(HttpMethod.Put, Wire.DashboardSettingsPath)
+                {
+                    Content = new StringContent(
+                        """{"refreshIntervalSeconds":120}""",
+                        Encoding.UTF8,
+                        "text/plain"),
+                };
+
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+                using var response = await client.SendAsync(request);
+
+                return response.StatusCode;
+            }
+
+            case ("SaveDashboardSettings", "anonymous"):
+            {
+                using var response = await Wire.SendAsync(
+                    client,
+                    HttpMethod.Put,
+                    Wire.DashboardSettingsPath,
+                    accessToken: null,
+                    new { refreshIntervalSeconds = 120 });
 
                 return response.StatusCode;
             }

@@ -146,6 +146,13 @@ public sealed class Holding
         return new Success();
     }
 
+    // Hiding is a display filter: it changes no figure and no alert.
+    public void SetVisibility(bool isVisible, TimeProvider clock)
+    {
+        IsVisible = isVisible;
+        UpdatedAt = clock.GetUtcNow();
+    }
+
     /// <summary>The single place a number is rounded, so the entity and the column can never disagree.</summary>
     private static decimal ToStoredScale(decimal value) =>
         Math.Round(value, StoredScale, MidpointRounding.ToEven);

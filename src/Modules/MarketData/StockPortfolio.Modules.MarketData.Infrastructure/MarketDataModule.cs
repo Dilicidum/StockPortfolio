@@ -1,16 +1,23 @@
-using System.Threading.RateLimiting;
-
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http.Resilience;
 
+using OneOf;
+using OneOf.Types;
+
+using StockPortfolio.Modules.MarketData.Application;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
+using StockPortfolio.Modules.MarketData.Application.Keys.Commands.RemoveApiKey;
+using StockPortfolio.Modules.MarketData.Application.Keys.Commands.SaveApiKey;
+using StockPortfolio.Modules.MarketData.Application.Keys.Queries.GetApiKeyStatus;
 using StockPortfolio.Modules.MarketData.Application.Names;
 using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Application.Tickers.Queries.SearchTickers;
 using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Infrastructure.Names;
+using StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 using StockPortfolio.Modules.MarketData.Infrastructure.Polling;
 using StockPortfolio.Modules.MarketData.Infrastructure.Prices;
 using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
@@ -24,11 +31,49 @@ public static class MarketDataModule
     // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>Registers MarketData: a provider, the token budget, the Redis stores, the contracts and the poller.</summary>
+    /// <summary>The ConnectionStrings key this module reads.</summary>
+    public const string ConnectionStringName = "MarketData";
+
+    /// <summary>The configuration key the BYOK feature switch is read from.</summary>
+    private const string ByokEnabledKey = "MarketData:Byok:Enabled";
+
+    /// <summary>Registers only the MarketData DbContext, for the migrator, which fetches nothing and encrypts nothing.</summary>
+    public static IServiceCollection AddMarketDataPersistence(this IServiceCollection services, IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var connectionString = configuration.GetConnectionString(ConnectionStringName);
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            throw new InvalidOperationException(
+                $"Connection string '{ConnectionStringName}' is not configured. Set "
+                + $"ConnectionStrings:{ConnectionStringName} (or ConnectionStrings__{ConnectionStringName}). "
+                + "Passing a null connection string to UseNpgsql throws later, from a stack that names "
+                + "neither the key nor the file.");
+        }
+
+        // AddDbContext, never AddDbContextFactory: the Migrator finds contexts by service type.
+        services.AddDbContext<MarketDataDbContext>(options => options.UseNpgsql(
+            connectionString,
+            npg => npg.MigrationsHistoryTable(
+                MarketDataDbContext.MigrationsHistoryTableName,
+                MarketDataDbContext.SchemaName)));
+
+        // KeyRingStore is internal to this assembly, so it is registered here rather than by the host,
+        // which can only ever see it through IKeyRingStore.
+        services.AddSingleton<IKeyRingStore, KeyRingStore>();
+
+        return services;
+    }
+
+    /// <summary>Registers MarketData: its DbContext, a provider, the Redis stores, the contracts and the poller.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(config);
+
+        services.AddMarketDataPersistence(config);
 
         // No eager validation of anything: a missing Finnhub key is a supported state and a throw here
         // would take down `docker compose up`, which is the P0 gate.
@@ -46,6 +91,16 @@ public static class MarketDataModule
                     client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
                 })
                 .AddStandardResilienceHandler(ConfigureResilience);
+
+            // A separate client, so a user's revoked key trips a breaker that is theirs alone. Sharing the
+            // client above would mean ten 401s from one bad key opens the circuit for every dashboard and
+            // the poller too. No default token header: the key travels per request instead.
+            services.AddHttpClient(FinnhubQuoteProvider.ByokClientName, client =>
+                {
+                    client.BaseAddress = options.BaseUrl;
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
+                })
+                .AddStandardResilienceHandler(ConfigureResilience);
         }
         else
         {
@@ -58,10 +113,6 @@ public static class MarketDataModule
             services.AddSingleton<IQuoteNudge>(sp => sp.GetRequiredService<FakeQuoteProvider>());
         }
 
-        // One bucket for the process: the typed client is transient, so a limiter held as a field on the
-        // provider would be a fresh bucket per resolution, enforcing nothing across concurrent requests.
-        services.AddSingleton<RateLimiter>(_ => BuildTokenBucket());
-
         services.AddSingleton<ILastKnownPriceStore, RedisLastKnownPriceStore>();
         services.AddSingleton<ICompanyNameStore, RedisCompanyNameStore>();
         services.AddSingleton<IPriceWindowStore, RedisPriceWindowStore>();
@@ -70,16 +121,45 @@ public static class MarketDataModule
         services.AddScoped<ISymbolValidator, SymbolValidator>();
         services.AddScoped<ICompanyNameReader, CompanyNameReader>();
 
-        // The module's first CQRS handler. Program.cs calls DecorateHandlers() after this, so it is
-        // wrapped in the logging decorator like every other one.
+        // Program.cs calls DecorateHandlers() after every module has registered, so each handler below
+        // is wrapped in the logging decorator like every other one in the host.
         services.AddScoped<
             IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>>,
             SearchTickersQueryHandler>();
+
+        AddKeys(services, config);
 
         AddPolling(services, config);
 
         return services;
     }
+
+    /// <summary>BYOK: the feature switch, the repository, the reader QuoteReader uses, and the three handlers.</summary>
+    private static void AddKeys(IServiceCollection services, IConfiguration config)
+    {
+        services.AddSingleton(ReadByokOptions(config));
+
+        services.AddScoped<IUserProviderKeyRepository, UserProviderKeyRepository>();
+        services.AddScoped<IUserProviderKeyReader, UserProviderKeyReader>();
+
+        services.AddScoped<
+            ICommandHandler<
+                SaveApiKeyCommand,
+                OneOf<SaveApiKeyResult, ProviderRejectedTheKey, ProviderCouldNotAnswer, ByokDisabled>>,
+            SaveApiKeyCommandHandler>();
+
+        services.AddScoped<
+            ICommandHandler<RemoveApiKeyCommand, OneOf<Success, NotFound>>,
+            RemoveApiKeyCommandHandler>();
+
+        services.AddScoped<
+            IQueryHandler<GetApiKeyStatusQuery, GetApiKeyStatusResult>,
+            GetApiKeyStatusQueryHandler>();
+    }
+
+    /// <summary>A blank, unparseable value or a missing key is a file that has not been told, not a "no".</summary>
+    private static ByokOptions ReadByokOptions(IConfiguration config) =>
+        new(bool.TryParse(config[ByokEnabledKey], out var enabled) ? enabled : ByokOptions.DefaultEnabled);
 
     /// <summary>The poller, its two locks, and the observer the host is expected to replace.</summary>
     private static void AddPolling(IServiceCollection services, IConfiguration config)
@@ -110,17 +190,7 @@ public static class MarketDataModule
         o.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
 
         // NEVER assign o.Retry.DelayGenerator - ShouldRetryAfterHeader's setter *is* that assignment, and
-        // setting a generator silently overwrites Retry-After handling. MaxDelay is ignored for it too.
+        // setting a generator silently overwrites Retry-After handling. With no client-side rate limiter,
+        // this header is the provider's only way to tell this client to slow down.
     }
-
-    private static TokenBucketRateLimiter BuildTokenBucket() =>
-        new(new TokenBucketRateLimiterOptions
-        {
-            TokenLimit = 25,
-            TokensPerPeriod = 1,
-            ReplenishmentPeriod = TimeSpan.FromSeconds(1),
-            AutoReplenishment = true,
-            QueueLimit = 256,
-            QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-        });
 }

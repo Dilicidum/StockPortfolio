@@ -10,6 +10,8 @@ using StockPortfolio.Modules.Identity.Application.Authentication.Commands.Refres
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
 using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
 using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
+using StockPortfolio.Modules.Identity.Application.Preferences.Commands.SaveAppearance;
+using StockPortfolio.Modules.Identity.Application.Preferences.Queries.GetAppearance;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
@@ -42,6 +44,11 @@ internal static class DependencyInjection
         services.AddScoped<
             IQueryHandler<GetCurrentUserQuery, OneOf<GetCurrentUserResult, NotFound>>,
             GetCurrentUserQueryHandler>();
+
+        services.AddScoped<IQueryHandler<GetAppearanceQuery, GetAppearanceResult>, GetAppearanceQueryHandler>();
+        services.AddScoped<
+            ICommandHandler<SaveAppearanceCommand, OneOf<GetAppearanceResult, InvalidInput>>,
+            SaveAppearanceCommandHandler>();
 
         return services;
     }
