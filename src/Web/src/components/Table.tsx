@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 
 export interface Column<TRow> {
   /** Stable key, also the mobile card's label. */
@@ -23,8 +24,12 @@ export interface TableProps<TRow> {
  * asks for a usable mobile layout rather than a shrunken desktop one.
  */
 export function Table<TRow>({ columns, rows, rowKey, caption, empty }: TableProps<TRow>) {
+  const { t } = useTranslation('common')
+
   if (rows.length === 0) {
-    return <div className="text-mu px-1 py-6 text-[12.5px]">{empty ?? 'Nothing here yet.'}</div>
+    // Every current caller passes its own `empty`; this is the defensive default for one
+    // that does not.
+    return <div className="text-mu px-1 py-6 text-[12.5px]">{empty ?? t('emptyTableFallback')}</div>
   }
 
   return (

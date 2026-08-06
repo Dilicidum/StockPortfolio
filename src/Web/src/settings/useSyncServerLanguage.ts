@@ -18,7 +18,7 @@ export function useSyncServerLanguage(): void {
 
   useEffect(() => {
     if (data && isSupportedLanguage(data.language)) {
-      applyServerLanguage(data.language)
+      void applyServerLanguage(data.language)
     }
   }, [data])
 }

@@ -92,15 +92,32 @@ void i18n.use(initReactI18next).init({
   interpolation: { escapeValue: false },
 })
 
+// `index.html` hardcodes `lang="en"` because it is static markup rendered before any of
+// this runs. Keeping `<html lang>` in step matters for screen readers (they use it to pick
+// a pronunciation) and browser translate prompts, so it is corrected here and on every
+// later change — `changeLanguage` fires this event for the initial `init()` too, not only
+// for later calls.
+i18n.on('languageChanged', (language) => {
+  if (typeof document !== 'undefined') document.documentElement.lang = language
+})
+if (typeof document !== 'undefined') document.documentElement.lang = i18n.language
+
 /**
  * THE ONLY PATH allowed to change the language once a session exists. Called by
  * `useSyncServerLanguage` as soon as the appearance query resolves, so the value the user
  * actually chose always overrides whatever the pre-sign-in cache guessed — including when
  * the two disagree, which is the ordinary case for a returning user on a fresh browser.
+ *
+ * Returns the settled promise rather than firing `changeLanguage` and forgetting it, so a
+ * test can `await` the moment the UI has actually re-rendered instead of racing it. Callers
+ * that do not care mark the call `void`, the same convention every other fire-and-forget
+ * call in this codebase follows.
  */
-export function applyServerLanguage(language: Language): void {
+export function applyServerLanguage(language: Language): Promise<void> {
   cacheLanguage(language)
-  if (i18n.language !== language) void i18n.changeLanguage(language)
+  if (i18n.language === language) return Promise.resolve()
+
+  return i18n.changeLanguage(language).then(() => undefined)
 }
 
 export default i18n
