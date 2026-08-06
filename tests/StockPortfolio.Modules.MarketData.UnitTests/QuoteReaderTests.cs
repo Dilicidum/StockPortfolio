@@ -3,6 +3,7 @@ using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using StackExchange.Redis;
 
+using StockPortfolio.Modules.MarketData.Application;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Domain;
@@ -23,12 +24,14 @@ public sealed class QuoteReaderTests
         IQuoteProvider provider,
         ILastKnownPriceStore store,
         IUserProviderKeyReader? keyReader = null,
-        IUserProviderKeyRepository? keyRepository = null) =>
+        IUserProviderKeyRepository? keyRepository = null,
+        ByokOptions? byokOptions = null) =>
         new(
             provider,
             store,
             keyReader ?? new StubKeyReader(_ => null),
             keyRepository ?? new FakeUserProviderKeyRepository(),
+            byokOptions ?? new ByokOptions(true),
             new FakeTimeProvider(Now));
 
     [Fact]
@@ -135,6 +138,21 @@ public sealed class QuoteReaderTests
     {
         var provider = new StubProvider(new Quote(T("AAPL"), 187.42m, Now));
         var reader = Build(provider, new RecordingStore(), new StubKeyReader(_ => null));
+
+        await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
+
+        provider.LastApiKeyOverride.ShouldBeNull();
+    }
+
+    /// <summary>The kill switch must actually kill: a stored key sits in the repository, but with BYOK
+    /// disabled it must never be read, decrypted or handed to the provider.</summary>
+    [Fact]
+    public async Task GetCurrentPrices_WhenByokIsDisabled_NeverReadsTheStoredKey()
+    {
+        var provider = new StubProvider(new Quote(T("AAPL"), 187.42m, Now));
+        var keyReader = new StubKeyReader(_ => throw new InvalidOperationException(
+            "The stored key must not be read while BYOK is disabled."));
+        var reader = Build(provider, new RecordingStore(), keyReader, byokOptions: new ByokOptions(false));
 
         await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 

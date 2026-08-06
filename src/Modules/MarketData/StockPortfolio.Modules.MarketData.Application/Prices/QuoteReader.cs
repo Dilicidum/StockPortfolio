@@ -10,6 +10,7 @@ public sealed class QuoteReader(
     ILastKnownPriceStore store,
     IUserProviderKeyReader keyReader,
     IUserProviderKeyRepository keyRepository,
+    ByokOptions byokOptions,
     TimeProvider clock) : IQuoteReader
 {
     public async Task<IReadOnlyDictionary<string, QuotedPrice>> GetCurrentPricesAsync(
@@ -36,8 +37,10 @@ public sealed class QuoteReader(
         }
 
         // Resolved once per call, before the fan-out: one database read and one decrypt for a whole
-        // dashboard load, never one per ticker.
-        var apiKeyOverride = await keyReader.ReadPlaintextAsync(userId, ct);
+        // dashboard load, never one per ticker. Skipped entirely while the switch is off, so a stored key
+        // is never read, decrypted or sent to the provider once BYOK is disabled - a saved key stays on
+        // file, but stops being used.
+        var apiKeyOverride = byokOptions.Enabled ? await keyReader.ReadPlaintextAsync(userId, ct) : null;
 
         var fetched = await provider.GetQuotesAsync(requested, apiKeyOverride, ct);
 

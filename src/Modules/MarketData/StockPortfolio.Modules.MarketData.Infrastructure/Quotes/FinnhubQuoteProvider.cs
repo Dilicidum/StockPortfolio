@@ -100,7 +100,10 @@ internal sealed partial class FinnhubQuoteProvider(
             // copies a default header onto the outgoing request when the request has not already set it.
             request.Headers.Add("X-Finnhub-Token", apiKey);
 
-            using var response = await client.SendAsync(request, ct);
+            // The BYOK client, not the shared one: a candidate key must not trip the breaker every
+            // dashboard and the poller share, and must not be told the provider is unreachable because
+            // that unrelated breaker happens to be open.
+            using var response = await httpClientFactory.CreateClient(ByokClientName).SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
             {

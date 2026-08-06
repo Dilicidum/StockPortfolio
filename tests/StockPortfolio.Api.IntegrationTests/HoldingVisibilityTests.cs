@@ -1,4 +1,6 @@
 using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
 
 using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
@@ -66,6 +68,27 @@ public sealed class HoldingVisibilityTests(ApiFixture fixture)
         using var settingResponse = await Wire.SaveAlertSettingAsync(client, token, ticker.Ticker, 5m, 30);
 
         settingResponse.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(settingResponse));
+    }
+
+    // Probes the declared 400 on PATCH .../visibility: the route has no ValidationFilter and its handler
+    // returns only Success or NotFound, so if anything produces a 400 here it has to be the framework's
+    // own JSON-body binding failure, not application validation. Written to settle exactly that question
+    // against a real request rather than by reasoning about the code.
+    [Fact]
+    public async Task Patch_WithMalformedJsonBody_Returns400()
+    {
+        var (client, token) = await SignedInAsync("visibility-malformed-body");
+        var id = await AddSucceedsAsync(client, token, Wire.UniqueTicker(), 5m, 100m);
+
+        using var request = new HttpRequestMessage(HttpMethod.Patch, $"/api/holdings/{id}/visibility")
+        {
+            Content = new StringContent("{ not json", Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await client.SendAsync(request, TestContext.Current.CancellationToken);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.BadRequest, await Wire.Describe(response));
     }
 
     private static Task<HttpResponseMessage> SetVisibilityAsync(

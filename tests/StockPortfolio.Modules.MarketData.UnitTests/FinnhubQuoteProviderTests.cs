@@ -332,6 +332,30 @@ public sealed class FinnhubQuoteProviderTests
         verdict.ShouldBe(KeyVerdict.Unknown);
     }
 
+    /// <summary>The reason the BYOK client exists at all: verifying a candidate key must not contribute to,
+    /// or be blocked by, the breaker every dashboard and the poller share. Before this test, VerifyKeyAsync
+    /// used the shared client - a user saving a perfectly good key could be told the provider was
+    /// unreachable because that unrelated breaker happened to be open.</summary>
+    [Fact]
+    public async Task VerifyKey_RoutesThroughTheByokNamedClient()
+    {
+        var sharedHandler = new CountingHandler(HttpStatusCode.OK, """{"count":1,"result":[{"symbol":"AAPL"}]}""");
+        var byokHandler = new CountingHandler(HttpStatusCode.OK, """{"count":1,"result":[{"symbol":"AAPL"}]}""");
+
+        var sharedClient = new HttpClient(sharedHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+        var byokClient = new HttpClient(byokHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
+
+        var factory = new StaticHttpClientFactory(byokClient);
+        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+
+        var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
+
+        verdict.ShouldBe(KeyVerdict.Accepted);
+        sharedHandler.Calls.ShouldBe(0, "verifying a candidate key must never touch the client every dashboard and the poller share");
+        byokHandler.Calls.ShouldBe(1);
+        factory.RequestedName.ShouldBe(FinnhubQuoteProvider.ByokClientName);
+    }
+
     /// <summary>The app's own key must never leak into a check of someone else's candidate key.</summary>
     [Fact]
     public async Task VerifyKey_SendsTheCandidateKey_NotTheClientsOwn()
