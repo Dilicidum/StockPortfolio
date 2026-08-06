@@ -91,8 +91,9 @@ function LoginPage() {
         </Button>
 
         <p className="text-mu text-xs leading-relaxed">
-          The access token is kept in memory only and is never written to
-          localStorage. Closing the tab ends the session.
+          One session for this browser, shared by every tab. Signing out ends it
+          everywhere. On a shared computer, sign out rather than just closing
+          the window.
         </p>
       </form>
     </AuthLayout>

@@ -1,34 +1,44 @@
 /**
  * SESSION MODEL — read this before changing anything here.
  *
- * The access token lives in a MODULE-SCOPED VARIABLE and nowhere else. Not
- * localStorage, not sessionStorage, not a non-httpOnly cookie. A short-lived
- * bearer sitting in web storage is readable by any script that gets injected
- * into the origin; keeping it in a closure means an XSS has to be live and
- * resident to steal it rather than just walking storage once.
+ * ONE SESSION PER BROWSER, not per tab. Signed in is signed in everywhere;
+ * signed out is signed out everywhere, in every tab, immediately.
  *
- * The refresh token goes to sessionStorage, in every deployment.
+ * The refresh token lives in localStorage. The access token lives in a
+ * MODULE-SCOPED VARIABLE and nowhere else — it is short-lived and there is no
+ * reason to write it down, so each tab mints its own from the shared refresh
+ * token.
  *
- * THERE IS NO COOKIE. This comment used to describe a dual-mode design — an
- * httpOnly cookie under compose, sessionStorage under Pages, with the client
- * blind to which — and none of the cookie half was ever built. The server sets
- * no cookie anywhere (`grep -ri "response.cookies\|httponly\|samesite"` over
- * the backend returns nothing); every auth endpoint returns the pair in the
- * body. The description survived because it read like a settled decision, so
- * nobody re-derived it. If a cookie is ever added, change this comment in the
- * same commit.
+ * WHY NOT AN httpOnly COOKIE. It is the right answer and it is unavailable
+ * here. The SPA is served from github.io and the API from Azure Container
+ * Apps, so a cookie the API sets is third-party: Safari blocks those outright,
+ * Firefox partitions them, Chrome restricts them. A credential that silently
+ * does not exist for some visitors is worse than one in storage. If the SPA is
+ * ever served from the same origin as the API, a cookie becomes possible and
+ * this whole file should go.
  *
- * sessionStorage, not localStorage: it is scoped to the tab and dies when the
- * tab closes, so a shared machine does not leak a live session into the next
- * person's browser window, and an XSS cannot walk storage once and leave with
- * a 14-day credential. An httpOnly cookie would be stronger still, and is
- * unavailable: the SPA is on github.io and the API on Azure Container Apps, so
- * the cookie would be third-party, and Safari blocks those outright.
+ * WHY NOT sessionStorage, WHICH IS WHAT THIS USED TO BE. sessionStorage is
+ * scoped to one tab, so tabs could not share a session. That was papered over
+ * with a BroadcastChannel that let a tab with no credential ask the others and
+ * adopt whatever it was handed — so a brand-new tab signed itself in silently,
+ * and signing out in one tab left the others signed in. Both were surprising,
+ * and neither is how anything else on the web behaves. localStorage makes the
+ * sharing real instead of simulated, and the message bus is deleted rather
+ * than fixed.
  *
- * Being tab-scoped is also why a second tab used to land on /login while the
- * first was still signed in. That is fixed by handing the session between tabs
- * over BroadcastChannel rather than by storing it somewhere shared — see
- * auth/sessionChannel.ts.
+ * THE COST, stated plainly: a 14-day refresh token is now written to disk,
+ * where script injected into this origin can read it in one line, and the
+ * session survives closing the browser. That is the ordinary trade every SPA
+ * without a first-party cookie makes. Note what it does NOT change — a live
+ * XSS could already call the API with the in-memory bearer and could already
+ * call refresh itself, so this widens the window rather than opening a door.
+ *
+ * THERE IS NO COOKIE, in any deployment. The server sets none anywhere; every
+ * auth endpoint returns the pair in the body. An earlier version of this
+ * comment described a dual-mode design where compose used a cookie and Pages
+ * used storage. None of the cookie half was ever built, and the description
+ * survived for months because it read like a settled decision. If a cookie is
+ * ever added, change this comment in the same commit.
  */
 
 const REFRESH_TOKEN_KEY = 'stockportfolio.refreshToken'
@@ -36,7 +46,7 @@ const REFRESH_TOKEN_KEY = 'stockportfolio.refreshToken'
 let accessToken: string | null = null
 let accessExpiresAt: string | null = null
 
-/** In-memory only. Returns null when there is no live session. */
+/** In-memory only. Returns null when this tab has not minted one yet. */
 export function getAccessToken(): string | null {
   return accessToken
 }
@@ -45,10 +55,16 @@ export function getAccessExpiresAt(): string | null {
   return accessExpiresAt
 }
 
-/** sessionStorage is absent in some SSR/test environments — never let it throw. */
+/**
+ * Always read through to storage rather than caching in memory. Another tab may
+ * have rotated the token since this one last looked, and refresh tokens are
+ * single-use — a stale copy is one the server has already retired.
+ *
+ * localStorage is absent in some SSR/test environments — never let it throw.
+ */
 export function getRefreshToken(): string | null {
   try {
-    return globalThis.sessionStorage?.getItem(REFRESH_TOKEN_KEY) ?? null
+    return globalThis.localStorage?.getItem(REFRESH_TOKEN_KEY) ?? null
   } catch {
     return null
   }
@@ -56,24 +72,8 @@ export function getRefreshToken(): string | null {
 
 export interface TokenPair {
   accessToken: string
-  /** Absent under compose, where the refresh token is an httpOnly cookie. */
   refreshToken?: string | null
   accessExpiresAt: string
-}
-
-/**
- * Notified after every local token change, so auth/sessionChannel.ts can mirror
- * it to the other tabs. A callback rather than an import because this module
- * must not depend on the channel: the channel already depends on this one, and
- * a cycle between them breaks module initialisation order in ways that only
- * show up in the bundled build.
- */
-let tokensChanged: ((pair: TokenPair | null) => void) | null = null
-
-export function setTokensChangedListener(
-  listener: ((pair: TokenPair | null) => void) | null,
-): void {
-  tokensChanged = listener
 }
 
 export function setTokens(pair: TokenPair): void {
@@ -82,25 +82,30 @@ export function setTokens(pair: TokenPair): void {
 
   try {
     if (pair.refreshToken) {
-      globalThis.sessionStorage?.setItem(REFRESH_TOKEN_KEY, pair.refreshToken)
+      globalThis.localStorage?.setItem(REFRESH_TOKEN_KEY, pair.refreshToken)
     }
   } catch {
-    // Private-mode Safari and friends. A failed write only costs us the
-    // cross-origin refresh path; the cookie path is unaffected.
+    // Private-mode Safari and friends. A failed write costs this tab its
+    // session on the next reload; the current one keeps working.
   }
-
-  tokensChanged?.(pair)
 }
 
+/**
+ * Ends the session for the whole browser. Removing the key fires a `storage`
+ * event in every OTHER tab — never in this one — which auth/sessionSync.ts
+ * turns into an immediate sign-out there. That is the entire cross-tab logout
+ * mechanism, and it is the browser's, not ours.
+ */
 export function clearTokens(): void {
   accessToken = null
   accessExpiresAt = null
 
   try {
-    globalThis.sessionStorage?.removeItem(REFRESH_TOKEN_KEY)
+    globalThis.localStorage?.removeItem(REFRESH_TOKEN_KEY)
   } catch {
     // ignore
   }
-
-  tokensChanged?.(null)
 }
+
+/** The key other modules listen for. Exported so nothing has to repeat it. */
+export const REFRESH_TOKEN_STORAGE_KEY = REFRESH_TOKEN_KEY

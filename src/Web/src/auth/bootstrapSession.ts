@@ -1,12 +1,7 @@
 import { queryClient } from '../lib/queryClient'
-import { getRefreshToken } from '../lib/tokenStore'
 import { authKeys, restoreSession } from './authApi'
 import { authStore } from './authStore'
-import {
-  adoptRemoteTokens,
-  requestSessionFromOtherTabs,
-  startSessionSync,
-} from './sessionChannel'
+import { startSessionSync } from './sessionSync'
 
 /**
  * Restores the session, if there is one, and never rejects.
@@ -19,19 +14,15 @@ import {
  *
  * Awaiting this before mounting <RouterProvider> is what makes the synchronous
  * `beforeLoad` guard in routes/_authenticated.tsx correct. See main.tsx.
+ *
+ * There is nothing to ask other tabs for: the refresh token is in localStorage,
+ * so a new tab already has whatever the browser has. This used to open a
+ * BroadcastChannel and wait 250ms for a peer to hand over a session before it
+ * could even start — a delay on every first load, to simulate sharing that
+ * storage now does for real.
  */
 export async function bootstrapSession(): Promise<void> {
-  // Start serving before asking, so two tabs opened at the same instant can
-  // still answer each other rather than both timing out.
   startSessionSync()
-
-  // Only a tab with no credential of its own needs to ask, which keeps the
-  // wait off the common paths: a reload has its sessionStorage intact, and a
-  // first-ever visit is the one case below that legitimately ends at /login.
-  if (!getRefreshToken()) {
-    const offered = await requestSessionFromOtherTabs()
-    if (offered) adoptRemoteTokens(offered)
-  }
 
   try {
     await queryClient.fetchQuery({
