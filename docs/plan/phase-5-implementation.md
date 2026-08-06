@@ -3,17 +3,20 @@
 > **For agentic workers:** use `superpowers:subagent-driven-development` or `superpowers:executing-plans` to
 > work through this task by task. Steps are checkboxes.
 
-**Goal:** ship the settings surface — theme, language, dashboard refresh interval, position visibility and a
-per-user market-data API key — so that every item in `phase-5-make-it-mine.md`'s "Done when" list passes in a
-browser and on the public URL.
+**Goal:** ship the settings surface — theme, language, dashboard refresh interval and a per-user market-data
+API key — so that `phase-5-make-it-mine.md`'s "Done when" list, as amended by decisions D1 and D3 below,
+passes in a browser and on the public URL.
 
 **Architecture:** each module owns the settings it can enforce, and serves them on its own routes. Identity
-gains a preferences row; Portfolio gains a dashboard-settings row and the missing write path for the
-visibility flag it already reads; MarketData gains its first database table, holding each user's encrypted
-provider key alongside the framework's encryption key ring. Encryption itself is a port MarketData declares
-and the host implements, because `.Infrastructure` may not reach ASP.NET Core. The SPA gains one settings
-route with independently-saving sections, a theme applied before first paint, and English/Ukrainian
-translations.
+gains a preferences row; Portfolio gains a dashboard-settings row; MarketData gains its first database table,
+holding each user's encrypted provider key alongside the framework's encryption key ring. Encryption itself
+is a port MarketData declares and the host implements, because `.Infrastructure` may not reach ASP.NET Core.
+The SPA gains one settings route with independently-saving sections, a theme applied before first paint, and
+English/Ukrainian translations.
+
+**Two things are deleted rather than built.** Position visibility, which was half-built and is not wanted,
+and the client-side token bucket, which models a free-tier quota this project is not built on. Both are
+removals of shipped code and both come early, in Tasks 3A and 3B, so nothing later is written against them.
 
 **Tech stack:** .NET 10, EF Core 10, Npgsql, ASP.NET Core Data Protection (shared framework, no new package),
 React 19, TanStack Query 5.101.4 / Router 1.170.18, Tailwind v4, i18next + react-i18next, Vitest + MSW.
@@ -64,12 +67,13 @@ Recorded here because a later reader will otherwise re-open them.
 
 | # | Decision | Why |
 |---|---|---|
-| D1 | **Dashboard totals follow visibility.** Hidden positions are excluded from the headline figures. | Already true: `HoldingQueries.GetVisibleHoldingsAsync` filters `IsVisible` in SQL, so hidden rows never reach `DashboardCalculator`, and `Weight` divides by that same visible total — percentages still sum to 100. Zero backend work. The README explains it. The "visible headline plus a quiet including-hidden line" option was considered and cut as complication the brief did not ask for. |
+| D1 | **Position visibility is removed from the product entirely** — the column, the filter, the field on every read model, and the argument in the plans that rested on it. | It was never built past the read half: nothing could set the flag and nothing could trigger the filter, so it has been dead weight since Phase 2. The alternative was to finish it, and the decision is that it is not wanted. **Stated consequence, accepted:** the brief's *list of stocks* inside dashboard settings then has nothing implementing it, and dashboard settings means the refresh interval alone. The totals question that used to hang off this — do hidden rows count — disappears with it. |
 | D2 | **MarketData owns the per-user key and validates it. The caller's id is threaded through the price contract.** | Storing it in Identity would make MarketData call Identity on every dashboard load — the first runtime dependency on the one module deliberately kept extractable — and would force Identity to learn what a provider key looks like. Threading the id follows the pattern every module already uses; the alternatives (an ambient scoped holder, `IHttpContextAccessor`) both fail silently back to the shared key when a path forgets to set them. |
-| D3 | **A user supplying their own key gets its own outbound path: no token bucket, and its own circuit breaker.** | The bucket is sized for one shared key, so a user who brought their own quota must not spend the application's. Bypassing the bucket alone is not enough, and this is the half the first draft got wrong: every request would still traverse the one resilience handler, so a user whose key is revoked generates 401s on the **shared** breaker — ten in thirty seconds opens it and blanks every other user's dashboard and starves the poller. Bring-your-own-key therefore gets a second named `HttpClient` with the same policy and a separate breaker. No per-key bucket: the only thing it would protect is that user's own Finnhub quota, and the provider's 429 already tells them. |
+| D3 | **The client-side token bucket is deleted. Nothing meters outbound calls; the provider's own 429 and the existing retry-and-breaker policy handle load.** | The bucket is 25 tokens refilling at one a second — 60 a minute, which is the Finnhub *free* tier's quota and nothing else. That is the application shaped around a free key, and the project is not built on one. What replaces it is what a normal client does: `AddStandardResilienceHandler` already retries, times out and breaks the circuit, and it honours `Retry-After` by default. Do not assign a `DelayGenerator` — its setter *is* what turns `Retry-After` handling off. |
+| D3b | **Bring-your-own-key still gets its own named `HttpClient`.** | Not for quota — for the **circuit breaker**, which is shared and is the dangerous shared resource. `MinimumThroughput` is 10 over 30 seconds, so one user whose key is revoked produces ten 401s and opens the circuit for everybody, including the poller. A separate named client is a separate handler chain and therefore a separate breaker. This is true with or without the bucket. |
 | D4 | **Both the user-key table and the encryption key ring live in the `marketdata` schema, in `MarketDataDbContext`.** | The role, schema and grants already exist unused since Phase 1; `db/init/*` needs no change. One context, one migration, one history table, no new password through compose / `.env.example` / Bicep / two workflows. |
 | D5 | **The alert threshold keeps its existing route.** No `PATCH /api/settings/alerts` is added. | `PUT /api/alerts/settings` already ships, already upserts threshold + window + enabled, and already has a validator, a 409 for a window exceeding retention, and tests. The plan file's proposed route would be a second way to do one thing. The cosmetic inconsistency (`/api/alerts/settings` beside `/api/settings/*`) is not worth breaking a shipped route for. |
-| D6 | **There is no aggregate `GET /api/settings`.** Each module serves its own section and the settings screen fetches them in parallel. | An aggregate would have to live in the host and call three modules' handlers, which makes the host the place every feature has to touch — the exact thing `StockPortfolio.Modules.<M>.Api` exists to prevent. Five parallel `GET`s on one screen cost nothing the user can perceive: appearance, dashboard settings, alert settings, key status, **and the holdings list the visibility section needs**. |
+| D6 | **There is no aggregate `GET /api/settings`.** Each module serves its own section and the settings screen fetches them in parallel. | An aggregate would have to live in the host and call three modules' handlers, which makes the host the place every feature has to touch — the exact thing `StockPortfolio.Modules.<M>.Api` exists to prevent. Four parallel `GET`s on one screen cost nothing the user can perceive: appearance, dashboard settings, alert settings, key status. |
 | D7 | **Encryption is a port MarketData declares and the host implements.** | `Microsoft.AspNetCore.DataProtection.Abstractions` and `…EntityFrameworkCore` both trip rule 4. The host may reference ASP.NET Core freely and already carries two adapters of exactly this shape. |
 
 ### The route surface after this phase
@@ -79,7 +83,6 @@ GET    /api/settings/appearance        Identity     theme, language
 PUT    /api/settings/appearance        Identity
 GET    /api/settings/dashboard         Portfolio    refreshIntervalSeconds
 PUT    /api/settings/dashboard         Portfolio
-PATCH  /api/holdings/{id}/visibility   Portfolio    show or hide one position
 GET    /api/alerts/settings            Alerts       already ships, unchanged
 PUT    /api/alerts/settings            Alerts       already ships, unchanged
 GET    /api/settings/api-key           MarketData   configured?, last four
@@ -114,14 +117,15 @@ replace, not a partial update. It also matches `PUT /api/alerts/settings`, which
 |---|---|
 | `.Domain/DashboardSettings.cs` | `UserId` + refresh interval; `CreateDefault`, `ChangeInterval` |
 | `.Domain/RefreshInterval.cs` | value object: seconds, 10–300, default 60 |
-| `.Domain/Holding.cs` (modify) | add `SetVisibility(bool)` |
+| `.Domain/Holding.cs` (modify) | **delete** `IsVisible` |
 | `.Application/Abstractions/IDashboardSettingsRepository.cs` | `FindAsync`, `SaveAsync` (commits) |
 | `.Application/Dashboard/Queries/GetDashboardSettings/…` | query, handler, result |
 | `.Application/Dashboard/Commands/SaveDashboardSettings/…` | command, handler, result |
-| `.Application/Holdings/Commands/SetHoldingVisibility/…` | command, handler, result |
 | `.Infrastructure/Persistence/Configurations/DashboardSettingsConfiguration.cs` | table `dashboard_settings` |
+| `.Infrastructure/Persistence/HoldingQueries.cs` (modify) | **delete** the visibility filter; rename the method |
 | `.Infrastructure/Persistence/DashboardSettingsRepository.cs` | EF implementation |
-| `.Api/Requests/…`, `.Api/Validators/…` | two requests, two validators |
+| `.Infrastructure/Persistence/Migrations/*_DropHoldingVisibility.cs` | drops `is_visible` |
+| `.Api/Requests/SaveDashboardSettingsRequest.cs`, `.Api/Validators/…` | one request, one validator |
 
 **MarketData** — `src/Modules/MarketData/…`
 
@@ -130,6 +134,7 @@ replace, not a partial update. It also matches `PUT /api/alerts/settings`, which
 | `.Infrastructure/Persistence/MarketDataDbContext.cs` | schema `marketdata`; two `DbSet`s |
 | `.Domain/UserProviderKey.cs` | user id, ciphertext, last four, saved-at |
 | `.Domain/KeyRingEntry.cs` | friendly name + XML blob; the framework's key ring, stored as data |
+| `.Infrastructure/MarketDataModule.cs` (modify) | **delete** the `RateLimiter` singleton; add the second named client |
 | `.Application/Abstractions/ISecretProtector.cs` | `Protect(string) : string`, `Unprotect(string) : string?` — **no ASP.NET types** |
 | `.Application/Abstractions/IKeyRingStore.cs` | `GetAll() : IReadOnlyList<string>`, `Store(string, string)` — synchronous, called rarely |
 | `.Application/Abstractions/IUserProviderKeyRepository.cs` | `FindAsync`, `SaveAsync`, `DeleteAsync` |
@@ -581,8 +586,11 @@ public sealed class RefreshIntervalTests
 }
 ```
 
-The last assertion is load-bearing and must not be "corrected" downward: 60 seconds is the number the
-capacity claim in the Phase 3 plan and the README paragraph built on it both rest on.
+Sixty seconds stays the default, but **the reason changes with D3** and the plans must change with it. It
+was justified by free-tier arithmetic — twenty positions at sixty seconds is twenty of sixty calls a minute.
+With the bucket gone and the app no longer shaped around a free key, that argument is retired. Keep 60 as a
+sensible default for a stock dashboard, and rewrite the Phase 3 capacity paragraph and the README paragraph
+built on it rather than leaving them asserting a quota the code no longer models.
 
 - [ ] **Step 2: run it, watch it fail. Step 3: write `RefreshInterval` and `DashboardSettings`**
 
@@ -648,117 +656,178 @@ Portfolio from five routes to seven.
 
 ---
 
-## Task 3 — Portfolio: hide and show a position
+## Task 3A — Remove position visibility
 
-The flag exists, defaults to visible, and the dashboard already filters on it. What is missing is any way to
-change it: `Holding` has no method, `UpdateHoldingCommand` carries only quantity and price, and no route
-exists.
+Decision D1. The flag was never finished — nothing could set it, so nothing could trigger the filter that
+reads it. Rather than finish it, delete it. This is a removal task and its deliverable is a smaller system.
 
 **Files:**
-- Modify: `…Portfolio.Domain/Holding.cs`
-- Create: `…Portfolio.Application/Holdings/Commands/SetHoldingVisibility/{Command,Handler}.cs`
-- Create: `…Portfolio.Api/Requests/SetHoldingVisibilityRequest.cs` (no validator — see Step 6)
-- Modify: `PortfolioEndpoints.cs`, Portfolio's `DependencyInjection.cs`
-- Test: `tests/StockPortfolio.Modules.Portfolio.UnitTests/HoldingTests.cs` (extend), `tests/StockPortfolio.Api.IntegrationTests/HoldingVisibilityTests.cs`
+- Modify: `…Portfolio.Domain/Holding.cs` — drop the `IsVisible` property and the constructor parameter
+- Modify: `…Portfolio.Infrastructure/Persistence/Configurations/HoldingConfiguration.cs` — drop the `is_visible` mapping
+- Modify: `…Portfolio.Infrastructure/Persistence/HoldingQueries.cs` — drop the filter, rename the method
+- Modify: `…Portfolio.Application/Abstractions/IDashboardHoldingReader.cs` — rename to match
+- Modify: `…Portfolio.Application/Holdings/Queries/GetHoldings/HoldingSummary.cs` — drop `IsVisible`
+- Create: `…Portfolio.Infrastructure/Persistence/Migrations/*_DropHoldingVisibility.cs`
+- Modify: `src/Web/src/portfolio/holdingsApi.ts` — drop `isVisible` from the `Holding` type
+- Test: `tests/StockPortfolio.Modules.Portfolio.UnitTests/HoldingTests.cs`, `…/EfModelTests.cs`, `tests/StockPortfolio.Api.IntegrationTests/DashboardTests.cs`, `src/Web/tests/portfolio.test.tsx`
 
-- [ ] **Step 1: the failing tests**
+- [ ] **Step 1: find every reader before touching anything**
 
-```csharp
-[Fact]
-public void SetVisibility_ToFalse_HidesTheHolding()
-{
-    var holding = AVisibleHolding();
-
-    holding.SetVisibility(false);
-
-    holding.IsVisible.ShouldBeFalse();
-}
-
-[Fact]
-public void SetVisibility_ToFalse_LeavesQuantityAndAveragePriceAlone()
-{
-    var holding = AVisibleHolding();
-    var quantity = holding.Quantity;
-    var average = holding.AveragePrice;
-
-    holding.SetVisibility(false);
-
-    holding.Quantity.ShouldBe(quantity);
-    holding.AveragePrice.ShouldBe(average);
-}
+```bash
+git grep -n -i "isvisible\|is_visible\|GetVisibleHoldings"
 ```
 
-`AVisibleHolding()` builds one through `Holding.Create` — reuse whatever helper `HoldingTests.cs` already has
-rather than adding a second.
+Expect hits in the entity, the configuration, the initial migration, `HoldingQueries`, the reader
+abstraction, `HoldingSummary`, the dashboard handler, the SPA's `Holding` type, and several test fixtures.
+Work from that list; it is the definition of done for this task.
 
-- [ ] **Step 2: run, fail. Step 3: add the method**
+- [ ] **Step 2: the domain**
 
-```csharp
-// Hiding is a display filter: it changes no figure and no alert.
-public void SetVisibility(bool isVisible)
-{
-    IsVisible = isVisible;
-    UpdatedAt = ...;   // match exactly what Correct() does with the clock; do not invent a second pattern
-}
+Delete `IsVisible` from `Holding`, **including the constructor parameter**. EF binds that constructor by
+name, so leaving an orphaned parameter after the column is dropped fails at model build — which is host
+startup, not the first query. `HoldingTests`' builder helpers need the argument removed too.
+
+- [ ] **Step 3: the read path**
+
+`HoldingQueries.GetVisibleHoldingsAsync` filters `h.IsVisible` at `HoldingQueries.cs:37`. Drop the clause and
+rename the method — `GetHoldingsForDashboardAsync` — along with `IDashboardHoldingReader`'s member. A method
+still called `GetVisible…` that no longer filters is worse than either state.
+
+`HoldsAsync` at `HoldingQueries.cs:14-28` needs only its comment removed; it never filtered, and its
+behaviour does not change.
+
+- [ ] **Step 4: run the tests and read what fails**
+
+```bash
+dotnet test
 ```
 
-Read `Correct` before writing this. If it takes a `TimeProvider`, so does this; if it stamps from a passed
-`DateTimeOffset`, so does this.
+`DashboardTests` has fixtures built so the totals cannot be derived from the visible rows. Those stay — they
+prove the figures come off the wire, which is still true and still worth proving. What must go is any
+assertion that a hidden row was excluded.
 
-- [ ] **Step 4: run, pass. Step 5: the command**
+- [ ] **Step 5: the migration**
 
-`SetHoldingVisibilityCommand(Guid UserId, Guid HoldingId, bool IsVisible)`, handler returning
-`OneOf<Success, NotFound>` using `OneOf.Types.Success` and `OneOf.Types.NotFound` — both ship with the
-package; do not redeclare them. Look the holding up scoped by `(userId, holdingId)` together, exactly as
-`UpdateHoldingCommandHandler` does, so someone else's id is a 404 rather than a 403.
-
-- [ ] **Step 6: the route**
-
-```csharp
-group.MapPatch("/{id:guid}/visibility", SetVisibilityAsync)
-    .WithName("SetHoldingVisibility")
-    .Produces(StatusCodes.Status204NoContent)
-    .ProducesProblem(StatusCodes.Status400BadRequest)
-    .ProducesProblem(StatusCodes.Status404NotFound);
+```bash
+dotnet ef migrations add DropHoldingVisibility --context PortfolioDbContext --output-dir Persistence/Migrations --project src/Modules/Portfolio/StockPortfolio.Modules.Portfolio.Infrastructure --startup-project src/Api
 ```
 
-`PATCH` here and `PUT` on the settings sections is deliberate and not an inconsistency: this changes one
-field of a larger resource, the settings routes replace the whole of a small one.
+The generated `Down` recreates the column with its default, which is correct and should be left alone. Check
+for an inline array and hoist it if present. Do **not** edit the initial migration — it is applied history,
+and rewriting it means a database that migrated cleanly last week no longer matches its own record.
 
-The request is `public sealed record SetHoldingVisibilityRequest(bool IsVisible);`.
+- [ ] **Step 6: the SPA**
 
-**Do not attach `ValidationFilter<SetHoldingVisibilityRequest>` and do not write an empty validator.** A
-`bool` has no invalid value, so there is nothing to check — and the reason an empty one might look harmless
-is wrong: `ValidationFilter<T>` calls `next(context)` when it finds no argument of type `T`
-(`ValidationFilter.cs:15-18`), so it does **not** produce the 400 for a missing body. That 400 comes from
-minimal-API body binding, before the filter runs. This is `deferred-work.md` A5, and an empty validator here
-would enshrine the opposite belief in a comment nobody later dares delete.
+Drop `isVisible` from the `Holding` interface in `holdingsApi.ts:38` and from every MSW fixture. TypeScript
+finds the readers; the compiler is the grep here.
 
-Drop the `.AddEndpointFilter` line from the route below and the two request-validator files from this task's
-file list. A5's status paragraph counts eight filtered routes; leave it at eight.
+- [ ] **Step 7: clean boot, then commit**
 
-- [ ] **Step 7: integration tests**
+```bash
+docker compose down -v && docker compose up
+```
 
-`HoldingVisibilityTests.cs`:
+The migrator applies the drop; the dashboard still renders.
 
-- `Patch_ToHidden_RemovesTheRowFromTheDashboard` — add two holdings, hide one, read `/api/dashboard`,
-  assert one position comes back
-- `Patch_ToHidden_LeavesItOnTheHoldingsList` — `/api/holdings` still returns both, with `isVisible: false`
-- `Patch_AHoldingOwnedBySomeoneElse_Returns404`
-- `Patch_ToHidden_StillLetsAnAlertBeConfigured` — hide it, then `PUT /api/alerts/settings` for that ticker
-  and assert 200. `IUserHoldsTicker` deliberately ignores visibility, and this is the test that stops
-  someone "fixing" that.
+```bash
+git commit -m "Position visibility is removed: a flag nothing could set, and a filter nothing could reach"
+```
 
-That last one is the assertion this task exists for. The others would all stay green under an implementation
-that also filtered hidden positions out of `HoldsAsync`, which would silently stop alerts firing on hidden
-positions — the exact behaviour the phase plan says must not happen.
+- [ ] **Step 8: the documents that argued for it**
 
-- [ ] **Step 8: register the handler, add `"SetHoldingVisibility"` to `ExpectedRouteNames["Portfolio"]`,
-  build, test, commit**
+This is the part that is easy to skip and leaves the plans lying.
 
-`git commit -m "A position can be hidden from the dashboard without leaving the portfolio"`
+- `docs/plan/00-overview.md` — the *Deliberately not built* entry for a watchlist argues that the brief's
+  "list of stocks" **means** this flag. That argument dies with the column. Rewrite the entry to say the
+  feature is not built and the brief line is not covered, or delete it — do not leave it asserting a
+  reading the code no longer supports.
+- `docs/plan/phase-5-make-it-mine.md` — the *Position visibility* section, the two bullets about visibility
+  not leaking into alerts, the "One decision left to you" section about totals, and the three "Done when"
+  lines that mention hiding. All go.
+- `docs/reference/er-diagram.md` — the column.
+- `docs/deferred-work.md` — a new entry recording that the brief's dashboard "list of stocks" is
+  deliberately not covered, with the reason, so it is not proposed again as an oversight.
 
 ---
+
+## Task 3B — Remove the client-side rate limiter
+
+Decision D3. The token bucket is 25 tokens refilling at one a second, which is 60 a minute, which is the
+free tier's quota and nothing else. The application is not built on a free key, so the limiter models a
+constraint that does not apply.
+
+Independent of Task 3A and of bring-your-own-key: this stands even if both were dropped.
+
+**Files:**
+- Modify: `…MarketData.Infrastructure/MarketDataModule.cs` — delete the `RateLimiter` singleton and `BuildTokenBucket`
+- Modify: `…MarketData.Infrastructure/Quotes/FinnhubQuoteProvider.cs` — delete the lease acquisition
+- Modify: `…MarketData.Infrastructure/StockPortfolio.Modules.MarketData.Infrastructure.csproj` and `Directory.Packages.props` — drop `System.Threading.RateLimiting`
+- Test: `tests/StockPortfolio.Modules.MarketData.UnitTests/MarketDataModuleTests.cs`, `…/FinnhubQuoteProviderTests.cs`
+
+- [ ] **Step 1: write the test that says what replaces it**
+
+Before deleting, pin the behaviour that must survive — that a 429 is still retried and still honours the
+provider's own `Retry-After`, because that is now the *only* thing holding the rate down:
+
+```csharp
+[Fact]
+public async Task GetQuotes_WhenTheProviderReturns429_RetriesRatherThanFailing()
+{
+    var handler = new CountingHandler(HttpStatusCode.TooManyRequests, thenOk: true);
+    var provider = AProviderOver(handler);
+
+    await provider.GetQuotesAsync(OneTicker, apiKeyOverride: null, TestContext.Current.CancellationToken);
+
+    handler.Attempts.ShouldBeGreaterThan(1);
+}
+```
+
+`CountingHandler` already exists in `MarketDataModuleTests`. Run it before the deletion — it should pass,
+because `AddStandardResilienceHandler` already does this.
+
+- [ ] **Step 2: delete**
+
+From `MarketDataModule.cs`: the `services.AddSingleton<RateLimiter>(…)` line at `:63`, the
+`BuildTokenBucket` method at `:116-125`, and the comment at `:61-62` explaining why the limiter had to be a
+singleton.
+
+From `FinnhubQuoteProvider.cs`: the `RateLimiter budget` constructor parameter, every `budget.AcquireAsync`,
+every `lease.IsAcquired` check and every lease disposal.
+
+Leave `ConfigureResilience` exactly as it is. **Do not assign a `DelayGenerator` while you are in there** —
+its setter *is* what disables `Retry-After` handling, and `MaxDelay` is ignored for generated delays. With
+the bucket gone, that header is the provider's only way to tell this client to slow down.
+
+- [ ] **Step 3: drop the package**
+
+`System.Threading.RateLimiting` from the Infrastructure csproj and its `PackageVersion` from
+`Directory.Packages.props`. A pinned version with no consumer is a version somebody will later have to
+research before they can remove it.
+
+- [ ] **Step 4: the tests that asserted the bucket existed**
+
+`MarketDataModuleTests` asserts the limiter is registered and is a singleton. Those tests go — they describe
+a design decision that no longer exists. Do not weaken them into something vaguer; delete them.
+
+- [ ] **Step 5: run everything**
+
+```bash
+dotnet build && dotnet test
+```
+
+- [ ] **Step 6: the documents**
+
+- `CLAUDE.md` — the Traps entry on `DelayGenerator` **stays**, and matters more now: it is load-bearing
+  rather than incidental. The note that "the client-side token bucket is what actually holds the rate down"
+  is now false and must be replaced.
+- The README's provider rate-limit paragraph, which quotes 60/minute from a search snippet.
+- `docs/plan/phase-3-live-prices.md` — the capacity arithmetic.
+
+- [ ] **Step 7: commit**
+
+```bash
+git commit -m "The client-side rate limiter is gone; the provider's own signals hold the rate"
+```
 
 ## Task 4 — MarketData gets a database
 
@@ -1432,21 +1501,14 @@ fetches.
 
 `FinnhubQuoteProvider` currently relies on `client.DefaultRequestHeaders`. Switch the per-ticker call to an
 explicit `HttpRequestMessage` and set `X-Finnhub-Token` on it when an override is present — a header on the
-request wins over the client's default, which is what makes this work without a second `HttpClient`.
+request wins over the client's default, so the key travels per request rather than per client.
 
-Then decision D3, which has **two halves**. The first is the token bucket:
+That alone is not enough, which is decision D3b. There is no token bucket left to bypass — Task 3B deleted
+it — but the circuit breaker is still shared, and it is the dangerous one.
 
-```csharp
-// The bucket is sized for the application's key. A user who brought their own brought their own quota
-// with it, and must not be throttled against a budget that is not theirs.
-RateLimitLease? lease = apiKeyOverride is null ? await budget.AcquireAsync(1, ct) : null;
-```
-
-Guard the `lease.IsAcquired` check and the disposal on `lease is not null`.
-
-The second half is the one the first draft of this plan missed, and it is the more damaging of the two.
 `MarketDataModule.cs:50` attaches `AddStandardResilienceHandler` to the one named `HttpClient`, with
-`MinimumThroughput = 10` over a 30-second window (`:105-118`). Every bring-your-own-key request would
+`MinimumThroughput = 10` over a 30-second window (line numbers shift once Task 3B lands; find
+`ConfigureResilience`). Every bring-your-own-key request would
 otherwise share that breaker — so a single user whose key is revoked produces ten 401s in thirty seconds,
 opens the circuit, and `FinnhubQuoteProvider.cs:57` then catches `BrokenCircuitException` per ticker and
 returns nothing **for everybody**, including the poller. One user's bad key would blank every dashboard.
@@ -1686,7 +1748,7 @@ npm --prefix src/Web test && node src/Web/scripts/check-locale-parity.mjs
 ## Task 10 — The settings screen
 
 **Files:**
-- Create: `src/Web/src/settings/settingsApi.ts`, `AppearanceSection.tsx`, `LanguageSection.tsx`, `QuotesSection.tsx`, `ApiKeySection.tsx`, `VisibilitySection.tsx`
+- Create: `src/Web/src/settings/settingsApi.ts`, `AppearanceSection.tsx`, `LanguageSection.tsx`, `QuotesSection.tsx`, `ApiKeySection.tsx`
 - Create: `src/Web/src/routes/_authenticated/settings.tsx`
 - Modify: `src/Web/src/components/AppShell.tsx`
 - Create: `src/Web/tests/settings.test.tsx`, `src/Web/tests/msw/settings.ts`
@@ -1698,10 +1760,10 @@ npm --prefix src/Web test && node src/Web/scripts/check-locale-parity.mjs
 Types, a `settingsKeys` factory and one fetcher per route, following `alertsApi.ts` exactly — that file is
 the closest existing model, since it already has both queries and mutations against one feature.
 
-- [ ] **Step 2: the route, with five sections in the plan's order**
+- [ ] **Step 2: the route, with four sections in the plan's order**
 
-Appearance, language, quotes (refresh interval **and** the alert threshold), your own key, then the
-visibility list.
+Appearance, language, quotes (refresh interval **and** the alert threshold), then your own key. The fifth
+section in the phase plan was the visibility list; D1 removed it.
 
 **Each section saves on its own**, with its own inline saved-or-failed state. One form with one Save button
 would let a rejected API key throw away a perfectly good theme change — which is the reason the API has
@@ -1709,12 +1771,15 @@ targeted writes rather than one big `PUT`.
 
 - [ ] **Step 3: the honesty line on the refresh interval**
 
-The quotes section must say plainly that a shorter interval costs more provider calls against a shared quota.
-Every refresh is a real fan-out — one call per visible position. Twenty positions at sixty seconds is twenty
-calls a minute out of roughly sixty, for one viewer.
+The quotes section says plainly that a shorter interval costs more provider calls: every refresh is a real
+fan-out, one call per position, so fifteen seconds is four times the traffic of sixty.
 
-Do not lower the 60-second default to make that arithmetic look better. The 10-to-300 range is not the
-problem; what the screen claims is.
+**Do not write the free-tier arithmetic.** The earlier draft of this screen said twenty calls out of roughly
+sixty a minute against a shared quota. With D3 that framing is gone — the app is not built on a free key and
+no longer models a quota — and repeating it would be the screen claiming a constraint the code does not have.
+State the cost in calls, not in a fraction of somebody's allowance.
+
+Sixty seconds stays the default because it is sensible for a stock dashboard, not because of a ceiling.
 
 - [ ] **Step 4: the key field**
 
@@ -1722,32 +1787,25 @@ A `type="password"` input. Once set it reads "configured, ends a1b2" with a Remo
 spinner while the server checks the key, then either succeeds or gives the specific reason — and "the
 provider could not answer" is a different message from "the provider rejected your key".
 
-- [ ] **Step 5: the visibility list**
-
-A checkbox per position with a "showing 6 of 8" counter and a Show all link. Each toggle is its own
-`PATCH`, optimistic, with the snapshot-and-rollback pattern `useHoldingMutations.ts` already uses. Note that
-TanStack Query 5.89 renamed the `TContext` generic and added a trailing `context` argument, but **argument
-positions did not move** — the `onMutate` snapshot is still argument 3 in `onError`.
-
-- [ ] **Step 6: nav and mobile**
+- [ ] **Step 5: nav and mobile**
 
 Add a Settings entry to `AppShell.tsx`'s `NAV`. Check the screen at 375px wide; it is in the "Done when" list.
 
-- [ ] **Step 7: translate this screen's own copy, then test**
+- [ ] **Step 6: translate this screen's own copy, then test**
 
 Every string added in this task goes into `settings.json` and `errors.json` in **both** languages as it is
 written, not afterwards. Run `node src/Web/scripts/check-locale-parity.mjs` — it proves the two files agree
 with each other, and proves nothing at all about a string that was never added to either. The only check on
-that is reading the screen with Ukrainian selected, which is Step 8.
+that is reading the screen with Ukrainian selected, which is Step 7.
 
 `tests/msw/settings.ts` with one handler per route, then `tests/settings.test.tsx`:
 
 - `savingTheTheme_WhenTheApiKeySectionIsFailing_StillSaves` — the reason sections save separately
-- `hidingAPosition_UpdatesTheCounterAndTheDashboard`
 - `theApiKey_IsNeverPresentInAnyResponseTheScreenReceives`
+- `aRejectedKey_TellsTheUserToReEnterIt` — the `Rejected` flag from Task 6
 - `changingTheRefreshInterval_ChangesHowOftenTheDashboardRefetches` — drive it with fake timers
 
-- [ ] **Step 8: run, read the screen in Ukrainian, commit**
+- [ ] **Step 7: run, read the screen in Ukrainian, commit**
 
 ---
 
@@ -1783,14 +1841,22 @@ deployed.
 - `docs/reference/er-diagram.md` — three new tables and MarketData's first schema with real contents.
 - `docs/reference/module-boundaries.md` — who owns which setting; MarketData no longer the module that
   persists nothing.
+- `docs/plan/00-overview.md` — the *Deliberately not built* watchlist entry (D1 killed its argument) and the
+  Phase 4 deployment status.
+- `docs/plan/phase-3-live-prices.md` and `docs/plan/phase-5-make-it-mine.md` — the free-tier capacity
+  arithmetic and the visibility sections.
 - `docs/reference/service-interactions.md` — the per-user key on the dashboard read path.
 
 - [ ] **Step 3: the README**
 
-Four things the "Done when" list names explicitly: who owns which setting; what a shorter refresh interval
-actually costs; how a user's own key is used and where the application's key is still used; and what hiding
-a position does and does not affect — in particular that alerts still fire on a hidden position, which is
-the first thing a reviewer asks.
+Three things: who owns which setting; what a shorter refresh interval actually costs, stated in provider
+calls rather than as a fraction of a quota; and how a user's own key is used, where the application's key is
+still used, and that a revoked key surfaces on the settings screen rather than silently.
+
+Two paragraphs must be **removed** rather than updated, and both are easy to miss because they read fine:
+the free-tier rate-limit paragraph that quotes 60 a minute from a search snippet (D3 deleted the thing that
+enforced it), and anything describing hiding a position (D1 deleted the feature). Leaving either turns the
+README into a description of a different application.
 
 - [ ] **Step 4: `CLAUDE.md`**
 
@@ -1810,10 +1876,9 @@ D5.
 docker compose down -v && docker compose up
 ```
 
-Then walk the "Done when" list in a browser: dark applies instantly, reload shows **no flash**, follow-the-
-system reacts to an OS theme change without a reload, Ukrainian survives a reload, 15 seconds visibly
-refetches faster, a 2% threshold fires, hiding a position removes the row and updates the counter, and a
-hidden position still alerts.
+Then walk the "Done when" list in a browser, minus the four lines D1 removed: dark applies instantly, reload
+shows **no flash**, follow-the-system reacts to an OS theme change without a reload, Ukrainian survives a
+reload, 15 seconds visibly refetches faster, and a 2% threshold fires.
 
 **Two items on that list cannot be checked here, and this is not a shortcoming of the environment.** With no
 `Finnhub__ApiKey`, `MarketDataModule.cs:41-63` registers `FakeQuoteProvider`, so "a bad key is rejected with
@@ -1875,9 +1940,9 @@ just the words. Named examples, all verified present:
 
 | Location | What it records |
 |---|---|
-| `HoldingQueries.cs:24-25` | a hidden position is still held, so `HoldsAsync` deliberately does not filter on visibility |
+| `main.tsx` StrictMode notes | React 19 runs effects twice, so the SSE hook needs its cancelled flag |
 | `Program.cs:79-85` | the adapter registrations must come after `AddMarketDataModule`, or the module's `TryAdd` no-op wins |
-| `MarketDataModule.cs:61-62` | the rate limiter is a singleton because the typed client is transient |
+| `MarketDataModule.cs` (the resilience block) | why `MinimumThroughput` is 10 and not the shipped default of 100 |
 | `Holding.cs` (the `AveragePrice` block) | efcore#31621 — a complex type cannot be a constructor parameter |
 | `main.tsx:39-67` | session restore must finish before `RouterProvider` mounts, because `beforeLoad` is synchronous |
 | `portfolio.tsx:73-79` | zod messages are keys so they can be translated |
