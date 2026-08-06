@@ -13,18 +13,29 @@ namespace StockPortfolio.Api.IntegrationTests;
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class EndpointMetadataTests(ApiFixture fixture)
 {
-    /// <summary>The five names WithName gives the /api/auth routes.</summary>
-    private static readonly string[] AuthRouteNames =
-        ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"];
+    /// <summary>The names WithName gives each module's routes, keyed by the module that ships them.</summary>
+    private static readonly Dictionary<string, string[]> ExpectedRouteNames = new(StringComparer.Ordinal)
+    {
+        // The /api/auth five.
+        ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser"],
 
-    /// <summary>The five names WithName gives Portfolio's routes: four under /api/holdings, plus the dashboard.</summary>
-    private static readonly string[] PortfolioRouteNames =
-        ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"];
+        // Four under /api/holdings, plus the dashboard.
+        ["Portfolio"] = ["GetHoldings", "AddHolding", "UpdateHolding", "RemoveHolding", "GetDashboard"],
 
-    /// <summary>MarketData's two routes that ship in every environment; the dev nudge is not mapped in all.</summary>
-    private static readonly string[] MarketDataRouteNames = ["GetMarketDataHealth", "SearchTickers"];
+        // The two that ship in every environment; the dev nudge is not mapped in all.
+        ["MarketData"] = ["GetMarketDataHealth", "SearchTickers"],
+    };
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
+
+    /// <summary>The five names WithName gives the /api/auth routes.</summary>
+    private static string[] AuthRouteNames => ExpectedRouteNames["Identity"];
+
+    /// <summary>The five names WithName gives Portfolio's routes.</summary>
+    private static string[] PortfolioRouteNames => ExpectedRouteNames["Portfolio"];
+
+    /// <summary>MarketData's names.</summary>
+    private static string[] MarketDataRouteNames => ExpectedRouteNames["MarketData"];
 
     /// <summary>The five routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
@@ -46,6 +57,36 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]
     public void EndpointDataSource_ExposesTheMarketDataRoutes() => ShouldExposeExactly(MarketDataRouteNames);
+
+    /// <summary>The rule the three above cannot make: a module nobody maps is a module nobody tests.</summary>
+    [Fact]
+    public void EveryModuleWithAnApiAssembly_ContributesAtLeastOneMappedRoute()
+    {
+        var modules = MappedModules();
+
+        // A rule that passes by finding nothing needs a companion assertion that fails if the search
+        // finds nothing. Raise this the commit a fourth module's endpoints are mapped, not before.
+        modules.Count.ShouldBe(
+            3,
+            "The set of loaded .Api assemblies is derived, not listed, so an empty or short set would "
+                + "make the loop below pass over nothing. Modules found: "
+                + string.Join(", ", modules));
+
+        var mapped = MappedRouteNames();
+
+        foreach (var module in modules)
+        {
+            ExpectedRouteNames.ShouldContainKey(
+                module,
+                module + " ships an .Api assembly that no entry in ExpectedRouteNames names, so its "
+                    + "routes are checked by nothing at all. Add its WithName names to the dictionary.");
+
+            ExpectedRouteNames[module].Any(mapped.Contains).ShouldBeTrue(
+                module + " ships an .Api assembly and contributes no route to the host's "
+                    + "EndpointDataSource. The usual cause is a missing Map" + module + "Endpoints call "
+                    + "in Program.cs — which compiles, registers, and serves nothing.");
+        }
+    }
 
     /// <summary>The check the typed Results union used to make: a status the route emits must be a status it.</summary>
     [Theory]
@@ -176,10 +217,30 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 + "not the one the host built — both rules pass over an empty set and enforce nothing.");
     }
 
+    /// <summary>Every module that ships an .Api assembly, read from what the host loaded rather than a list.</summary>
+    private static List<string> MappedModules() =>
+        AppDomain.CurrentDomain.GetAssemblies()
+            .Select(assembly => assembly.GetName().Name)
+            .Where(name => name is not null
+                && name.StartsWith("StockPortfolio.Modules.", StringComparison.Ordinal)
+                && name.EndsWith(".Api", StringComparison.Ordinal))
+            .Select(name => name!["StockPortfolio.Modules.".Length..^".Api".Length])
+            .Order(StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>Every name the host's endpoints carry, unfiltered — the set a module must intersect.</summary>
+    private HashSet<string> MappedRouteNames() =>
+        _fixture.Services.GetRequiredService<EndpointDataSource>()
+            .Endpoints
+            .Select(endpoint => endpoint.Metadata.GetMetadata<IEndpointNameMetadata>()?.EndpointName)
+            .Where(name => name is not null)
+            .Select(name => name!)
+            .ToHashSet(StringComparer.Ordinal);
+
     /// <summary>Reads the response metadata off the endpoint the host actually built.</summary>
     private IReadOnlyList<IProducesResponseTypeMetadata> DeclaredResponses(string routeName)
     {
-        var endpoints = EndpointsByName([.. AuthRouteNames, .. PortfolioRouteNames, .. MarketDataRouteNames]);
+        var endpoints = EndpointsByName([.. ExpectedRouteNames.Values.SelectMany(names => names)]);
 
         endpoints.ShouldContainKey(routeName);
 
