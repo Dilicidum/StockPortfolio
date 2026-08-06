@@ -25,12 +25,15 @@ public sealed class UpdateHoldingCommandHandler(IHoldingRepository holdings, Tim
             return new NotFound();
         }
 
-        if (!holding.Correct(command.Quantity, Money.Usd(command.Price), clock)
-                .TryPickT0(out _, out var invalid))
-        {
-            return invalid;
-        }
+        return await holding.Correct(command.Quantity, Money.Usd(command.Price), clock).Match(
+            corrected => SaveAsync(holding, ct),
+            invalid => Task.FromResult<OneOf<HoldingSummary, NotFound, InvalidInput>>(invalid));
+    }
 
+    private async Task<OneOf<HoldingSummary, NotFound, InvalidInput>> SaveAsync(
+        Holding holding,
+        CancellationToken ct)
+    {
         await holdings.UpdateAsync(holding, ct);
 
         return HoldingSummary.From(holding);

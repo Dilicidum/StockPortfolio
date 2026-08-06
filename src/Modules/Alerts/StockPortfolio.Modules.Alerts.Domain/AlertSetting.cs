@@ -49,27 +49,12 @@ public sealed class AlertSetting
         decimal thresholdPercent,
         int windowMinutes,
         bool enabled,
-        int maxWindowMinutes)
-    {
-        if (Ticker.Create(ticker).TryPickT1(out var badTicker, out var symbol))
-        {
-            return badTicker;
-        }
-
-        if (Validate(thresholdPercent, windowMinutes, maxWindowMinutes)
-            .TryPickT1(out var invalid, out var values))
-        {
-            return invalid;
-        }
-
-        return new AlertSetting(
-            AlertSettingId.New(),
-            userId,
-            symbol,
-            enabled,
-            values.Threshold,
-            values.Window);
-    }
+        int maxWindowMinutes) =>
+        Ticker.Create(ticker).Match(
+            symbol => Validate(thresholdPercent, windowMinutes, maxWindowMinutes).Match(
+                values => Build(userId, symbol, enabled, values),
+                invalid => invalid),
+            badTicker => badTicker);
 
     /// <summary>Changes the threshold, the window and whether it is on — all three, or none of them.</summary>
     public OneOf<Success, InvalidInput> Adjust(
@@ -80,35 +65,48 @@ public sealed class AlertSetting
     {
         // Both values are checked before either is assigned: a half-applied change would leave a
         // setting nobody asked for, and there is no transaction here to roll one back.
-        if (Validate(thresholdPercent, windowMinutes, maxWindowMinutes)
-            .TryPickT1(out var invalid, out var values))
-        {
-            return invalid;
-        }
-
-        Threshold = values.Threshold;
-        Window = values.Window;
-        Enabled = enabled;
-
-        return new Success();
+        return Validate(thresholdPercent, windowMinutes, maxWindowMinutes).Match(
+            values => Apply(values, enabled),
+            invalid => invalid);
     }
 
     /// <summary>The one place the two configurable values are judged, so Create and Adjust cannot diverge.</summary>
     private static OneOf<(ThresholdPercent Threshold, AlertWindow Window), InvalidInput> Validate(
         decimal thresholdPercent,
         int windowMinutes,
-        int maxWindowMinutes)
+        int maxWindowMinutes) =>
+        ThresholdPercent.Create(thresholdPercent).Match(
+            threshold => AlertWindow.Create(windowMinutes, maxWindowMinutes).Match(
+                window => Values(threshold, window),
+                badWindow => badWindow),
+            badPercent => badPercent);
+
+    /// <summary>Validate's success shape, named so both Match arms return the same type.</summary>
+    private static OneOf<(ThresholdPercent Threshold, AlertWindow Window), InvalidInput> Values(
+        ThresholdPercent threshold,
+        AlertWindow window) => (threshold, window);
+
+    /// <summary>Create's success shape, named so both Match arms return the same type.</summary>
+    private static OneOf<AlertSetting, InvalidInput> Build(
+        Guid userId,
+        Ticker symbol,
+        bool enabled,
+        (ThresholdPercent Threshold, AlertWindow Window) values) =>
+        new AlertSetting(
+            AlertSettingId.New(),
+            userId,
+            symbol,
+            enabled,
+            values.Threshold,
+            values.Window);
+
+    /// <summary>Assigns the checked values, and returns the union so both Match arms agree.</summary>
+    private OneOf<Success, InvalidInput> Apply((ThresholdPercent Threshold, AlertWindow Window) values, bool enabled)
     {
-        if (ThresholdPercent.Create(thresholdPercent).TryPickT1(out var badPercent, out var threshold))
-        {
-            return badPercent;
-        }
+        Threshold = values.Threshold;
+        Window = values.Window;
+        Enabled = enabled;
 
-        if (AlertWindow.Create(windowMinutes, maxWindowMinutes).TryPickT1(out var badWindow, out var window))
-        {
-            return badWindow;
-        }
-
-        return (threshold, window);
+        return new Success();
     }
 }

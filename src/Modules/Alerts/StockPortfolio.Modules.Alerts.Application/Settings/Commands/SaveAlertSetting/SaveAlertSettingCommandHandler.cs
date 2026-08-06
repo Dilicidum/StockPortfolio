@@ -18,17 +18,23 @@ public sealed class SaveAlertSettingCommandHandler(
         OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>>
 {
     /// <inheritdoc/>
-    public async Task<OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>> Handle(
+    public Task<OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>> Handle(
         SaveAlertSettingCommand command,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        if (!Ticker.Create(command.Ticker).TryPickT0(out var ticker, out var badTicker))
-        {
-            return badTicker;
-        }
+        return Ticker.Create(command.Ticker).Match(
+            ticker => HandleAsync(command, ticker, ct),
+            badTicker => Task.FromResult<
+                OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>>(badTicker));
+    }
 
+    private async Task<OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>> HandleAsync(
+        SaveAlertSettingCommand command,
+        Ticker ticker,
+        CancellationToken ct)
+    {
         // "Do you own this?" is a context question, so the handler asks it - and asks it before any
         // read of the Alerts database, because a threshold on a position you do not hold is refused
         // whatever is already stored. This is the phase's only Alerts to Portfolio call.
@@ -48,38 +54,39 @@ public sealed class SaveAlertSettingCommandHandler(
 
         if (existing is not null)
         {
-            if (!existing
-                    .Adjust(
-                        command.ThresholdPercent,
-                        command.WindowMinutes,
-                        command.Enabled,
-                        options.MaxWindowMinutes)
-                    .TryPickT0(out _, out var adjustFailed))
-            {
-                return adjustFailed;
-            }
-
-            await settings.SaveAsync(existing, ct);
-
-            return Describe(existing);
-        }
-
-        if (!AlertSetting
-                .Create(
-                    command.UserId,
-                    ticker.Value,
+            return await existing
+                .Adjust(
                     command.ThresholdPercent,
                     command.WindowMinutes,
                     command.Enabled,
                     options.MaxWindowMinutes)
-                .TryPickT0(out var created, out var createFailed))
-        {
-            return createFailed;
+                .Match(
+                    adjusted => SaveAndDescribeAsync(existing, ct),
+                    adjustFailed => Task.FromResult<
+                        OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>>(
+                        adjustFailed));
         }
 
-        await settings.SaveAsync(created, ct);
+        return await AlertSetting
+            .Create(
+                command.UserId,
+                ticker.Value,
+                command.ThresholdPercent,
+                command.WindowMinutes,
+                command.Enabled,
+                options.MaxWindowMinutes)
+            .Match(
+                created => SaveAndDescribeAsync(created, ct),
+                createFailed => Task.FromResult<
+                    OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>>(createFailed));
+    }
 
-        return Describe(created);
+    private async Task<OneOf<SaveAlertSettingResult, TickerNotHeld, WindowExceedsRetention, InvalidInput>>
+        SaveAndDescribeAsync(AlertSetting setting, CancellationToken ct)
+    {
+        await settings.SaveAsync(setting, ct);
+
+        return Describe(setting);
     }
 
     private static SaveAlertSettingResult Describe(AlertSetting setting) => new(

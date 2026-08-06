@@ -9,7 +9,8 @@ public sealed class PriceWindowReader(IPriceWindowStore store, TimeProvider cloc
 {
     public async Task<PriceWindow?> GetWindowAsync(string ticker, TimeSpan window, CancellationToken ct)
     {
-        if (!Ticker.Create(ticker).TryPickT0(out var symbol, out _) || window <= TimeSpan.Zero)
+        if (Ticker.TryParse(ticker) is not { } symbol
+            || window <= TimeSpan.Zero)
         {
             return null;
         }

@@ -28,7 +28,7 @@ internal sealed record FinnhubSearchResponse(
         foreach (var row in Result)
         {
             if (string.IsNullOrWhiteSpace(row.Description)
-                || !Ticker.Create(row.Symbol).TryPickT0(out var ticker, out _)
+                || Ticker.TryParse(row.Symbol) is not { } ticker
                 || !seen.Add(ticker.Value))
             {
                 continue;

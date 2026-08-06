@@ -11,14 +11,15 @@ namespace StockPortfolio.Modules.Portfolio.Application.Dashboard.Commands.SaveDa
 public sealed class SaveDashboardSettingsCommandHandler(IDashboardSettingsRepository repository)
     : ICommandHandler<SaveDashboardSettingsCommand, OneOf<GetDashboardSettingsResult, InvalidInput>>
 {
-    public async Task<OneOf<GetDashboardSettingsResult, InvalidInput>> Handle(
-        SaveDashboardSettingsCommand command, CancellationToken ct)
-    {
-        if (!RefreshInterval.Create(command.RefreshIntervalSeconds).TryPickT0(out var interval, out var invalid))
-        {
-            return invalid;
-        }
+    public Task<OneOf<GetDashboardSettingsResult, InvalidInput>> Handle(
+        SaveDashboardSettingsCommand command, CancellationToken ct) =>
+        RefreshInterval.Create(command.RefreshIntervalSeconds).Match(
+            interval => SaveAsync(command, interval, ct),
+            invalid => Task.FromResult<OneOf<GetDashboardSettingsResult, InvalidInput>>(invalid));
 
+    private async Task<OneOf<GetDashboardSettingsResult, InvalidInput>> SaveAsync(
+        SaveDashboardSettingsCommand command, RefreshInterval interval, CancellationToken ct)
+    {
         var settings = await repository.FindAsync(command.UserId, ct)
             ?? DashboardSettings.CreateDefault(command.UserId);
         settings.ChangeInterval(interval);

@@ -101,7 +101,7 @@ internal sealed class FakeQuoteProvider(FakeQuoteOptions options, TimeProvider c
 
     public void Nudge(string ticker, decimal percent, TimeSpan duration)
     {
-        var key = Ticker.Create(ticker).TryPickT0(out var parsed, out _) ? parsed.Value : null;
+        var key = Ticker.TryParse(ticker)?.Value;
 
         if (key is not null)
         {

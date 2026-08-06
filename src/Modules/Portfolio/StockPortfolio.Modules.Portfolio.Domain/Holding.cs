@@ -76,11 +76,19 @@ public sealed class Holding
         var storedQuantity = ToStoredScale(quantity);
         var storedPrice = ToStoredScale(purchasePrice);
 
-        if (ValidateAmounts(storedQuantity, storedPrice).TryPickT1(out var invalid, out _))
-        {
-            return invalid;
-        }
+        return ValidateAmounts(storedQuantity, storedPrice).Match(
+            valid => Open(userId, ticker, storedQuantity, storedPrice, clock),
+            invalid => invalid);
+    }
 
+    /// <summary>Builds the position, once the numbers it is built from have passed.</summary>
+    private static OneOf<Holding, InvalidInput> Open(
+        Guid userId,
+        Ticker ticker,
+        decimal storedQuantity,
+        Money storedPrice,
+        TimeProvider clock)
+    {
         var now = clock.GetUtcNow();
 
         var holding = new Holding(HoldingId.New(), userId, ticker, storedQuantity, isVisible: true, now, now);
@@ -98,11 +106,14 @@ public sealed class Holding
         var storedQuantity = ToStoredScale(quantity);
         var storedPrice = ToStoredScale(purchasePrice);
 
-        if (ValidateAmountsAndCurrency(storedQuantity, storedPrice).TryPickT1(out var invalid, out _))
-        {
-            return invalid;
-        }
+        return ValidateAmountsAndCurrency(storedQuantity, storedPrice).Match(
+            valid => ApplyMerge(storedQuantity, storedPrice, clock),
+            invalid => invalid);
+    }
 
+    /// <summary>Merges amounts that have already passed; only the summed quantity is still in question.</summary>
+    private OneOf<Success, InvalidInput> ApplyMerge(decimal storedQuantity, Money storedPrice, TimeProvider clock)
+    {
         // Both operands already sit at the stored scale, so their sum is exact — but a sum of two
         // individually legal quantities can still cross the ceiling each of them cleared alone.
         var total = Quantity + storedQuantity;
@@ -134,11 +145,17 @@ public sealed class Holding
         var storedQuantity = ToStoredScale(quantity);
         var storedPrice = ToStoredScale(purchasePrice);
 
-        if (ValidateAmountsAndCurrency(storedQuantity, storedPrice).TryPickT1(out var invalid, out _))
-        {
-            return invalid;
-        }
+        return ValidateAmountsAndCurrency(storedQuantity, storedPrice).Match(
+            valid => ApplyCorrection(storedQuantity, storedPrice, clock),
+            invalid => invalid);
+    }
 
+    /// <summary>Replaces the position's numbers, which by here have already passed.</summary>
+    private OneOf<Success, InvalidInput> ApplyCorrection(
+        decimal storedQuantity,
+        Money storedPrice,
+        TimeProvider clock)
+    {
         Quantity = storedQuantity;
         AveragePrice = storedPrice;
         UpdatedAt = clock.GetUtcNow();

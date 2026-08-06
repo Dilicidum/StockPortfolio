@@ -18,7 +18,7 @@ public sealed class CompanyNameReader(ICompanyNameStore store) : ICompanyNameRea
 
         foreach (var candidate in tickers)
         {
-            if (Ticker.Create(candidate).TryPickT0(out var ticker, out _))
+            if (Ticker.TryParse(candidate) is { } ticker)
             {
                 requested.Add(ticker);
             }

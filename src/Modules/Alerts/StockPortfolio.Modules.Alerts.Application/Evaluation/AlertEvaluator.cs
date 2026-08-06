@@ -20,13 +20,13 @@ public sealed partial class AlertEvaluator(
     ILogger<AlertEvaluator> logger) : IAlertEvaluator
 {
     /// <inheritdoc/>
-    public async Task EvaluateAsync(string ticker, CancellationToken ct)
-    {
-        if (!Ticker.Create(ticker).TryPickT0(out var symbol, out _))
-        {
-            return;
-        }
+    public Task EvaluateAsync(string ticker, CancellationToken ct) =>
+        Ticker.Create(ticker).Match(
+            symbol => EvaluateAsync(symbol, ct),
+            badTicker => Task.CompletedTask);
 
+    private async Task EvaluateAsync(Ticker symbol, CancellationToken ct)
+    {
         var watching = await settings.ListEnabledForTickerAsync(symbol.Value, ct);
 
         if (watching.Count == 0)

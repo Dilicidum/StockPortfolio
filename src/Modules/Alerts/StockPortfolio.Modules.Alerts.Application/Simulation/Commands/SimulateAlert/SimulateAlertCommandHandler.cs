@@ -77,11 +77,8 @@ public sealed class SimulateAlertCommandHandler(
             return enabled.Count > 0 ? enabled[0] : null;
         }
 
-        if (!Ticker.Create(command.Ticker).TryPickT0(out var symbol, out _))
-        {
-            return null;
-        }
-
-        return enabled.Find(setting => setting.Ticker == symbol);
+        return Ticker.Create(command.Ticker).Match(
+            symbol => enabled.Find(setting => setting.Ticker == symbol),
+            badTicker => null);
     }
 }

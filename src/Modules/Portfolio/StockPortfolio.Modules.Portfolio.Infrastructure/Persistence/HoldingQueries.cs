@@ -11,21 +11,19 @@ namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 internal sealed class HoldingQueries(PortfolioDbContext context) : IUserHoldsTicker, IDashboardHoldingReader
 {
     /// <inheritdoc/>
-    public async Task<bool> HoldsAsync(Guid userId, string ticker, CancellationToken ct)
-    {
+    public Task<bool> HoldsAsync(Guid userId, string ticker, CancellationToken ct) =>
         // Parsed rather than trusted: the argument crosses a module boundary as a bare string, and a
         // symbol that is not a ticker at all is "not held", not an exception on a read.
-        if (!Ticker.Create(ticker).TryPickT0(out var parsed, out _))
-        {
-            return false;
-        }
+        Ticker.Create(ticker).Match(
+            parsed => HoldsAsync(userId, parsed, ct),
+            badTicker => Task.FromResult(false));
 
+    private Task<bool> HoldsAsync(Guid userId, Ticker parsed, CancellationToken ct) =>
         // AsNoTracking is correct here and only here: this is a read model nothing mutates. The
         // repository must never gain it. No visibility filter either - a hidden position is still held.
-        return await context.Holdings
+        context.Holdings
             .AsNoTracking()
             .AnyAsync(h => h.UserId == userId && h.Ticker == parsed, ct);
-    }
 
     /// <inheritdoc/>
     public async Task<IReadOnlyList<HoldingRow>> GetVisibleHoldingsAsync(Guid userId, CancellationToken ct)

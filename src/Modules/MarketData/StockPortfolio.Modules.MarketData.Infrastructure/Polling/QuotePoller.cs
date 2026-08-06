@@ -141,7 +141,7 @@ internal sealed partial class QuotePoller(
 
         foreach (var candidate in targets)
         {
-            if (Ticker.Create(candidate).TryPickT0(out var ticker, out _))
+            if (Ticker.TryParse(candidate) is { } ticker)
             {
                 tickers.Add(ticker);
             }
