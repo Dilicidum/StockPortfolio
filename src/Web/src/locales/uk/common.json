@@ -8,13 +8,15 @@
     "cancel": "Скасувати",
     "save": "Зберегти",
     "saving": "Збереження…",
+    "saved": "Збережено",
     "tryAgain": "Спробувати ще раз"
   },
   "nav": {
     "mainLabel": "Основна",
     "dashboard": "Панель приладів",
     "portfolio": "Портфель",
-    "notifications": "Сповіщення"
+    "notifications": "Сповіщення",
+    "settings": "Налаштування"
   },
   "signOut": "Вийти",
   "notFound": {

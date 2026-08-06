@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { dashboardKeys } from '../marketdata/dashboardApi'
 import {
   addHolding,
   holdingKeys,
   removeHolding,
+  setHoldingVisibility,
   updateHolding,
   type AddHoldingBody,
   type Holding,
@@ -108,5 +110,34 @@ export function useRemoveHolding() {
     onError: (_error, _id, onMutateResult) => rollback(queryClient, onMutateResult),
 
     onSettled: () => queryClient.invalidateQueries({ queryKey: holdingKeys.list() }),
+  })
+}
+
+export function useSetHoldingVisibility() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ id, isVisible }: { id: string; isVisible: boolean }) =>
+      setHoldingVisibility(id, isVisible),
+
+    onMutate: async ({ id, isVisible }) => {
+      const snapshot = await takeSnapshot(queryClient)
+
+      queryClient.setQueryData<Holding[]>(holdingKeys.list(), (old) =>
+        (old ?? []).map((holding) => (holding.id === id ? { ...holding, isVisible } : holding)),
+      )
+
+      return snapshot
+    },
+
+    onError: (_error, _variables, onMutateResult) => rollback(queryClient, onMutateResult),
+
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: holdingKeys.list() })
+      // The dashboard reads a SEPARATE query (`/api/dashboard`, not `/api/holdings`) and
+      // filters on the same flag server-side, so a visibility change here has to invalidate
+      // it too or the dashboard would keep showing a position just hidden from here.
+      queryClient.invalidateQueries({ queryKey: dashboardKeys.view() })
+    },
   })
 }

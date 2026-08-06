@@ -1,1 +1,53 @@
-{}
+{
+  "title": "Settings",
+  "subtitle": "Appearance, quotes, your own API key and which positions show on the dashboard",
+  "appearance": {
+    "title": "Appearance",
+    "themeLabel": "Theme",
+    "themeOptions": {
+      "light": "Light",
+      "dark": "Dark",
+      "system": "Match system"
+    }
+  },
+  "language": {
+    "title": "Language",
+    "label": "Language",
+    "options": {
+      "en": "English",
+      "uk": "Українська"
+    }
+  },
+  "quotes": {
+    "title": "Quotes",
+    "intervalLabel": "Refresh every",
+    "intervalOptions": {
+      "15": "15 seconds",
+      "30": "30 seconds",
+      "60": "60 seconds",
+      "120": "2 minutes",
+      "300": "5 minutes"
+    },
+    "costNote": "Every dashboard refresh fetches a fresh price for every visible position — one provider call per position, each time. Refreshing every 15 seconds is four times the calls of every 60."
+  },
+  "apiKey": {
+    "title": "Your own API key",
+    "description": "Bring your own Finnhub key and prices are fetched with it instead of the shared demo key.",
+    "inputLabel": "API key",
+    "save": "Save key",
+    "configuredStatus": "Configured, ends {{lastFour}}",
+    "remove": "Remove",
+    "rejectedNotice": "The provider refused this key. Re-enter it below.",
+    "rejectedMessage": "The provider rejected this key. Check it and try again.",
+    "unavailableMessage": "The provider could not answer just now. Try again shortly.",
+    "disabledMessage": "Bringing your own key is not available right now."
+  },
+  "visibility": {
+    "title": "Visible positions",
+    "counter": "Showing {{visible}} of {{total}}",
+    "showAll": "Show all",
+    "empty": "Add a position on the Portfolio page to control its visibility here.",
+    "toggleAria": "Toggle {{ticker}} on the dashboard",
+    "toggleFailure": "Could not update {{ticker}}. Try again."
+  }
+}

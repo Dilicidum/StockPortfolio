@@ -25,6 +25,7 @@ const NAV: NavItem[] = [
   { to: '/dashboard', labelKey: 'nav.dashboard' },
   { to: '/portfolio', labelKey: 'nav.portfolio' },
   { to: '/notifications', labelKey: 'nav.notifications' },
+  { to: '/settings', labelKey: 'nav.settings' },
 ]
 
 function initialsOf(email: string): string {

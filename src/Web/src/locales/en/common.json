@@ -8,13 +8,15 @@
     "cancel": "Cancel",
     "save": "Save",
     "saving": "Saving…",
+    "saved": "Saved",
     "tryAgain": "Try again"
   },
   "nav": {
     "mainLabel": "Main",
     "dashboard": "Dashboard",
     "portfolio": "Portfolio",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "settings": "Settings"
   },
   "signOut": "Sign out",
   "notFound": {
