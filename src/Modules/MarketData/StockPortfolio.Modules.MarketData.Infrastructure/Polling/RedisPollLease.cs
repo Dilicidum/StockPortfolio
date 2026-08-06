@@ -29,7 +29,7 @@ internal sealed partial class RedisPollLease(
             // flag must then not be touched at all — releasing one this replica does not hold would let two
             // cycles overlap, which is the single thing the second key exists to prevent.
             var claimed = await database.StringSetAsync(
-                ClaimKey(now), Held, options.Interval * 2, false, When.NotExists);
+                ClaimKey(now, options.Interval), Held, options.Interval * 2, false, When.NotExists);
 
             if (!claimed)
             {
@@ -62,9 +62,19 @@ internal sealed partial class RedisPollLease(
         }
     }
 
-    /// <summary>UTC and invariant: two replicas in different zones or locales must name the same key.</summary>
-    internal static string ClaimKey(DateTimeOffset now) =>
-        ClaimPrefix + now.UtcDateTime.ToString("yyyyMMddHHmm", CultureInfo.InvariantCulture);
+    /// <summary>The cycle this instant belongs to, counted from the epoch so every replica agrees.</summary>
+    internal static string ClaimKey(DateTimeOffset now, TimeSpan interval)
+    {
+        // Keyed to the INTERVAL, not to the calendar minute. The key's lifetime is interval * 2, so a
+        // minute-named key only survives its own minute while the interval is at least half a minute -
+        // set the interval to 15s and the claim expires inside the minute it names, letting a second
+        // replica claim that same minute. Deriving the name from the same number as the lifetime is what
+        // keeps "one winner per cycle" true at every interval rather than only at the default one.
+        var seconds = Math.Max(1L, (long)interval.TotalSeconds);
+
+        return ClaimPrefix
+            + (now.ToUnixTimeSeconds() / seconds).ToString(CultureInfo.InvariantCulture);
+    }
 
     [LoggerMessage(
         EventId = 5140,
