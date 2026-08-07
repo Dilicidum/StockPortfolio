@@ -1,62 +1,61 @@
-# Identity — the reference implementation
+# Identity
 
-The rules are in the root [CLAUDE.md](../../../CLAUDE.md). This file is only the index: which file to open
-when you want to see a rule actually working, and why that one rather than a sibling.
+Owns accounts and sign-in, and each user's theme and language. Repo-wide rules are in the root
+[CLAUDE.md](../../../CLAUDE.md); this file is only what is specific to this module.
 
-**Read "Where Identity is not a safe template" in the root CLAUDE.md before copying anything from here.**
-Five of Identity's answers are wrong for a module with domain events, a background service or an outbound
-HTTP dependency.
+Sign-in is **ASP.NET Core Identity**, not hand-written. A session token is a sealed, data-protected
+bearer token, not a signed JWT. Passwords, hashing, lockout and the token format all belong to the
+framework, so there is nothing of ours to read for them.
 
----
+## What it persists
 
-## Open this file to see that concept
+Schema `identity`, connection string name `Identity`, database role `identity_svc`, context
+`IdentityDbContext` (which derives from `IdentityUserContext<AppUser, Guid>`).
 
-| Concept | File | Why this one |
-|---|---|---|
-| Entity shape | `Domain/User.cs` | The private all-args constructor, the guard-free rule, and a factory returning `OneOf<User, InvalidInput>` — all in 90 lines |
-| Two endings for one field | `Domain/RefreshToken.cs` | `Supersede` and `Revoke` both stamp `SupersededAt`; only one sets `SupersededBy`. Conflating them made logout do nothing for 30 seconds |
-| Strongly-typed id | `Domain/UserId.cs` | 6 lines. `Guid.CreateVersion7()` in the domain, because Npgsql's sequential generator selects on `ClrType` and would never fire for `UserId` |
-| Use-case folder | `Application/Authentication/Commands/RegisterUser/` | Command, handler, and the one failure record that belongs to it — nothing pooled |
-| Handler returning a union | `Application/.../RegisterUser/RegisterUserCommandHandler.cs` | `OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>` in the signature; the context question asked *before* the expensive hash |
-| A collaborator shared by handlers | `Application/Authentication/SessionOpener.cs` | Two public names (`OpenAsync`, `RotateAsync`) over one private core — not one method with a nullable flag. Holds four invariants that fail silently if copied |
-| Layering seam | `Application/Abstractions/IUserRepository.cs` | Names the commit point in the doc comment, which is the thing Portfolio must change |
-| Module DI seam | `Infrastructure/IdentityModule.cs` | The only public type in `.Infrastructure`, and the loud failure when a connection string is missing |
-| Handler registration | `Infrastructure/DependencyInjection.cs` | Closed generics spelled out — the cost of returning `OneOf<…>` directly, and worth it |
-| EF configuration | `Infrastructure/Persistence/Configurations/UserConfiguration.cs` | Explicit column names, and the unique index that backstops the handler's check |
-| Value converter | `Infrastructure/Persistence/Converters/UserIdConverter.cs` | Lives in `.Infrastructure`, not beside the id — this is what keeps EF out of `.Domain` |
-| Request + validator | `Api/Requests/RegisterUserRequest.cs` + `Api/Validators/RegisterUserRequestValidator.cs` | Cross-field rule (password ≠ email) that DataAnnotations cannot express |
-| Endpoint surface | `Api/IdentityEndpoints.cs` | Five routes, every status declared, `.Match` with named parameters and no type argument, group-level 500 |
-
-## And in tests
-
-| Concept | File |
+| Table | Comes from |
 |---|---|
-| A rule that would otherwise pass by finding nothing | `Architecture.Tests/ModuleBoundaryTests.cs` → `EmptyShells_AreExactlyThePhasesNotYetBuilt` |
-| `.Produces` tied to observed behaviour | `Api.IntegrationTests/EndpointMetadataTests.cs` |
-| Parameterisation proved, not asserted | `Api.IntegrationTests/ParameterisationTests.cs` — the best-constructed test in the suite |
-| Time-dependent behaviour | `Api.IntegrationTests/RefreshRotationTests.cs` — `FakeTimeProvider`, never `Thread.Sleep` |
-| EF constructor binding | `Modules.Identity.UnitTests/EfConstructorBindingTests.cs` |
+| `AspNetUsers`, `AspNetUserClaims`, `AspNetUserLogins`, `AspNetUserTokens` | the base context |
+| `user_preferences` | ours: theme and language, keyed on user id |
 
----
+There is no roles table: `IdentityUserContext` is the no-roles base, and this app has no roles.
 
-## What Identity does not have
+## What it publishes and consumes
 
-It is a misleading teacher precisely because it is clean. It has **no** domain events, **no** background
-service, **no** outbound HTTP, **no** Redis, **no** pushed messages, **no** cross-module dependency, and an **empty**
-`.Contracts` — deliberately, because nothing calls Identity at runtime. The JWT carries the user id, which
-is the argument for extracting Identity first.
+Nothing either way. `StockPortfolio.Modules.Identity.Contracts` holds **no code on purpose** —
+nothing calls Identity at run time, because a token is self-contained and checking one needs no call
+here. `EmptyShells_AreExactlyThePhasesNotYetBuilt` in
+`tests/StockPortfolio.Architecture.Tests/ModuleBoundaryTests.cs` names that assembly and goes red if
+a type is added. Identity references no other module.
 
-So Identity cannot teach you: transaction scope under an event dispatcher, degradation as a success field,
-authentication without a header, or an adapter over another module's contracts. Those rules are in the root
-CLAUDE.md anyway, sourced from the phase plans rather than from this code.
+## Where the interesting code is
 
-## Session lifetimes
+| File | Why you would open it |
+|---|---|
+| `StockPortfolio.Modules.Identity.Api/IdentityEndpoints.cs` | Every route: `/api/auth` register, login, refresh, logout, me, plus `/api/settings/appearance` (GET and PUT) |
+| `StockPortfolio.Modules.Identity.Infrastructure/IdentityModule.cs` | The whole wire-up, including `AddIdentityCore` and the store |
+| `StockPortfolio.Modules.Identity.Infrastructure/Persistence/IdentityDbContext.cs` | What is mapped, and the converters for theme and language |
+| `StockPortfolio.Modules.Identity.Domain/UserPreferences.cs` | The one entity we own; `AppUser.cs` beside it is a one-line subclass |
+| `StockPortfolio.Modules.Identity.Application/Preferences/Wire.cs` | The only place `light`/`dark`/`system` and `en`/`uk` are turned into enum values |
+| `src/Host/Extensions/AuthenticationExtensions.cs` | Not in this module, but it decides the claim name, the password rules and the token lifetime |
 
-There is no policy type to read. Sessions are ASP.NET Core Identity bearer tokens, so the framework owns the
-values: the host sets the access token to 15 minutes in `AuthenticationExtensions`, and the refresh token
-keeps the framework's 14-day default, which nothing here changes. There is no rotation setting and no grace
-window — a refresh token is sealed and self-contained, and signing out rolls the user's security stamp,
-which is the only revocation available.
+## Gotchas
 
-> ⚠️ **The rest of this file predates the move to ASP.NET Core Identity and most of it is wrong.** Eight of
-> the thirteen files named above no longer exist. Treat every row as unverified until this file is rewritten.
+- **The framework's own auth routes are never mapped.** The host calls `AddIdentityApiEndpoints`
+  purely to get the schemes and `SignInManager`; the routes above are ours. Do not also call
+  `MapIdentityApi` — you would get a second, differently-behaved `/register`.
+- **The user id claim is `sub`, and the host sets it**, through `ClaimsIdentity.UserIdClaimType`.
+  Every endpoint here, and both other modules, read `sub`. Changing it is a host change.
+- **In `RegisterAsync` the status code and `Location` header are set before `SignInAsync`.**
+  `SignInAsync` writes the whole response, so anything set afterwards is lost.
+- **Logout rolls the security stamp**, which is the only revocation the framework offers. It signs
+  the user out on every device, and the access token already issued stays valid until it expires.
+- **Refresh unprotects the token itself** through `BearerTokenOptions.RefreshTokenProtector`, checks
+  expiry against `TimeProvider`, then re-validates the security stamp. There is no refresh-token
+  table, no rotation and no grace window — do not go looking for them.
+- **The tokens are sealed by the Data Protection key ring, which MarketData stores** in
+  `marketdata.data_protection_keys`. Break that and every existing session stops working.
+- `IdentityDbContext.OnModelCreating` must call `base.OnModelCreating` **first** — that call is what
+  maps `AspNetUsers` and its three siblings.
+- The context throws on `SkippedEntityTypeConfigurationWarning`, so an `IEntityTypeConfiguration`
+  outside the `StockPortfolio.Modules.Identity` namespace fails the build of the model rather than
+  being ignored.

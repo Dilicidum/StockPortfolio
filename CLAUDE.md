@@ -6,41 +6,20 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**All six phases are functionally complete.** `dotnet build` is clean at 0 warnings and `docker compose up`
-brings the whole stack up from a clean volume. Phase 5 shipped the settings surface: a theme applied before
-the first paint, English and Ukrainian, a saved dashboard refresh interval, a visibility toggle per position,
-and a per-user market-data API key encrypted at rest. **Phase 6 is built and deployed**; what is left is the
-by-hand browser walkthrough against the public URL.
+All six phases are built and deployed — the API on Azure Container Apps, the SPA on GitHub Pages. The
+by-hand browser walkthrough against the public URL is the one thing still unproven.
 
-**Phase 5 closed a P0 gap, not just extras.** The brief lists the minimum routes as login, dashboard,
-portfolio and **settings**, and the settings route did not exist until this phase.
+**Three degradation behaviours are counter-intuitive, and each has been "corrected" by mistake before.**
+Stopping Redis changes nothing on the dashboard — the provider is asked directly, so the cache was never on
+that read path — and it *does* suppress alerts, because a stale price is a degraded read while a made-up
+price history is a wrong alert. A rejected provider key is reported as unhealthy with its reason and the app
+keeps serving last-known prices; it does **not** fall back to the fake provider, which would serve invented
+numbers for real tickers. And a last-known price is shown only while the market has been open an hour or
+less since it was recorded, counting open minutes rather than wall-clock ones, so Friday's close stands all
+weekend and a dash means a real trading hour passed with nothing to show. Holidays are not handled.
 
-**Phase 6 is graceful failure, and three of its answers are counter-intuitive.** Stopping Redis changes
-nothing on the dashboard — the provider is asked directly, so the cache was never on that read path — and it
-suppresses alerts, because a stale price is a degraded read while a made-up price history is a wrong alert. A
-rejected provider key is reported as unhealthy with its reason and the app keeps serving last-known prices;
-it does **not** fall back to the fake provider, which would serve invented numbers for real tickers. And a
-last-known price is shown only while the market has been open an hour or less since it was recorded, counting
-open minutes rather than wall-clock ones, so Friday's close stands all weekend and overnight and a dash means
-a real trading hour has passed with nothing to show. Holidays are not handled.
-
-Two things were deleted rather than built. The **client-side token bucket** was sized to one provider's free
-tier, and the brief says free-tier limits are not a problem, so it went — what holds the rate now is retry
-honouring `Retry-After`, the circuit breaker, per-ticker isolation and the last-known-price fallback. And the
-**anticorruption layer's enumerated catches** were replaced with a broad catch that lets only cancellation
-through: three named exception types meant a 200 carrying an HTML error page from a WAF or CDN escaped and
-turned the dashboard into a 500, which is the exact failure the error-handling requirement exists to prevent.
-
-**MarketData now persists.** It gained its first `DbContext` and its first two tables, so there are four
-migrated contexts and four schemas with migration history. Encryption is a port the module declares
-(`ISecretProtector`, `IKeyRingStore`) and the host implements, because `.Infrastructure` may not reach
-ASP.NET Core — the Data Protection packages both trip that rule transitively.
-
-Still open:
-
-- Server-generated text (API validation messages, a fired alert's reason) stays English; the backend does no
-  language negotiation.
-- The by-hand browser walkthrough against the public URL is unfinished. The probes, the four database logins, the cache and the real price provider all answer correctly there, and the SPA loads clean; what is unproven is everything a person has to click.
+Server-generated text — API validation messages, a fired alert's reason — stays English; the backend does no
+language negotiation.
 
 ## Commands
 
