@@ -15,6 +15,24 @@ namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Migrations
             migrationBuilder.EnsureSchema(
                 name: "identity");
 
+            // Hand-written, and the reason this migration is not additive. It replaces three earlier ones
+            // whose tables are still there on any database deployed before it, and user_preferences is
+            // created again below - so without this the migration job dies on "relation already exists".
+            // Guarded, so on an empty database it does nothing, which is what the tests and a clean
+            // `docker compose up` see. Regenerating this migration drops these lines: put them back.
+            migrationBuilder.Sql(@"DROP TABLE IF EXISTS identity.""user_preferences"";");
+            migrationBuilder.Sql(@"DROP TABLE IF EXISTS identity.""refresh_tokens"";");
+            migrationBuilder.Sql(@"DROP TABLE IF EXISTS identity.""users"";");
+
+            // Those three would otherwise sit in the history table for ever, naming migrations no assembly
+            // contains. EF ignores them; a person reading the table would not.
+            migrationBuilder.Sql(@"
+                DELETE FROM identity.""__EFMigrationsHistory""
+                WHERE ""MigrationId"" IN (
+                    '20260802000554_InitialIdentity',
+                    '20260802154228_DropRedundantActiveRefreshTokenIndex',
+                    '20260806115629_AddUserPreferences');");
+
             migrationBuilder.CreateTable(
                 name: "AspNetUsers",
                 schema: "identity",
