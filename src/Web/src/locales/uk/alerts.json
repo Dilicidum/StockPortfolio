@@ -27,7 +27,7 @@
   },
   "liveBadge": {
     "connecting": "З'єднання…",
-    "live": "Наживо (SSE)",
+    "live": "Наживо (WebSocket)",
     "reconnecting": "Повторне з'єднання…",
     "offline": "Офлайн",
     "liveTitle": "Сповіщення надходять із сервера в реальному часі",

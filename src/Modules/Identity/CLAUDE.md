@@ -25,7 +25,7 @@ HTTP dependency.
 | EF configuration | `Infrastructure/Persistence/Configurations/UserConfiguration.cs` | Explicit column names, and the unique index that backstops the handler's check |
 | Value converter | `Infrastructure/Persistence/Converters/UserIdConverter.cs` | Lives in `.Infrastructure`, not beside the id — this is what keeps EF out of `.Domain` |
 | Request + validator | `Api/Requests/RegisterUserRequest.cs` + `Api/Validators/RegisterUserRequestValidator.cs` | Cross-field rule (password ≠ email) that DataAnnotations cannot express |
-| Endpoint surface | `Api/IdentityEndpoints.cs` | Five routes, every status declared, `.Match<IResult>` with named parameters, group-level 500 |
+| Endpoint surface | `Api/IdentityEndpoints.cs` | Five routes, every status declared, `.Match` with named parameters and no type argument, group-level 500 |
 
 ## And in tests
 
@@ -42,7 +42,7 @@ HTTP dependency.
 ## What Identity does not have
 
 It is a misleading teacher precisely because it is clean. It has **no** domain events, **no** background
-service, **no** outbound HTTP, **no** Redis, **no** SSE, **no** cross-module dependency, and an **empty**
+service, **no** outbound HTTP, **no** Redis, **no** pushed messages, **no** cross-module dependency, and an **empty**
 `.Contracts` — deliberately, because nothing calls Identity at runtime. The JWT carries the user id, which
 is the argument for extracting Identity first.
 

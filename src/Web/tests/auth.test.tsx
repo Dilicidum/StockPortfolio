@@ -21,8 +21,6 @@ function renderAt(path: string) {
     routeTree,
     history: createMemoryHistory({ initialEntries: [path] }),
     context: { queryClient, auth: authStore },
-    // The app's own bootstrap has already settled by the time the real router
-    // mounts, so there is nothing to preload here either.
     defaultPreload: false,
   })
 
@@ -44,8 +42,6 @@ describe('route guard', () => {
       expect(router.state.location.pathname).toBe('/login')
     })
 
-    // And it remembers where the visitor was heading, so signing in finishes
-    // the journey instead of dumping them on a generic landing page.
     expect(router.state.location.search).toMatchObject({ redirect: '/dashboard' })
 
     expect(await screen.findByRole('button', { name: /sign in/i })).toBeInTheDocument()
@@ -55,8 +51,6 @@ describe('route guard', () => {
 
 describe('login form', () => {
   it('renders a server error without crashing', async () => {
-    // The API rejects the credentials with RFC 7807 problem+json, which is the
-    // ordinary outcome of a typo — not an exception, and not a blank screen.
     server.use(
       http.post('*/api/auth/login', () =>
         HttpResponse.json(
@@ -83,7 +77,6 @@ describe('login form', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Invalid email or password.')
 
-    // Still on the login page, form still usable, no error boundary.
     expect(router.state.location.pathname).toBe('/login')
     expect(screen.getByLabelText(/email/i)).toHaveValue('someone@example.com')
     expect(authStore.getState().isAuthenticated).toBe(false)
@@ -96,7 +89,6 @@ describe('login form', () => {
           {
             title: 'One or more validation errors occurred.',
             status: 400,
-            // ASP.NET Core emits PascalCase keys; the client normalises them.
             errors: { Email: ['Email is not a known account.'] },
           },
           { status: 400, headers: { 'Content-Type': 'application/problem+json' } },
@@ -125,9 +117,6 @@ describe('signed-in session', () => {
         logoutCalls += 1
         return new HttpResponse(null, { status: 204 })
       }),
-      // Phase 3 gave /dashboard a real fetch and Phase 4 gave the authenticated layout an
-      // alert stream, and MSW is set to error on anything unhandled — so this sign-out
-      // test needs both sets of stubs to reach the page.
       ...dashboardHandlers,
       ...alertsHandlers,
     )

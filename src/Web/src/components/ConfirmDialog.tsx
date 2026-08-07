@@ -12,11 +12,6 @@ export interface ConfirmDialogProps {
   busy?: boolean | undefined
 }
 
-/**
- * A modal with a focus trap, Escape-to-close and aria-modal, built by hand because the brief
- * bans UI component libraries — no Radix, no Headless UI, no React Aria. Focus moves to Cancel
- * on open, because that is the safe action, and returns to whatever opened the dialog on close.
- */
 export function ConfirmDialog({
   open,
   title,
@@ -35,9 +30,6 @@ export function ConfirmDialog({
   const cancelRef = useRef<HTMLButtonElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
 
-  // Focus in, focus back out. Keyed on `open` alone: fold this into the keydown effect
-  // below and an inline `onCancel` from the parent re-runs it on every render, which
-  // re-captures the opener as the Cancel button and bounces focus out and back each time.
   useEffect(() => {
     if (!open) return
 
@@ -61,16 +53,12 @@ export function ConfirmDialog({
 
       if (event.key !== 'Tab') return
 
-      // The trap. Without it, Tab walks out of the dialog into the page behind it, which
-      // is still rendered and still focusable.
       const focusable = panelRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])')
       if (!focusable || focusable.length === 0) return
 
       const first = focusable[0]!
       const last = focusable[focusable.length - 1]!
 
-      // Focus can be outside the panel entirely — disabling the confirm button while it
-      // holds focus drops it to <body>, and from there Tab would enter the page behind.
       if (!panelRef.current?.contains(document.activeElement)) {
         event.preventDefault()
         first.focus()

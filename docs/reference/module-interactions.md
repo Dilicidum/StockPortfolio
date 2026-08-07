@@ -225,19 +225,19 @@ flowchart TB
     ACR -.-> JOB
     JOB -->|"as the migration role"| PG
     API --> PG
-    API -->|"prices, cooldowns, tickets, fan-out"| RD
+    API -->|"prices, cooldowns, fan-out between copies"| RD
 ```
 
 Three consequences shape the code, and all three were designed for from the start.
 
 **Cross-origin is permanent**, because the SPA is on one host and the API on another. The allowed origin is
-listed explicitly. The live stream cannot send an authorization header, and cross-origin cookies are
-unreliable now that third-party cookies are being phased out, so the browser first exchanges its session for
-a single-use, short-lived ticket and passes that on the stream URL.
+listed explicitly. The live connection cannot send an authorization header, and cross-origin cookies are
+unreliable now that third-party cookies are being phased out, so the token travels in the URL instead — the
+real-time library's own answer, with the server reading it back only for that one path.
 
-**A heartbeat every twenty seconds is not optional.** The hosting platform closes an idle connection after
-four minutes, and four minutes is both the default and the floor on this tier — raising it needs a
-dedicated, much more expensive plan.
+**Something must cross the connection every few seconds.** The hosting platform closes an idle connection
+after four minutes, and four minutes is both the default and the floor on this tier — raising it needs a
+dedicated, much more expensive plan. The library's own keep-alive covers this; nothing here does.
 
 **The API keeps at least one copy running, and at most two.** It scaled to zero until the poller landed, and
 zero was only ever correct while nothing ran between requests — a sleeping copy samples no prices, so no

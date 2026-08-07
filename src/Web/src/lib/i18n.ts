@@ -34,16 +34,8 @@ export function isSupportedLanguage(value: string | null | undefined): value is 
   return (SUPPORTED_LANGUAGES as readonly string[]).includes(value ?? '')
 }
 
-/**
- * A pre-sign-in bootstrap cache only, exactly like `lib/theme.ts`'s `THEME_STORAGE_KEY` — read
- * once to guess a starting language before any session exists. The moment one does,
- * `applyServerLanguage` is the only thing allowed to change the language, and it re-caches
- * here so the NEXT bootstrap (a fresh tab, before that session's appearance query has
- * answered) guesses the same value rather than falling back to English again.
- */
 const LANGUAGE_STORAGE_KEY = 'stockportfolio.language'
 
-/** Never throws — a browser with site data blocked reports 'en' rather than failing. */
 export function readCachedLanguage(): Language {
   try {
     const stored = globalThis.localStorage?.getItem(LANGUAGE_STORAGE_KEY) ?? null
@@ -57,7 +49,6 @@ function cacheLanguage(language: Language): void {
   try {
     globalThis.localStorage?.setItem(LANGUAGE_STORAGE_KEY, language)
   } catch {
-    // Private-mode Safari and friends. The language still applies for this load.
   }
 }
 
@@ -83,36 +74,17 @@ void i18n.use(initReactI18next).init({
     },
   },
   lng: readCachedLanguage(),
-  // NO FALLBACK. A missing Ukrainian key must render as its raw key path — ugly and visible
-  // to whoever is looking at the Ukrainian UI — rather than silently showing English, which
-  // would hide the gap from whoever added the key and show it to every Ukrainian reader.
   fallbackLng: false,
   ns: NAMESPACES,
   defaultNS: 'common',
   interpolation: { escapeValue: false },
 })
 
-// `index.html` hardcodes `lang="en"` because it is static markup rendered before any of
-// this runs. Keeping `<html lang>` in step matters for screen readers (they use it to pick
-// a pronunciation) and browser translate prompts, so it is corrected here and on every
-// later change — `changeLanguage` fires this event for the initial `init()` too, not only
-// for later calls.
 i18n.on('languageChanged', (language) => {
   if (typeof document !== 'undefined') document.documentElement.lang = language
 })
 if (typeof document !== 'undefined') document.documentElement.lang = i18n.language
 
-/**
- * THE ONLY PATH allowed to change the language once a session exists. Called by
- * `useSyncServerLanguage` as soon as the appearance query resolves, so the value the user
- * actually chose always overrides whatever the pre-sign-in cache guessed — including when
- * the two disagree, which is the ordinary case for a returning user on a fresh browser.
- *
- * Returns the settled promise rather than firing `changeLanguage` and forgetting it, so a
- * test can `await` the moment the UI has actually re-rendered instead of racing it. Callers
- * that do not care mark the call `void`, the same convention every other fire-and-forget
- * call in this codebase follows.
- */
 export function applyServerLanguage(language: Language): Promise<void> {
   cacheLanguage(language)
   if (i18n.language === language) return Promise.resolve()

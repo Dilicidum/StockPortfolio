@@ -29,7 +29,6 @@ const AAPL: Holding = {
   updatedAt: '2026-08-04T12:00:00+00:00',
 }
 
-/** Stands in for window.matchMedia, exactly as `theme.test.tsx` does — jsdom has none. */
 class StubMediaQueryList {
   matches: boolean
   private listeners = new Set<(event: MediaQueryListEvent) => void>()
@@ -70,7 +69,6 @@ afterEach(() => {
   document.documentElement.style.colorScheme = ''
 })
 
-/** Same boilerplate as `i18n.test.tsx`'s `renderPortfolio` — any authenticated route does, since the theme sync lives in the layout, not the Settings screen. */
 async function renderPortfolio() {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   queryClient.setQueryData(holdingKeys.list(), [AAPL])
@@ -90,12 +88,6 @@ async function renderPortfolio() {
 }
 
 describe('useSyncServerTheme', () => {
-  /**
-   * THE ONE THAT PROVES SIGN-IN ON A SECOND DEVICE WORKS. No cache write here — a fresh
-   * browser with nothing in localStorage — so this starts exactly like a first-time visitor,
-   * defaulting to 'system'. The server disagrees and holds 'dark'; the page has to move to
-   * match it without anyone opening Settings.
-   */
   it('serverTheme_DisagreeingWithTheCache_Wins', async () => {
     server.use(appearanceHandler({ theme: 'dark', language: 'en' }))
 
@@ -106,11 +98,6 @@ describe('useSyncServerTheme', () => {
     })
   })
 
-  /**
-   * THE STRICTMODE-SURVIVING LIVE-FOLLOW CASE. `watchSystemTheme` already had a correct
-   * teardown and its own unit tests before this — the defect was that nothing ever called
-   * it. The OS flips mid-session, with nobody touching Settings, and the page has to move.
-   */
   it('systemTheme_ChangingWhileChoiceIsSystem_UpdatesLive', async () => {
     server.use(appearanceHandler({ theme: 'system', language: 'en' }))
 
@@ -127,7 +114,6 @@ describe('useSyncServerTheme', () => {
     })
   })
 
-  /** The choice is 'dark', not 'system' — an OS flip must not move a page that opted out of following it. */
   it('systemTheme_ChangingWhileChoiceIsDark_DoesNothing', async () => {
     server.use(appearanceHandler({ theme: 'dark', language: 'en' }))
 
@@ -137,10 +123,6 @@ describe('useSyncServerTheme', () => {
       expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
     })
 
-    // The DOM attribute flips to 'dark' in the same commit that STARTS tearing the system
-    // listener down (both follow from the one `setChoice('dark')` call), but the teardown
-    // itself lands in the render that call schedules — the same tick in a real browser, one
-    // beat later under this harness's scheduler. Give it that beat before proving silence.
     await new Promise((resolve) => setTimeout(resolve, 10))
 
     stub.dispatch(false)

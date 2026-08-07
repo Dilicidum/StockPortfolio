@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { applyTheme, watchSystemTheme } from '../src/lib/theme'
 
-/** Stands in for window.matchMedia, which jsdom does not implement. */
 class StubMediaQueryList {
   matches: boolean
   private listeners = new Set<(event: MediaQueryListEvent) => void>()
@@ -64,11 +63,6 @@ it('watchSystemTheme_WhenTheOsThemeChanges_CallsBack', () => {
   teardown()
 })
 
-/**
- * The StrictMode case. React 19 mounts an effect, tears it down, and mounts it again; a
- * watcher that does not remove its own listener in teardown leaves two registered against
- * one media query. This is the only test that goes red on a missing removeEventListener.
- */
 it('watchSystemTheme_AfterTeardown_DoesNotCallBack', () => {
   const onChange = vi.fn()
   const teardown = watchSystemTheme(onChange)

@@ -1,52 +1,43 @@
 using System.Security.Claims;
+
 using FluentValidation;
+
+using Microsoft.AspNetCore.Authentication.BearerToken;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
 using OneOf;
-using OneOf.Types;
+
 using StockPortfolio.Modules.Identity.Api.Requests;
 using StockPortfolio.Modules.Identity.Api.Validators;
-using StockPortfolio.Modules.Identity.Application;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.LoginUser;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RefreshSession;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RegisterUser;
-using StockPortfolio.Modules.Identity.Application.Authentication.Commands.RevokeSession;
-using StockPortfolio.Modules.Identity.Application.Authentication.Queries.GetCurrentUser;
 using StockPortfolio.Modules.Identity.Application.Preferences.Commands.SaveAppearance;
 using StockPortfolio.Modules.Identity.Application.Preferences.Queries.GetAppearance;
+using StockPortfolio.Modules.Identity.Domain;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Identity.Api;
 
-/// <summary>The Identity module's entire inbound HTTP surface: five routes under /api/auth, two under /api/settings, plus the one DI seam.</summary>
 public static class IdentityEndpoints
 {
-    /// <summary>Where a newly created account is addressable.</summary>
-    private const string CurrentUserPath = "/api/auth/me";
-
-    /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
 
-    /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
+    private const string CurrentUserPath = "/api/auth/me";
+
     public static IServiceCollection AddIdentityApi(this IServiceCollection services)
     {
-        services.AddValidatorsFromAssemblyContaining<LoginUserRequestValidator>();
+        services.AddValidatorsFromAssemblyContaining<RegisterUserRequestValidator>();
 
         return services;
     }
 
-    /// <summary>Maps the five authentication routes onto /api/auth.</summary>
     public static IEndpointRouteBuilder MapIdentityEndpoints(this IEndpointRouteBuilder app)
     {
-        // Every status an endpoint can actually emit is declared. 415 and 500 carry problem+json
-        // because AddProblemDetails and UseStatusCodePages give even framework-generated
-        // responses a body - verified against the running API, not assumed.
-
-        // 500 is the one status every route here shares, so it is declared once on the group.
         var group = app.MapGroup("/api/auth")
             .WithTags("Authentication")
             .ProducesProblem(StatusCodes.Status500InternalServerError);
@@ -57,7 +48,7 @@ public static class IdentityEndpoints
             .WithName("Register")
             .WithSummary("Creates an account and signs the caller straight in.")
             .WithDescription("Returns the same token pair as login; Location points at /api/auth/me.")
-            .Produces<TokenPair>(StatusCodes.Status201Created)
+            .Produces<AccessTokenResponse>(StatusCodes.Status201Created)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
@@ -67,8 +58,8 @@ public static class IdentityEndpoints
             .AllowAnonymous()
             .WithName("Login")
             .WithSummary("Exchanges email and password for a token pair.")
-            .WithDescription("A wrong password and an unknown email give the identical 401, so the endpoint is not an account enumerator.")
-            .Produces<TokenPair>(StatusCodes.Status200OK)
+            .WithDescription("A wrong password and an unknown email give the identical 401.")
+            .Produces<AccessTokenResponse>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
@@ -78,8 +69,8 @@ public static class IdentityEndpoints
             .AllowAnonymous()
             .WithName("Refresh")
             .WithSummary("Exchanges a refresh token for a fresh token pair.")
-            .WithDescription("Anonymous by design: the caller arrives here because its access token has expired.")
-            .Produces<TokenPair>(StatusCodes.Status200OK)
+            .WithDescription("Anonymous by design: the caller arrives because its access token has expired.")
+            .Produces<AccessTokenResponse>(StatusCodes.Status200OK)
             .ProducesValidationProblem()
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
@@ -87,17 +78,18 @@ public static class IdentityEndpoints
         group.MapPost("/logout", LogoutAsync)
             .RequireAuthorization()
             .WithName("Logout")
-            .WithSummary("Ends the session.")
-            .WithDescription("Idempotent. Send the refresh token in the body to retire it immediately; omit it and the call still returns 204.")
+            .WithSummary("Ends the session: revokes every refresh token this user holds.")
+            .WithDescription(
+                "The access token already issued stays usable until it expires; refresh stops at once. "
+                + "Signs the user out on every device, because the security stamp is per account.")
             .Produces(StatusCodes.Status204NoContent)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
+            .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         group.MapGet("/me", GetCurrentUserAsync)
             .RequireAuthorization()
             .WithName("GetCurrentUser")
             .WithSummary("Returns the identity behind the current access token.")
-            .Produces<GetCurrentUserResult>(StatusCodes.Status200OK)
+            .Produces<CurrentUserResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized);
 
         var settings = app.MapGroup("/api/settings")
@@ -122,97 +114,117 @@ public static class IdentityEndpoints
         return app;
     }
 
-    /// <summary>Creates an account and issues its first token pair.</summary>
     private static async Task<IResult> RegisterAsync(
         RegisterUserRequest request,
-        ICommandHandler<RegisterUserCommand, OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>> handler,
-        CancellationToken ct)
+        UserManager<AppUser> users,
+        SignInManager<AppUser> signIn,
+        HttpContext http)
     {
-        var result = await handler.Handle(new RegisterUserCommand(request.Email, request.Password), ct);
+        var email = request.Email.Trim();
 
-        return result.Match<IResult>(
-            tokens => TypedResults.Created(CurrentUserPath, tokens),
-            emailTaken => ProblemDetailsExtensions.ConflictProblem("An account with that email address already exists."),
+        if (await users.FindByEmailAsync(email) is not null)
+        {
+            return ProblemDetailsExtensions.ConflictProblem("An account with that email address already exists.");
+        }
 
-            // The handler's own InvalidInput case, not the filter's.
-            invalid => invalid.ToValidationProblem());
+        var user = new AppUser { UserName = email, Email = email };
+        var created = await users.CreateAsync(user, request.Password);
+
+        if (!created.Succeeded)
+        {
+            return ValidationProblemFrom(created);
+        }
+
+        // Set before SignInAsync, which writes the whole response; afterwards is too late.
+        http.Response.StatusCode = StatusCodes.Status201Created;
+        http.Response.Headers.Location = CurrentUserPath;
+
+        signIn.AuthenticationScheme = IdentityConstants.BearerScheme;
+        await signIn.SignInAsync(user, isPersistent: false);
+
+        return TypedResults.Empty;
     }
 
-    /// <summary>Signs an existing account in.</summary>
     private static async Task<IResult> LoginAsync(
         LoginUserRequest request,
-        ICommandHandler<LoginUserCommand, OneOf<TokenPair, InvalidCredentials>> handler,
-        CancellationToken ct)
+        SignInManager<AppUser> signIn)
     {
-        var result = await handler.Handle(new LoginUserCommand(request.Email, request.Password), ct);
+        signIn.AuthenticationScheme = IdentityConstants.BearerScheme;
 
-        return result.Match<IResult>(
-            tokens => TypedResults.Ok(tokens),
-            rejected => ProblemDetailsExtensions.UnauthorizedProblem("Invalid credentials."));
+        var result = await signIn.PasswordSignInAsync(
+            request.Email.Trim(), request.Password, isPersistent: false, lockoutOnFailure: true);
+
+        if (result.IsLockedOut)
+        {
+            return ProblemDetailsExtensions.UnauthorizedProblem(
+                "Too many failed attempts. Try again later.");
+        }
+
+        if (!result.Succeeded)
+        {
+            // One answer for a wrong password and for an unknown address, so this is not an enumerator.
+            return ProblemDetailsExtensions.UnauthorizedProblem("Invalid credentials.");
+        }
+
+        return TypedResults.Empty;
     }
 
-    /// <summary>Rotates a refresh token into a new pair.</summary>
     private static async Task<IResult> RefreshAsync(
         RefreshSessionRequest request,
-        ICommandHandler<RefreshSessionCommand, OneOf<TokenPair, InvalidOrExpired>> handler,
-        CancellationToken ct)
+        SignInManager<AppUser> signIn,
+        IOptionsMonitor<BearerTokenOptions> bearerOptions,
+        TimeProvider clock)
     {
-        var result = await handler.Handle(new RefreshSessionCommand(request.RefreshToken), ct);
+        var protector = bearerOptions.Get(IdentityConstants.BearerScheme).RefreshTokenProtector;
+        var ticket = protector.Unprotect(request.RefreshToken);
 
-        return result.Match<IResult>(
-            tokens => TypedResults.Ok(tokens),
-            rejected => ProblemDetailsExtensions.UnauthorizedProblem("That refresh token is not valid."));
-    }
-
-    /// <summary>Ends the session, revoking the refresh token when one is offered.</summary>
-    private static async Task<IResult> LogoutAsync(
-        RevokeSessionRequest? request,
-        ICommandHandler<RevokeSessionCommand, OneOf<Success, NotFound>> handler,
-        CancellationToken ct)
-    {
-        // No body, or a body with no token: nothing is revocable.
-        if (request is null || string.IsNullOrWhiteSpace(request.RefreshToken))
+        if (ticket?.Properties?.ExpiresUtc is not { } expiresUtc
+            || clock.GetUtcNow() >= expiresUtc
+            || await signIn.ValidateSecurityStampAsync(ticket.Principal) is not AppUser user)
         {
-            return TypedResults.NoContent();
+            return ProblemDetailsExtensions.UnauthorizedProblem("That refresh token is not valid.");
         }
 
-        var result = await handler.Handle(new RevokeSessionCommand(request.RefreshToken), ct);
-
-        // Both cases are 204: logging out twice is not an error.
-        return result.Match<IResult>(
-            closed => TypedResults.NoContent(),
-            nothingToClose => TypedResults.NoContent());
+        return TypedResults.SignIn(
+            await signIn.CreateUserPrincipalAsync(user),
+            authenticationScheme: IdentityConstants.BearerScheme);
     }
 
-    /// <summary>Resolves the bearer token back to a user.</summary>
+    private static async Task<IResult> LogoutAsync(
+        ClaimsPrincipal principal,
+        UserManager<AppUser> users,
+        SignInManager<AppUser> signIn)
+    {
+        if (await users.GetUserAsync(principal) is { } user)
+        {
+            // Refresh validates the stamp, so moving it is the only revocation the framework offers.
+            await users.UpdateSecurityStampAsync(user);
+        }
+
+        await signIn.SignOutAsync();
+
+        return TypedResults.NoContent();
+    }
+
     private static async Task<IResult> GetCurrentUserAsync(
         ClaimsPrincipal principal,
-        IQueryHandler<GetCurrentUserQuery, OneOf<GetCurrentUserResult, NotFound>> handler,
-        CancellationToken ct)
+        UserManager<AppUser> users)
     {
-        // Totality over a string?, not a security control: OnTokenValidated already rejects a subject-less
-        // token, so this only gives FindFirstValue's null a branch to go down.
-        if (!Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out var userId))
+        if (await users.GetUserAsync(principal) is not { } user)
         {
-            return ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");
+            return ProblemDetailsExtensions.UnauthorizedProblem(
+                "This session no longer refers to a valid account.");
         }
 
-        var result = await handler.Handle(new GetCurrentUserQuery(userId), ct);
-
-        return result.Match<IResult>(
-            user => TypedResults.Ok(user),
-
-            // The JWT outlived the account it names — deleted, or issued by a previous database.
-            gone => ProblemDetailsExtensions.UnauthorizedProblem("This session no longer refers to a valid account."));
+        return TypedResults.Ok(new CurrentUserResponse(user.Id, user.Email ?? string.Empty));
     }
 
-    // Reads the caller's appearance settings, creating the default row on first read.
     private static async Task<IResult> GetAppearanceAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetAppearanceQuery, GetAppearanceResult> handler,
         CancellationToken ct)
     {
-        if (!Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out var userId))
+        if (!TryReadUserId(principal, out var userId))
         {
             return ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");
         }
@@ -222,24 +234,34 @@ public static class IdentityEndpoints
         return TypedResults.Ok(result);
     }
 
-    // Saves the caller's appearance settings.
     private static async Task<IResult> SaveAppearanceAsync(
         SaveAppearanceRequest request,
         ClaimsPrincipal principal,
         ICommandHandler<SaveAppearanceCommand, OneOf<GetAppearanceResult, InvalidInput>> handler,
         CancellationToken ct)
     {
-        if (!Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out var userId))
+        if (!TryReadUserId(principal, out var userId))
         {
             return ProblemDetailsExtensions.UnauthorizedProblem("The access token carries no usable subject.");
         }
 
-        var result = await handler.Handle(new SaveAppearanceCommand(userId, request.Theme, request.Language), ct);
+        var result = await handler.Handle(
+            new SaveAppearanceCommand(userId, request.Theme, request.Language), ct);
 
-        return result.Match<IResult>(
-            saved => TypedResults.Ok(saved),
-
-            // Reachable only if the validator and the handler disagree about the allowed set.
+        return result.Match(
+            saved => Results.Ok(saved),
             invalid => invalid.ToValidationProblem());
     }
+
+    private static bool TryReadUserId(ClaimsPrincipal principal, out Guid userId) =>
+        Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out userId);
+
+    private static Microsoft.AspNetCore.Http.HttpResults.ValidationProblem ValidationProblemFrom(
+        IdentityResult result) =>
+        TypedResults.ValidationProblem(new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["Password"] = [.. result.Errors.Select(error => error.Description)],
+        });
 }
+
+public sealed record CurrentUserResponse(Guid Id, string Email);

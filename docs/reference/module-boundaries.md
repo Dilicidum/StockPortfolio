@@ -261,7 +261,7 @@ flowchart TB
     subgraph RD["Redis — derived, re-fetchable, expiring"]
         direction LR
         R1["<b>prices</b><br/><br/>last price per ticker<br/>recent series per watched ticker<br/>poll locks"]
-        R2["<b>alerts</b><br/><br/>cooldowns<br/>stream tickets<br/>fan-out channel"]
+        R2["<b>alerts</b><br/><br/>cooldowns<br/>fan-out between copies"]
     end
 
     subgraph BR["Browser — per tab, never durable"]

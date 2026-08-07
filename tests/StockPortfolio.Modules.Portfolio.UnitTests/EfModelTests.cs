@@ -11,7 +11,6 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>The model must build, and it must bind the one constructor Holding has.</summary>
 public sealed class EfModelTests
 {
     private const string ModelOnly = "Host=localhost;Database=model-only;Username=none;Password=none";
@@ -32,8 +31,7 @@ public sealed class EfModelTests
         return context.Model.FindEntityType(typeof(DashboardSettings))!;
     }
 
-    // Renaming a constructor parameter without renaming its property leaves no bindable constructor,
-    // and with no parameterless fallback the WHOLE model fails to build at startup.
+    // Rename a constructor parameter without its property and EF finds no bindable constructor — the whole model fails at startup.
     [Fact]
     public void Holding_BindsEveryScalarProperty_ThroughTheConstructor()
     {
@@ -51,7 +49,6 @@ public sealed class EfModelTests
                 + "constructor parameter (efcore#31621) — and the factory assigns it afterwards.");
     }
 
-    // The companion to the parameter-name list above: EF must actually have chosen that constructor.
     [Fact]
     public void Holding_BindsThatConstructor_ForMaterialisation()
     {
@@ -143,8 +140,7 @@ public sealed class EfModelTests
             ignoreOrder: true);
     }
 
-    // Without HasPrecision, Npgsql maps decimal to unconstrained numeric, and a later
-    // HasPrecision(18,2) would then silently truncate every stored average.
+    // Without HasPrecision, Npgsql maps decimal to unconstrained numeric and a later HasPrecision(18,2) truncates silently.
     [Theory]
     [InlineData("Quantity")]
     [InlineData("AveragePrice.Amount")]
@@ -160,9 +156,7 @@ public sealed class EfModelTests
         property.GetScale().ShouldBe(6);
     }
 
-    // A bool with a store default of true is the classic "column is always true" bug: the CLR default
-    // false reads as "not set", so EF omits it and the database writes true. EF8 fixed it by making the
-    // sentinel equal the store default. Phase 5's Hide() depends on that fix, so pin it now.
+    // A bool with a store default of true silently swallows an explicit false unless EF's sentinel equals that default.
     [Fact]
     public void IsVisible_DefaultsToTrueInTheDatabase_WithoutSwallowingAnExplicitFalse()
     {
@@ -188,7 +182,6 @@ public sealed class EfModelTests
         currency.IsFixedLength().ShouldBe(true);
     }
 
-    // The same renamed-parameter hazard as Holding, now for the second entity this context maps.
     [Fact]
     public void DashboardSettings_BindsEveryScalarProperty_ThroughTheConstructor()
     {
@@ -248,8 +241,7 @@ public sealed class EfModelTests
             .ShouldBe(["user_id", "refresh_interval_seconds"], ignoreOrder: true);
     }
 
-    // The RefreshInterval converter, registered as both Properties<T>() and DefaultTypeMapping<T>() —
-    // missing the second is the failure mode CLAUDE.md records under "Where Identity is not a safe template".
+    // The converter must be registered as both Properties<T>() and DefaultTypeMapping<T>(); missing the second fails quietly.
     [Fact]
     public void RefreshInterval_StoresAsAPlainInt() =>
         DashboardSettingsEntity()

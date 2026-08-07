@@ -3,15 +3,12 @@ using StockPortfolio.Modules.Alerts.Domain;
 
 namespace StockPortfolio.Tests.Fakes;
 
-/// <summary>An in-memory fired_alerts table that also records the order it was written in.</summary>
 internal sealed class FakeFiredAlertRepository(List<string> journal) : IFiredAlertRepository
 {
-    /// <summary>The journal entry AddAsync writes, so persist-then-publish is an assertion about order.</summary>
     public const string Saved = "saved";
 
     private readonly List<FiredAlert> _rows = [];
 
-    /// <summary>Gets every alert recorded, newest last.</summary>
     public IReadOnlyList<FiredAlert> Rows => _rows;
 
     public Task AddAsync(FiredAlert alert, CancellationToken ct)

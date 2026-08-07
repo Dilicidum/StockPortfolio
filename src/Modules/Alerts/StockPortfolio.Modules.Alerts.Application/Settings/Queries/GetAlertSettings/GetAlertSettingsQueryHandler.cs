@@ -3,11 +3,9 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
 
-/// <summary>Lists a user's thresholds. There is no failure case: no thresholds is an empty list, not a 404.</summary>
 public sealed class GetAlertSettingsQueryHandler(IAlertSettingRepository settings)
     : IQueryHandler<GetAlertSettingsQuery, IReadOnlyList<GetAlertSettingsResult>>
 {
-    /// <inheritdoc/>
     public async Task<IReadOnlyList<GetAlertSettingsResult>> Handle(
         GetAlertSettingsQuery query,
         CancellationToken ct)

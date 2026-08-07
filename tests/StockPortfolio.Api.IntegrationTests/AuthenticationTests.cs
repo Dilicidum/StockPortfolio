@@ -8,13 +8,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The five /api/auth routes, driven end to end over HTTP against a real Postgres.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AuthenticationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>Registering issues a usable session, and the same credentials sign in again.</summary>
     [Fact]
     public async Task Register_ThenLogin_ReturnsTokens()
     {
@@ -24,22 +22,27 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         using var registered = await Wire.RegisterAsync(client, email, Wire.ValidPassword);
         registered.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(registered));
 
-        var fromRegister = await Wire.ReadTokensAsync(registered);
-        fromRegister.AccessExpiresAt.ShouldBeGreaterThan(DateTimeOffset.UtcNow);
-
-        // 201 without a Location reads as an oversight.
         registered.Headers.Location?.ToString().ShouldBe("/api/auth/me");
+
+        var fromRegister = await Wire.ReadTokensAsync(registered);
+        fromRegister.AccessToken.ShouldNotBeNullOrWhiteSpace();
 
         using var loggedIn = await Wire.LoginAsync(client, email, Wire.ValidPassword);
         loggedIn.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedIn));
 
         var fromLogin = await Wire.ReadTokensAsync(loggedIn);
 
-        // A second sign-in is a second session, not a re-issue of the first.
-        fromLogin.RefreshToken.ShouldNotBe(fromRegister.RefreshToken);
+        fromLogin.TokenType.ShouldBe("Bearer");
+        fromLogin.ExpiresIn.ShouldBeGreaterThan(0);
+
+        using var again = await Wire.LoginAsync(client, email, Wire.ValidPassword);
+        again.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(again));
+
+        var fromSecondLogin = await Wire.ReadTokensAsync(again);
+
+        fromSecondLogin.RefreshToken.ShouldNotBe(fromLogin.RefreshToken);
     }
 
-    /// <summary>The second registration of one address conflicts rather than overwriting.</summary>
     [Fact]
     public async Task Register_DuplicateEmail_Returns409()
     {
@@ -54,7 +57,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         second.Content.Headers.ContentType?.MediaType.ShouldBe(Wire.ProblemJson);
     }
 
-    /// <summary>The taken-address check normalises the same way the entity does, so a variant still conflicts.</summary>
     [Theory]
     [InlineData("uppercased")]
     [InlineData("padded")]
@@ -77,12 +79,10 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         using var second = await Wire.RegisterAsync(client, variant, Wire.ValidPassword);
 
-        // If the handler's pre-check normalised differently from User.Create, the insert would reach the
-        // unique index instead and surface as a 500.
+        // A pre-check that normalised differently from User.Create would reach the unique index instead and surface as a 500.
         second.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(second));
     }
 
-    /// <summary>A password under the floor is a field-level 400, not a generic one.</summary>
     [Fact]
     public async Task Register_WeakPassword_Returns400WithProblemDetails()
     {
@@ -103,13 +103,11 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         problem.Errors["Password"].ShouldNotBeEmpty();
     }
 
-    /// <summary>Case and surrounding whitespace do not create a second account.</summary>
     [Fact]
-    public async Task Register_NormalisesEmailToLowercase()
+    public async Task Register_TreatsEmailCaseInsensitively_ButKeepsTheCasingTyped()
     {
         using var client = _fixture.CreateClient();
 
-        // Foo@Bar.com, in the shape the brief's example uses: mixed case on both sides of the '@'.
         var mixed = $"Foo-{Guid.NewGuid():N}@Bar.Example.Test";
         var lower = mixed.ToLowerInvariant();
 
@@ -122,7 +120,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         using var loggedIn = await Wire.LoginAsync(client, lower, Wire.ValidPassword);
         loggedIn.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(loggedIn));
 
-        // And /me reports the normalised form, not what was typed.
+        // /me echoes the casing typed: Identity normalises into NormalizedEmail and leaves Email as entered.
         var tokens = await Wire.ReadTokensAsync(loggedIn);
         using var me = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
 
@@ -133,14 +131,12 @@ public sealed class AuthenticationTests(ApiFixture fixture)
             TestContext.Current.CancellationToken);
 
         user.ShouldNotBeNull();
-        user.Email.ShouldBe(lower);
+        user.Email.ShouldBe(mixed);
 
-        // Registering the mixed-case form a second time conflicts, which is the property that matters: two.
-        using var again = await Wire.RegisterAsync(client, mixed, Wire.ValidPassword);
+        using var again = await Wire.RegisterAsync(client, lower, Wire.ValidPassword);
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(again));
     }
 
-    /// <summary>An anonymous call to a guarded route is rejected.</summary>
     [Fact]
     public async Task Me_WithoutToken_Returns401()
     {
@@ -151,7 +147,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>A bearer token resolves back to the account that owns it.</summary>
     [Fact]
     public async Task Me_WithValidToken_ReturnsEmail()
     {
@@ -160,7 +155,8 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         var tokens = await Wire.RegisterSucceedsAsync(client, email);
 
-        using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
+        using var response = await Wire.SendAsync(
+            client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -170,46 +166,56 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         user.ShouldNotBeNull();
         user.Email.ShouldBe(email);
+
         user.Id.ShouldNotBe(Guid.Empty);
     }
 
-    /// <summary>Signing out answers 204 and does not require a body.</summary>
     [Fact]
-    public async Task Logout_Returns204()
+    public async Task Logout_Returns204_AndIsIdempotent()
     {
         using var client = _fixture.CreateClient();
 
         var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("logout"));
 
-        using var withToken = await Wire.SendAsync(
-            client,
-            HttpMethod.Post,
-            "/api/auth/logout",
-            tokens.AccessToken,
-            new { refreshToken = tokens.RefreshToken });
+        using var withToken = await Wire.LogoutAsync(client, tokens.AccessToken);
 
         withToken.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(withToken));
 
-        // Idempotent: the same token again, and no body at all, are both still 204.
-        using var repeated = await Wire.SendAsync(
-            client,
-            HttpMethod.Post,
-            "/api/auth/logout",
-            tokens.AccessToken,
-            new { refreshToken = tokens.RefreshToken });
+        // Idempotent: the access token outlives the logout by design, so a second call still lands.
+        using var repeated = await Wire.LogoutAsync(client, tokens.AccessToken);
 
         repeated.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(repeated));
-
-        using var withoutBody = await Wire.SendAsync(
-            client,
-            HttpMethod.Post,
-            "/api/auth/logout",
-            tokens.AccessToken);
-
-        withoutBody.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(withoutBody));
     }
 
-    /// <summary>Sign-out still needs a bearer token — it is not an anonymous route.</summary>
+    // MapIdentityApi ships no logout, and SignOutAsync alone revokes nothing for a bearer caller: rolling the security stamp is what closes it.
+    [Fact]
+    public async Task Refresh_AfterLogout_IsRejected()
+    {
+        using var client = _fixture.CreateClient();
+
+        var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("logout-revokes"));
+
+        // Refreshing works before the logout, so the rejection below is the logout and not a bad token.
+        using (var before = await Wire.RefreshAsync(client, tokens.RefreshToken))
+        {
+            before.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(before));
+        }
+
+        var current = await Wire.ReadTokensAsync(await Wire.RefreshAsync(client, tokens.RefreshToken));
+
+        using (var loggedOut = await Wire.LogoutAsync(client, current.AccessToken))
+        {
+            loggedOut.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(loggedOut));
+        }
+
+        using var after = await Wire.RefreshAsync(client, current.RefreshToken);
+
+        after.StatusCode.ShouldBe(
+            HttpStatusCode.Unauthorized,
+            "Logout must roll the security stamp, which /refresh validates. Without that the token "
+                + "stays good for its whole lifetime and logout is cosmetic: " + await Wire.Describe(after));
+    }
+
     [Fact]
     public async Task Logout_WithoutToken_Returns401()
     {
@@ -220,7 +226,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>A wrong password and an unknown address give the identical answer.</summary>
     [Fact]
     public async Task Login_WithWrongPassword_IsIndistinguishableFromUnknownAccount()
     {
@@ -242,7 +247,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         first.ShouldBe(second);
     }
 
-    /// <summary>Reads the identifying fields of a ProblemDetails body, ignoring the trace id.</summary>
     private static async Task<(string? Type, string? Title, int? Status, string? Detail)> ReadProblemAsync(
         HttpResponseMessage response)
     {

@@ -4,9 +4,7 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
 namespace StockPortfolio.Tests.Fakes;
 
-/// <summary>Base64-encodes with a prefix rather than echoing the plaintext back unchanged. A plain
-/// string concatenation would still leave the plaintext sitting inside the ciphertext as a literal
-/// substring — this is why the prefix alone is not enough, and the bytes have to actually change.</summary>
+// Base64, not concatenation: a prefixed plaintext would still sit inside the ciphertext as a literal substring.
 internal sealed class FakeSecretProtector : ISecretProtector
 {
     private const string Prefix = "protected:";

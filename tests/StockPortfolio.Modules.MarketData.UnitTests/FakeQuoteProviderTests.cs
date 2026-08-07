@@ -30,8 +30,7 @@ public sealed class FakeQuoteProviderTests
     [Fact]
     public async Task FakeProvider_SameTickerSameMinute_SamePriceAcrossTwoInstances()
     {
-        // Two instances, not two calls: same-instance equality passes with string.GetHashCode() too,
-        // so only this form pins the FNV-1a requirement that survives a process restart.
+        // Two instances, not two calls: same-instance equality would pass with string.GetHashCode() too.
         var first = await PriceOf(Build(Now), "AAPL");
         var second = await PriceOf(Build(Now), "AAPL");
 
@@ -64,7 +63,6 @@ public sealed class FakeQuoteProviderTests
     [Fact]
     public async Task FakeProvider_BasePrice_LandsInTheAdvertisedRange()
     {
-        // Minute zero is the base price itself, before any walk step.
         var price = await PriceOf(Build(new DateTimeOffset(2026, 8, 5, 0, 0, 0, TimeSpan.Zero)), "AAPL");
 
         price.ShouldBeInRange(20m, 500m);
@@ -96,7 +94,6 @@ public sealed class FakeQuoteProviderTests
         (await PriceOf(provider, "AAPL")).ShouldBeGreaterThan(before);
     }
 
-    /// <summary>`docker compose up` with no key is the acceptance gate, so search must work without one.</summary>
     [Theory]
     [InlineData("appl", "AAPL")]
     [InlineData("APPLE", "AAPL")]
@@ -125,7 +122,6 @@ public sealed class FakeQuoteProviderTests
     public async Task FakeProvider_Search_NothingMatching_IsAnEmptyList(string query) =>
         (await Build(Now).SearchSymbolsAsync(query, TestContext.Current.CancellationToken)).ShouldBeEmpty();
 
-    /// <summary>Every catalogue symbol must be addable, or picking one fills a field the form rejects.</summary>
     [Fact]
     public async Task FakeProvider_EverySuggestion_IsASymbolThisAppCanHold()
     {
@@ -145,7 +141,7 @@ public sealed class FakeQuoteProviderTests
         everything.ShouldAllBe(symbol => Ticker.Create(symbol).IsT0);
     }
 
-    /// <summary>The fake is the only provider on the clean-clone path, so it needs a rule that can say no.</summary>
+    // Invented behaviour, and the only axis the fake can say no on — do not simplify it back to always-true.
     [Theory]
     [InlineData("sixteen-character", true)]
     [InlineData("too-short", false)]
@@ -157,8 +153,6 @@ public sealed class FakeQuoteProviderTests
         verdict.ShouldBe(accepted ? KeyVerdict.Accepted : KeyVerdict.Rejected);
     }
 
-    /// <summary>There is no Unknown verdict from the fake: a fake that pretends the provider is down is
-    /// a fake nobody can reason about.</summary>
     [Fact]
     public async Task FakeProvider_VerifyKey_NeverAnswersUnknown()
     {

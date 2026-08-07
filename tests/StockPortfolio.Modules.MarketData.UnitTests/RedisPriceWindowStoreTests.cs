@@ -15,9 +15,7 @@ public sealed class RedisPriceWindowStoreTests
     [Fact]
     public void Encode_TwoSamplesAtOnePrice_AreTwoMembersNotOne()
     {
-        // The trap this store exists around: a sorted set keys on the MEMBER, and a member encoded as the
-        // bare price collides the second time a ticker prints the same number. Redis then updates the
-        // existing entry's score instead of adding a row, and the earlier reading is gone with no error.
+        // A sorted set keys on the member: a bare price collides the second time a ticker prints it, silently erasing the earlier reading.
         var members = new HashSet<string>(StringComparer.Ordinal)
         {
             RedisPriceWindowStore.Encode(187.42m, Observed),
@@ -57,8 +55,7 @@ public sealed class RedisPriceWindowStoreTests
     [Fact]
     public async Task Store_RedisUnreachable_SwallowsTheFailureOnBothPaths()
     {
-        // A real multiplexer pointed at a dead port, exactly as AbortOnConnectFail=false leaves it in
-        // production: every command throws RedisConnectionException at the call site.
+        // A real multiplexer on a dead port: with AbortOnConnectFail=false every command throws at the call site, as in production.
         var options = ConfigurationOptions.Parse("127.0.0.1:1");
         options.AbortOnConnectFail = false;
         options.ConnectTimeout = 50;

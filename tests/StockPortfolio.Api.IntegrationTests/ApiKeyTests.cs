@@ -7,7 +7,6 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-// The BYOK settings trio under /api/settings/api-key, driven end to end over HTTP against a real Postgres.
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class ApiKeyTests(ApiFixture fixture)
 {
@@ -65,8 +64,7 @@ public sealed class ApiKeyTests(ApiFixture fixture)
         (await StatusAsync(client, token)).Configured.ShouldBeFalse();
     }
 
-    // The most important test in this task: the raw response text, not a deserialised field, must never
-    // carry the key. A leak added later would land in a field a typed assertion does not know to look at.
+    // The raw response text, not a deserialised field: a leak added later would land in a field a typed assertion never looks at.
     [Fact]
     public async Task Get_AfterSaving_NeverReturnsTheKeyAnywhereInTheBody()
     {
@@ -103,7 +101,6 @@ public sealed class ApiKeyTests(ApiFixture fixture)
         (await StatusAsync(client, token)).Configured.ShouldBeFalse();
     }
 
-    // A switched-off feature should not advertise itself: 404, not a 200 that quietly ignores the body.
     [Fact]
     public async Task Post_WhenByokIsDisabled_Returns404()
     {

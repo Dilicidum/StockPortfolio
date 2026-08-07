@@ -7,7 +7,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Polling;
 
-/// <summary>The only background job in the application: it samples the tickers an alert is watching.</summary>
 internal sealed partial class QuotePoller(
     IServiceScopeFactory scopeFactory,
     IPollLease lease,
@@ -17,7 +16,6 @@ internal sealed partial class QuotePoller(
     TimeProvider clock,
     ILogger<QuotePoller> logger) : BackgroundService
 {
-    /// <summary>One cycle. Internal so a test can run exactly one without driving the timer.</summary>
     internal async Task RunCycleAsync(CancellationToken ct)
     {
         if (!await lease.TryAcquireAsync(clock.GetUtcNow(), ct))
@@ -31,8 +29,6 @@ internal sealed partial class QuotePoller(
         }
         finally
         {
-            // CancellationToken.None: a host on its way down must still hand the in-flight flag back, or
-            // every replica waits out the expiry before any cycle can run again.
             await lease.ReleaseAsync(CancellationToken.None);
         }
     }
@@ -50,14 +46,12 @@ internal sealed partial class QuotePoller(
         }
         catch (OperationCanceledException)
         {
-            // The host is stopping, and a cancelled wait is the ordinary way this service ends.
         }
     }
 
     private async Task RunCycleSafelyAsync(CancellationToken ct)
     {
-        // The catch goes INSIDE the loop, never around it: an unhandled exception out of a BackgroundService
-        // takes the whole host down, because StopHost is the default BackgroundServiceExceptionBehavior.
+        // The catch goes INSIDE the loop: an unhandled exception out of a BackgroundService takes the whole host down.
         try
         {
             await RunCycleAsync(ct);
@@ -74,9 +68,6 @@ internal sealed partial class QuotePoller(
 
     private async Task PollAsync(CancellationToken ct)
     {
-        // A scope per cycle. The poller is a singleton; the target source and the observer are the host's
-        // adapters over Alerts and are scoped, and the typed Finnhub client is transient, so capturing any
-        // of the three on this object would outlive what it is allowed to.
         await using var scope = scopeFactory.CreateAsyncScope();
 
         var targets = await scope.ServiceProvider
@@ -85,14 +76,11 @@ internal sealed partial class QuotePoller(
 
         var tickers = Canonicalise(targets);
 
-        // Returns before the provider is touched at all: with no alerts configured, nothing is polled.
         if (tickers.Count == 0)
         {
             return;
         }
 
-        // null: the poller has no user, so it has no key to pass. The shared window is shared, and a
-        // user's own quota must not be spent filling it.
         var quotes = await scope.ServiceProvider
             .GetRequiredService<IQuoteProvider>()
             .GetQuotesAsync(tickers, apiKeyOverride: null, ct);
@@ -102,9 +90,6 @@ internal sealed partial class QuotePoller(
             return;
         }
 
-        // Through the same store the dashboard writes, not a second encoder: the window is what alerts read
-        // and the last-known key is what the dashboard falls back to, so a sample landing in one and not the
-        // other diverges with nothing to show for it.
         await lastKnownStore.WriteAsync(quotes, ct);
 
         var observer = scope.ServiceProvider.GetRequiredService<IPriceSampleObserver>();
@@ -118,7 +103,7 @@ internal sealed partial class QuotePoller(
         }
     }
 
-    /// <summary>The observer's contract says one failure must not stop the next ticker; a comment cannot.</summary>
+    /// <summary>The per-ticker catch, and the only thing enforcing that one failed observer does not end the cycle.</summary>
     private async Task NotifyAsync(IPriceSampleObserver observer, string ticker, CancellationToken ct)
     {
         try
@@ -141,7 +126,7 @@ internal sealed partial class QuotePoller(
 
         foreach (var candidate in targets)
         {
-            if (Ticker.Create(candidate).TryPickT0(out var ticker, out _))
+            if (Ticker.TryParse(candidate) is { } ticker)
             {
                 tickers.Add(ticker);
             }

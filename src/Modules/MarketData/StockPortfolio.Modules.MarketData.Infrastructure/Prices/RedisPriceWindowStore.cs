@@ -28,15 +28,12 @@ internal sealed partial class RedisPriceWindowStore(
             var key = (RedisKey)(KeyPrefix + ticker);
             var cutoff = (double)(at - retention).ToUnixTimeMilliseconds();
 
-            // One batch: the add and the trim are pipelined, so a series cannot be read mid-way through a
-            // write and come back longer than retention allows.
             var batch = database.CreateBatch();
 
             var add = batch.SortedSetAddAsync(key, Encode(price, at), at.ToUnixTimeMilliseconds());
             var trim = batch.SortedSetRemoveRangeByScoreAsync(
                 key, double.NegativeInfinity, cutoff, Exclude.Stop);
 
-            // Twice retention, refreshed on every write: a ticker nobody watches any more expires itself.
             var expire = batch.KeyExpireAsync(key, retention * 2);
 
             batch.Execute();
@@ -79,7 +76,6 @@ internal sealed partial class RedisPriceWindowStore(
         {
             LogReadFailed(logger, ex, ticker);
 
-            // Empty, not a throw: no window means no alert, which is the same answer a quiet ticker gives.
             return [];
         }
     }
@@ -88,7 +84,6 @@ internal sealed partial class RedisPriceWindowStore(
     internal static string Encode(decimal price, DateTimeOffset at) =>
         string.Create(CultureInfo.InvariantCulture, $"{at.ToUnixTimeMilliseconds()}:{price}");
 
-    /// <summary>A corrupt member is one missing sample, never a throw — a partial window still evaluates.</summary>
     internal static bool TryDecode(string? encoded, out (DateTimeOffset At, decimal Price) sample)
     {
         sample = default;

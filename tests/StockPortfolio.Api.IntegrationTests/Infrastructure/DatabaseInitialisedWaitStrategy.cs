@@ -7,10 +7,10 @@ using Npgsql;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
-/// <summary>Waits until docker-entrypoint-initdb.d has finished, not merely until Postgres accepts a connection.</summary>
+// Waits until docker-entrypoint-initdb.d has finished, not merely until Postgres accepts a connection.
 internal sealed class DatabaseInitialisedWaitStrategy(Func<IContainer, string> connectionStringFactory) : IWaitUntil
 {
-    /// <summary>Every role 01-roles.sql creates, plus a grant from the far end of the same file.</summary>
+    // Every role 01-roles.sql creates, plus a grant from the far end of the same file.
     private const string ProbeSql = """
         SELECT CASE
             WHEN (SELECT count(*) FROM pg_roles
@@ -20,7 +20,6 @@ internal sealed class DatabaseInitialisedWaitStrategy(Func<IContainer, string> c
         END
         """;
 
-    /// <inheritdoc/>
     public async Task<bool> UntilAsync(IContainer container)
     {
         try
@@ -34,7 +33,6 @@ internal sealed class DatabaseInitialisedWaitStrategy(Func<IContainer, string> c
         }
         catch (NpgsqlException)
         {
-            // Refused, reset, or the database is still starting.
             return false;
         }
         catch (SocketException)

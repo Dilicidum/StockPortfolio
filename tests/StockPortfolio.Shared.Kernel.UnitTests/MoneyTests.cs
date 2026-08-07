@@ -1,7 +1,6 @@
 using Shouldly;
 using StockPortfolio.Shared.Kernel;
 
-// Namespace matches the other test projects rather than mirroring the source tree.
 namespace StockPortfolio.Tests;
 
 public sealed class MoneyTests
@@ -82,8 +81,7 @@ public sealed class MoneyTests
     [Fact]
     public void Add_IsCommutative_AcrossCurrencyCasing()
     {
-        // The guard is case-insensitive but record equality is ordinal, so before the constructor
-        // normalised the currency these two sums compared unequal while both read as "3 dollars".
+        // Record equality is ordinal, so without the constructor normalising currency these two sums compare unequal.
         var lowerFirst = new Money(1m, "usd").Add(Money.Usd(2m));
         var upperFirst = Money.Usd(1m).Add(new Money(2m, "usd"));
 

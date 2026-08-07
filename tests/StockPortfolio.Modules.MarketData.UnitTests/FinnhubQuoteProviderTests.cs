@@ -52,7 +52,7 @@ public sealed class FinnhubQuoteProviderTests
         exists.ShouldBeTrue();
     }
 
-    /// <summary>The fake never produces UnknownTicker, so the real mapping is only ever asserted here.</summary>
+    // The fake never produces UnknownTicker, so the real mapping is asserted nowhere else.
     [Theory]
     [InlineData("""{"count":1,"result":[{"symbol":"AAPL"}]}""", true)]
     [InlineData("""{"count":1,"result":[{"symbol":"aapl"}]}""", true)]
@@ -82,7 +82,6 @@ public sealed class FinnhubQuoteProviderTests
         exists.ShouldBeTrue();
     }
 
-    /// <summary>Search keeps what the existence check throws away — the whole point of reusing that call.</summary>
     [Fact]
     public async Task Search_KeepsTheDescriptionTheExistenceCheckDiscards()
     {
@@ -101,7 +100,6 @@ public sealed class FinnhubQuoteProviderTests
         matches[1].Name.ShouldBe("APPLE HOSPITALITY REIT INC");
     }
 
-    /// <summary>A suggestion the add-position form would then reject is worse than no suggestion.</summary>
     [Fact]
     public async Task Search_DropsRowsThatCouldNotBeAdded_AndDeduplicates()
     {
@@ -119,12 +117,10 @@ public sealed class FinnhubQuoteProviderTests
 
         var matches = await provider.SearchSymbolsAsync("aapl", TestContext.Current.CancellationToken);
 
-        // One AAPL, and nothing else: the fuzzy hits are wanted, the unaddable rows are not.
         matches.ShouldHaveSingleItem().Ticker.Value.ShouldBe("AAPL");
         matches[0].Name.ShouldBe("APPLE INC");
     }
 
-    /// <summary>An outage must leave the field a plain text box, never break the form it sits on.</summary>
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized)]
     [InlineData(HttpStatusCode.Forbidden)]
@@ -143,7 +139,6 @@ public sealed class FinnhubQuoteProviderTests
         (await provider.SearchSymbolsAsync("appl", TestContext.Current.CancellationToken)).ShouldBeEmpty();
     }
 
-    /// <summary>A body with no result array at all is "nothing matched", not a null reference.</summary>
     [Theory]
     [InlineData("""{"count":0,"result":[]}""")]
     [InlineData("""{"count":0}""")]
@@ -188,7 +183,6 @@ public sealed class FinnhubQuoteProviderTests
         quotes.Select(quote => quote.Ticker.Value).Order(StringComparer.Ordinal).ShouldBe(["AAPL", "TSLA"]);
     }
 
-    /// <summary>Requirement 10's second gap: a WAF/CDN page must degrade the ticker, not crash the request.</summary>
     [Fact]
     public async Task GetQuotes_WhenTheProviderReturnsHtmlWithA200_OmitsTheTickerRatherThanThrowing()
     {
@@ -217,9 +211,7 @@ public sealed class FinnhubQuoteProviderTests
         quotes.ShouldBeEmpty();
     }
 
-    /// <summary>The test this task exists for: a per-user key must trip a breaker that belongs to it alone,
-    /// which is only true if it travels over a different client than the one the app's own key and the
-    /// poller share. A header alone on the shared client would not give that isolation.</summary>
+    // A header alone on the shared client would not isolate a per-user key's breaker from the app's own.
     [Fact]
     public async Task GetQuotes_WithAnApiKeyOverride_RoutesThroughTheByokNamedClient()
     {
@@ -243,7 +235,6 @@ public sealed class FinnhubQuoteProviderTests
         factory.RequestedName.ShouldBe(FinnhubQuoteProvider.ByokClientName);
     }
 
-    /// <summary>The header carries the key, not the client: a stale default on the shared client must never leak.</summary>
     [Fact]
     public async Task GetQuotes_WithAnApiKeyOverride_SendsItOnTheRequest_NeverTheSharedClientsDefault()
     {
@@ -270,7 +261,6 @@ public sealed class FinnhubQuoteProviderTests
         headerHandler.LastTokenHeader.ShouldBe("a-users-own-key");
     }
 
-    /// <summary>With no override, the byok client is never even asked for — the app's own key path is untouched.</summary>
     [Fact]
     public async Task GetQuotes_WithNoApiKeyOverride_NeverAsksTheFactoryForTheByokClient()
     {
@@ -311,7 +301,6 @@ public sealed class FinnhubQuoteProviderTests
         verdict.ShouldBe(KeyVerdict.Rejected);
     }
 
-    /// <summary>The check this test exists for: an unanswerable provider must never be read as a bad key.</summary>
     [Fact]
     public async Task VerifyKey_WhenTheProviderCannotAnswer_IsUnknownNotRejected()
     {
@@ -332,10 +321,7 @@ public sealed class FinnhubQuoteProviderTests
         verdict.ShouldBe(KeyVerdict.Unknown);
     }
 
-    /// <summary>The reason the BYOK client exists at all: verifying a candidate key must not contribute to,
-    /// or be blocked by, the breaker every dashboard and the poller share. Before this test, VerifyKeyAsync
-    /// used the shared client - a user saving a perfectly good key could be told the provider was
-    /// unreachable because that unrelated breaker happened to be open.</summary>
+    // On the shared client, a good key would be reported unreachable whenever the dashboard's breaker was open.
     [Fact]
     public async Task VerifyKey_RoutesThroughTheByokNamedClient()
     {
@@ -356,7 +342,6 @@ public sealed class FinnhubQuoteProviderTests
         factory.RequestedName.ShouldBe(FinnhubQuoteProvider.ByokClientName);
     }
 
-    /// <summary>The app's own key must never leak into a check of someone else's candidate key.</summary>
     [Fact]
     public async Task VerifyKey_SendsTheCandidateKey_NotTheClientsOwn()
     {
@@ -384,7 +369,6 @@ public sealed class FinnhubQuoteProviderTests
             new FakeTimeProvider(Now),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
-    /// <summary>Always hands back the one client it was built with, and records the name it was asked for.</summary>
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
     {
         public string? RequestedName { get; private set; }

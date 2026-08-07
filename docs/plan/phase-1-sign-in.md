@@ -120,7 +120,7 @@ An integration test connects as one module's role, tries to read another module'
 
 - Unhandled errors and bare status codes both become problem details, so a declared response body is always actually there.
 - **Two health endpoints.** Liveness checks nothing; readiness checks the database and the cache. The platform restarts a container failing liveness, so a liveness probe touching the database turns a blip into a restart loop. The probes must also be declared explicitly in the infrastructure template, or the platform injects TCP probes, never calls either path, and the split is decorative.
-- **Never enable response compression** — it buffers server-sent events, and the later alert feed dies silently.
+- **Never enable response compression** — it buffers streaming responses, and a live feed dies silently.
 - JSON numbers are handled strictly and money gets its own converter, rather than loosening a global setting. Inbound claim mapping is switched off explicitly, or the subject claim is renamed and reads back as null.
 - **Exactly one CORS layer is active, and it is the application one.** Two layers on one response risk a duplicate allow-origin header, which browsers reject outright.
 
@@ -138,7 +138,7 @@ The cache ships with no business consumer — nothing needs it until live prices
 
 ## Known gaps and deviations
 
-- **The brief lists WebSockets; this project ships server-sent events.** The reasoning and the comparison belong in the README from the first commit, not deferred to the phase that adds the stream. Real-time is not part of the acceptance gate, so this cannot fail it either way.
+- **The brief lists WebSockets, and that is what the alert feed uses**, through the framework's own real-time library. The reasoning and the comparison with the hand-written alternative belong in the README from the first commit, not deferred to the phase that adds the feed.
 - **The identity module's contracts project ships empty**, deliberately, with a note inside saying why. Nothing calls identity at runtime — the token is self-contained — which is the argument that it is the cheapest module to extract.
 - **Changing a password is not built.** There is no caller until the settings screen. When it is written, the guard belongs in the mutator, unlike the constructor rule above: the ORM never calls a setter, so a guard there runs only for real callers.
 

@@ -11,35 +11,26 @@ using StockPortfolio.Modules.Portfolio.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
-/// <summary>Attaches an EF Core interceptor to a module's DbContext from outside the module.</summary>
 internal static class ModuleDbContextInterceptors
 {
-    /// <summary>Adds interceptors to the Identity module's DbContext registration.</summary>
     public static void AddToIdentity(IServiceCollection services, params IInterceptor[] interceptors) =>
         AddTo(services, IdentityDbContextType(), interceptors);
 
-    /// <summary>Adds interceptors to the Portfolio module's DbContext registration.</summary>
     public static void AddToPortfolio(IServiceCollection services, params IInterceptor[] interceptors) =>
         AddTo(services, PortfolioDbContextType(), interceptors);
 
-    /// <summary>Adds interceptors to the Alerts module's DbContext registration.</summary>
     public static void AddToAlerts(IServiceCollection services, params IInterceptor[] interceptors) =>
         AddTo(services, AlertsDbContextType(), interceptors);
 
-    /// <summary>Adds interceptors to the MarketData module's DbContext registration.</summary>
     public static void AddToMarketData(IServiceCollection services, params IInterceptor[] interceptors) =>
         AddTo(services, MarketDataDbContextType(), interceptors);
 
-    /// <summary>Finds the single DbContext declared by Alerts.Infrastructure.</summary>
     public static Type AlertsDbContextType() => SingleDbContextIn(typeof(AlertsModule).Assembly);
 
-    /// <summary>Finds the single DbContext declared by Identity.Infrastructure.</summary>
     public static Type IdentityDbContextType() => SingleDbContextIn(typeof(IdentityModule).Assembly);
 
-    /// <summary>Finds the single DbContext declared by Portfolio.Infrastructure.</summary>
     public static Type PortfolioDbContextType() => SingleDbContextIn(typeof(PortfolioModule).Assembly);
 
-    /// <summary>Finds the single DbContext declared by MarketData.Infrastructure.</summary>
     public static Type MarketDataDbContextType() => SingleDbContextIn(typeof(MarketDataModule).Assembly);
 
     private static Type SingleDbContextIn(Assembly assembly)

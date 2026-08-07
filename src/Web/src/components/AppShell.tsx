@@ -8,19 +8,9 @@ import { Logo } from './Logo'
 
 interface NavItem {
   to: string
-  /** A `common.json` key, not the label itself — this array is module scope, where no
-   * `t()` exists yet, so translation happens where it is rendered. */
   labelKey: string
 }
 
-/**
- * An earlier comment here claimed a nav entry pointing at an unknown route is a
- * type error. It is not, and relying on that would be a silent 404: `NavItem.to`
- * is declared `string`, and TanStack Router's `ToPathOption` short-circuits on
- * `string extends TTo ? string : …`, which switches the literal check off
- * entirely. Only an inline literal `to="/somewhere"` on a `<Link>` is checked.
- * Every entry below must be verified against `routeTree.gen.ts` by hand.
- */
 const NAV: NavItem[] = [
   { to: '/dashboard', labelKey: 'nav.dashboard' },
   { to: '/portfolio', labelKey: 'nav.portfolio' },
@@ -40,19 +30,13 @@ export interface AppShellProps {
   children: ReactNode
 }
 
-/**
- * Two columns above `lg`, stacked below it. At 375px the sidebar becomes a
- * horizontal strip: brand and account on one row, nav scrolling underneath.
- * Nothing is hidden behind a hamburger, because with one nav item a drawer
- * would be pure ceremony.
- */
 export function AppShell({ title, subtitle, children }: AppShellProps) {
   const { t } = useTranslation('common')
   const { user, logout, isSigningOut } = useAuth()
   const email = user?.email ?? ''
 
   return (
-    <div className="min-h-screen bg-bg text-tx lg:grid lg:grid-cols-[minmax(0,232px)_minmax(0,1fr)]">
+    <div className="min-h-dvh bg-bg text-tx lg:grid lg:grid-cols-[minmax(0,232px)_minmax(0,1fr)]">
       <aside className="flex flex-col gap-5 border-b border-bd bg-panel px-4 py-4 lg:gap-6 lg:border-b-0 lg:border-r lg:px-3.5 lg:py-5">
         <div className="flex items-center justify-between px-2">
           <Logo />
@@ -105,8 +89,6 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* Says what was built. The transport is server-sent events, so the badge says
-                so — labelling this a WebSocket would be the app misdescribing itself. */}
             <LiveBadge />
 
             <div className="flex items-center gap-2.5 rounded-full border border-bd bg-panel-2 py-[5px] pr-3 pl-[6px]">

@@ -14,39 +14,27 @@ import { TickerCell } from '../../components/TickerCell'
 import { useAuth } from '../../auth/useAuth'
 import { formatAge, formatMoney, formatPercent, isNegative, NO_VALUE, type Money } from '../../lib/format'
 import { dashboardKeys, fetchDashboard, type DashboardPosition } from '../../marketdata/dashboardApi'
-import { dashboardSettingsQuery, saveDashboardSettings, settingsKeys, type DashboardSettings } from '../../settings/settingsApi'
+import { fallbackMessage } from '../../lib/formErrors'
+import {
+  DEFAULT_REFRESH_SECONDS,
+  REFRESH_INTERVAL_SECONDS,
+  dashboardSettingsQuery,
+  saveDashboardSettings,
+  settingsKeys,
+  type DashboardSettings,
+} from '../../settings/settingsApi'
 
-/**
- * NO LOADER AND NO ERROR COMPONENT, unlike `portfolio.tsx` — whose own comment says so.
- *
- * Holdings are the page and are worth waiting for; quotes are not. A loader failure
- * takes the whole route down with an error component, and the brief grades visible
- * degraded state rather than a blank screen. Plain `useQuery` keeps the last good table
- * on screen and puts the failure in a banner above it.
- */
 export const Route = createFileRoute('/_authenticated/dashboard')({
   component: DashboardPage,
 })
 
-/**
- * 60s is not free to change: §3's free-tier arithmetic — twenty of sixty calls a minute
- * for one viewer — assumes it, and 15s quadruples that figure for anyone who picks it.
- */
-const INTERVALS = [
-  { labelKey: 'refresh.every15s', value: 15_000 },
-  { labelKey: 'refresh.every30s', value: 30_000 },
-  { labelKey: 'refresh.every60s', value: 60_000 },
-  { labelKey: 'refresh.every5m', value: 300_000 },
-] as const
-
-const DEFAULT_INTERVAL_MS = 60_000
+const TONE_CLASS = { neutral: 'text-mu', up: 'text-up', down: 'text-dn' } as const
 
 function toneOf(money: Money | null | undefined): 'neutral' | 'up' | 'down' {
   if (!money) return 'neutral'
   return isNegative(money) ? 'down' : 'up'
 }
 
-/** A row worth stamping individually: served from the last-known store, or well behind its peers. */
 function isTrailing(position: DashboardPosition, newestObservedAt: number, staleAfterMs: number): boolean {
   if (position.isLastKnown) return true
   if (!position.observedAt) return false
@@ -59,16 +47,12 @@ function DashboardPage() {
   const { t } = useTranslation('dashboard')
   const queryClient = useQueryClient()
 
-  // Sourced from the settings screen's own query, not local state — a value changed here and
-  // a value changed on /settings write through the SAME mutation below, so the two screens
-  // can never disagree about how often a refresh actually happens.
   const { data: settings } = useQuery(dashboardSettingsQuery)
-  const intervalMs = (settings?.refreshIntervalSeconds ?? DEFAULT_INTERVAL_MS / 1000) * 1000
+  const intervalSeconds = settings?.refreshIntervalSeconds ?? DEFAULT_REFRESH_SECONDS
+  const intervalMs = intervalSeconds * 1000
 
   const saveInterval = useMutation({
     mutationFn: saveDashboardSettings,
-    // Optimistic: the select is the only control here, so its own change has to show up
-    // immediately rather than waiting on the round trip, exactly as the visibility toggle does.
     onMutate: (body) => {
       const previous = queryClient.getQueryData<DashboardSettings>(settingsKeys.dashboard())
       queryClient.setQueryData(settingsKeys.dashboard(), body)
@@ -80,8 +64,6 @@ function DashboardPage() {
     },
   })
 
-  // The app's first `useQuery` — every other query is a `useSuspenseQuery` behind a
-  // loader. All three options below override a global default deliberately.
   const { data, isPending, isError, error } = useQuery({
     queryKey: dashboardKeys.view(),
     queryFn: ({ signal }) => fetchDashboard(signal),
@@ -110,8 +92,6 @@ function DashboardPage() {
     {
       header: t('columns.price'),
       numeric: true,
-      // The per-row stamp §3 asks for: a single headline figure hides the one thinly
-      // traded ticker that is minutes behind everything else on the page.
       cell: (position) => {
         if (!position.currentPrice) {
           return (
@@ -142,7 +122,7 @@ function DashboardPage() {
       header: t('columns.pl'),
       numeric: true,
       cell: (position) => (
-        <span className={position.profit ? (isNegative(position.profit) ? 'text-dn' : 'text-up') : 'text-mu'}>
+        <span className={TONE_CLASS[toneOf(position.profit)]}>
           {formatMoney(position.profit)}
         </span>
       ),
@@ -151,7 +131,7 @@ function DashboardPage() {
       header: t('columns.plPercent'),
       numeric: true,
       cell: (position) => (
-        <span className={position.profit ? (isNegative(position.profit) ? 'text-dn' : 'text-up') : 'text-mu'}>
+        <span className={TONE_CLASS[toneOf(position.profit)]}>
           {formatPercent(position.profitPercent)}
         </span>
       ),
@@ -163,7 +143,7 @@ function DashboardPage() {
     <AppShell title={t('title')} subtitle={user ? t('subtitleSignedIn', { email: user.email }) : undefined}>
       {isError ? (
         <Alert tone="error" title={t('error.title')}>
-          {error instanceof Error && error.message ? error.message : t('error.fallback')}
+          {fallbackMessage(error, t('error.fallback'))}
           {data ? t('error.showingLastKnown') : ''}
         </Alert>
       ) : null}
@@ -184,12 +164,6 @@ function DashboardPage() {
         />
       </div>
 
-      {/*
-       * The mockup's right-hand column, and it stacks under the table below `xl` — at 375px
-       * the panel is a full-width list of rows, which is the layout it was designed as.
-       * `min-w-0` on the left column is what stops a wide table from pushing the panel off
-       * the grid instead of scrolling inside its own cell.
-       */}
       <div className="grid grid-cols-1 gap-3.5 xl:grid-cols-[minmax(0,1fr)_minmax(0,330px)]">
         <div className="flex min-w-0 flex-col gap-3.5">
           <Card
@@ -199,21 +173,20 @@ function DashboardPage() {
                 <Freshness
                   asOf={data?.asOf}
                   stalestObservedAt={data?.stalestObservedAt}
-                  // Two cycles: one missed refresh is a blip, two is a story worth telling.
                   staleAfterMs={intervalMs * 2}
                 />
                 <label className="text-mu flex items-center gap-2 text-[12.5px]">
                   {t('holdings.refreshLabel')}
                   <select
                     className="border-bd bg-panel-2 text-tx rounded-lg border px-2 py-1 text-[12.5px]"
-                    value={intervalMs}
+                    value={intervalSeconds}
                     onChange={(event) =>
-                      saveInterval.mutate({ refreshIntervalSeconds: Number(event.target.value) / 1000 })
+                      saveInterval.mutate({ refreshIntervalSeconds: Number(event.target.value) })
                     }
                   >
-                    {INTERVALS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {t(option.labelKey)}
+                    {REFRESH_INTERVAL_SECONDS.map((seconds) => (
+                      <option key={seconds} value={seconds}>
+                        {t(`refresh.${seconds}`)}
                       </option>
                     ))}
                   </select>

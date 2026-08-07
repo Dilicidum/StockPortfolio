@@ -9,7 +9,6 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Alerts.Application.Evaluation;
 
-/// <summary>Judges one ticker's thresholds against its price window, once per fresh sample.</summary>
 public sealed partial class AlertEvaluator(
     IAlertSettingRepository settings,
     IPriceWindowReader windows,
@@ -19,14 +18,13 @@ public sealed partial class AlertEvaluator(
     TimeProvider clock,
     ILogger<AlertEvaluator> logger) : IAlertEvaluator
 {
-    /// <inheritdoc/>
-    public async Task EvaluateAsync(string ticker, CancellationToken ct)
-    {
-        if (!Ticker.Create(ticker).TryPickT0(out var symbol, out _))
-        {
-            return;
-        }
+    public Task EvaluateAsync(string ticker, CancellationToken ct) =>
+        Ticker.Create(ticker).Match(
+            symbol => EvaluateAsync(symbol, ct),
+            badTicker => Task.CompletedTask);
 
+    private async Task EvaluateAsync(Ticker symbol, CancellationToken ct)
+    {
         var watching = await settings.ListEnabledForTickerAsync(symbol.Value, ct);
 
         if (watching.Count == 0)
@@ -34,9 +32,6 @@ public sealed partial class AlertEvaluator(
             return;
         }
 
-        // One read per distinct window length, not one for the longest. Every setting judged against
-        // the longest window would silently widen a five-minute threshold to an hour the moment any
-        // other user asked for one, and the two users never meet anywhere else.
         var staleLogged = false;
 
         foreach (var group in watching.GroupBy(setting => setting.Window.Minutes).OrderBy(group => group.Key))
@@ -55,25 +50,19 @@ public sealed partial class AlertEvaluator(
         }
     }
 
-    /// <summary>The three guards of the phase plan, in the order they are cheapest and least noisy.</summary>
     private bool Usable(PriceWindow window, string ticker, ref bool staleLogged)
     {
-        // Too few points is the ordinary state of a ticker somebody has just started watching, so it
-        // is silent. A rule that logs its own warm-up is a rule people turn the log level down on.
         if (window.SampleCount < options.MinimumSamples)
         {
             return false;
         }
 
-        // A window straddling a period when nothing was sampled - a weekend, or an hour the provider
-        // was unreachable - compares two prices that never faced each other. No calendar needed.
         if (window.LargestGap > options.MaxSampleGap)
         {
             return false;
         }
 
-        // A feed that stopped is not a price that stopped moving. Suppressing here and logging is the
-        // whole of the feed-health signal: the user asked about a price, not about the pipeline.
+        // A feed that stopped is not a price that stopped moving, so alerts are suppressed rather than fired.
         if (clock.GetUtcNow() - window.NewestAt > options.MaxSampleGap)
         {
             if (!staleLogged)
@@ -97,8 +86,6 @@ public sealed partial class AlertEvaluator(
             return;
         }
 
-        // Set-if-absent, so two replicas evaluating the same fresh sample produce one alert between
-        // them. A read followed by a write would let both pass in the same millisecond.
         if (!await cooldowns.TryStartAsync(
                 setting.UserId,
                 setting.Ticker.Value,
@@ -120,8 +107,6 @@ public sealed partial class AlertEvaluator(
             clock.GetUtcNow(),
             isSimulated: false);
 
-        // Persist, then publish — and the order lives in the dispatcher, not here, because Simulate
-        // sends an alert down the same path and the two must not be able to disagree about it.
         await dispatcher.DispatchAsync(alert, ct);
     }
 

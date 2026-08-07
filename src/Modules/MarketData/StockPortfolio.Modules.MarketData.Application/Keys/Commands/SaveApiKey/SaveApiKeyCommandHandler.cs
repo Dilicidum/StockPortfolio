@@ -6,7 +6,6 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.MarketData.Application.Keys.Commands.SaveApiKey;
 
-/// <summary>Validates a candidate key against the live provider, then stores it encrypted. Never the plaintext.</summary>
 public sealed class SaveApiKeyCommandHandler(
     IUserProviderKeyRepository repository,
     IQuoteProvider provider,
@@ -17,7 +16,6 @@ public sealed class SaveApiKeyCommandHandler(
         SaveApiKeyCommand,
         OneOf<SaveApiKeyResult, ProviderRejectedTheKey, ProviderCouldNotAnswer, ByokDisabled>>
 {
-    /// <inheritdoc/>
     public async Task<OneOf<SaveApiKeyResult, ProviderRejectedTheKey, ProviderCouldNotAnswer, ByokDisabled>> Handle(
         SaveApiKeyCommand command,
         CancellationToken ct)
@@ -29,8 +27,6 @@ public sealed class SaveApiKeyCommandHandler(
             return new ByokDisabled();
         }
 
-        // Checked with the CANDIDATE key, never the app's own — VerifyKeyAsync is the one method on
-        // IQuoteProvider that does not fail open, because an unanswerable check must not be read as valid.
         var verdict = await provider.VerifyKeyAsync(command.ApiKey, ct);
 
         if (verdict == KeyVerdict.Rejected)

@@ -2,36 +2,25 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Text;
 using System.Text.Json;
 
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
 
 namespace StockPortfolio.Api.IntegrationTests.Infrastructure;
 
-/// <summary>The token pair returned by register, login and refresh.</summary>
-public sealed record AuthPayload(string AccessToken, string RefreshToken, DateTimeOffset AccessExpiresAt);
+public sealed record AuthPayload(string TokenType, string AccessToken, long ExpiresIn, string RefreshToken);
 
-/// <summary>The body of GET /api/auth/me.</summary>
 public sealed record UserPayload(Guid Id, string Email);
 
-// The body of GET and PUT /api/settings/appearance.
 public sealed record AppearancePayload(string Theme, string Language);
 
-// The body of GET and PUT /api/settings/dashboard. A plain JSON number both ways: the user typed it.
 public sealed record DashboardSettingsPayload(int RefreshIntervalSeconds);
 
-// The body of GET and POST /api/settings/api-key. The key itself is never a member of this type.
 public sealed record ApiKeyStatusPayload(bool Configured, string? LastFour, bool Rejected);
 
-/// <summary>An amount as the API serialises it. Amount is a string on purpose — see MoneyJsonConverter.</summary>
 public sealed record MoneyPayload(string Amount, string Currency);
 
-/// <summary>The errors map of an RFC 9457 validation problem, keyed by field name.</summary>
 public sealed record ValidationProblemPayload(Dictionary<string, string[]>? Errors);
 
-/// <summary>One position as the API returns it. Name is null when no company name is cached.</summary>
 public sealed record HoldingPayload(
     Guid Id,
     string Ticker,
@@ -42,17 +31,14 @@ public sealed record HoldingPayload(
     DateTimeOffset UpdatedAt,
     string? Name);
 
-/// <summary>One ticker suggestion.</summary>
 public sealed record TickerMatchPayload(string Symbol, string Description);
 
-/// <summary>One threshold as the API returns it. ThresholdPercent is a JSON number: the user typed it.</summary>
 public sealed record AlertSettingPayload(
     string Ticker,
     decimal ThresholdPercent,
     int WindowMinutes,
     bool Enabled);
 
-/// <summary>One row of alert history. Direction arrives as "Fall" or "Rise", never 0 or 1.</summary>
 public sealed record FiredAlertPayload(
     Guid Id,
     string Ticker,
@@ -65,7 +51,6 @@ public sealed record FiredAlertPayload(
     bool IsSimulated,
     string Reason);
 
-/// <summary>One dashboard row. Every nullable member is nullable on the wire too — null means unknown.</summary>
 public sealed record DashboardPositionPayload(
     Guid Id,
     string Ticker,
@@ -81,64 +66,48 @@ public sealed record DashboardPositionPayload(
     DateTimeOffset? ObservedAt,
     bool IsLastKnown);
 
-/// <summary>The KPI row. ProfitPercent is a string on purpose — a bare decimal would be a JSON number.</summary>
 public sealed record DashboardTotalsPayload(
     MoneyPayload Value,
     MoneyPayload Cost,
     MoneyPayload Profit,
-
-    // Nullable: with nothing priced there is no cost to divide by, and "0.00" would claim break-even.
     string? ProfitPercent,
     int PositionCount,
     int PricedPositionCount);
 
-/// <summary>The body of GET /api/dashboard.</summary>
 public sealed record DashboardPayload(
     IReadOnlyList<DashboardPositionPayload> Positions,
     DashboardTotalsPayload Totals,
     DateTimeOffset AsOf,
     DateTimeOffset? StalestObservedAt);
 
-/// <summary>Thin helpers over the five /api/auth routes, so the tests read as assertions rather than as.</summary>
 internal static class Wire
 {
-    /// <summary>The dashboard route, which is Portfolio's even though the prices are MarketData's.</summary>
     public const string DashboardPath = "/api/dashboard";
 
-    /// <summary>Ticker search, under /api/marketdata/ with the health route rather than under /api/tickers/.</summary>
     public const string SearchPath = "/api/marketdata/search";
 
-    /// <summary>Thresholds: one GET for the lot, one PUT per position.</summary>
     public const string AlertSettingsPath = "/api/alerts/settings";
 
-    // The appearance settings pair: one GET, one PUT, both under /api/settings.
     public const string AppearancePath = "/api/settings/appearance";
 
-    // The dashboard settings pair: one GET, one PUT, both under /api/settings.
     public const string DashboardSettingsPath = "/api/settings/dashboard";
 
-    // The BYOK settings trio: GET the status, POST to save, DELETE to forget.
     public const string ApiKeySettingsPath = "/api/settings/api-key";
 
-    /// <summary>Fired-alert history, and the group root — the SPA calls it without a trailing slash.</summary>
     public const string AlertHistoryPath = "/api/alerts";
 
-    /// <summary>Media type the API must use for RFC 7807 errors.</summary>
     public const string ProblemJson = "application/problem+json";
 
-    /// <summary>A password comfortably over the 12-character floor.</summary>
+    // No digit, uppercase or symbol on purpose: the host turns those default rules off, and this is what proves it.
     public const string ValidPassword = "correct-horse-battery-staple";
 
-    /// <summary>Mints an address no other test can collide with.</summary>
     public static string UniqueEmail(string prefix) =>
         $"{prefix}-{Guid.NewGuid():N}@example.test";
 
-    /// <summary>Mints a symbol no earlier test has fetched — marketdata:last:* is never trimmed and the
-    /// one Redis container outlives every test in the assembly, so a reused symbol is already warm.</summary>
+    // marketdata:last:* is never trimmed and one Redis container outlives the assembly, so a reused symbol is already warm.
     public static string UniqueTicker()
     {
-        // Five letters, the longest the shape allows, so it can also never collide with the three- and
-        // four-letter literals ("AAPL", "IBM", "TSLA"…) the rest of the suite hardcodes.
+        // Five letters, the longest the shape allows, so it can never collide with the shorter literals the suite hardcodes.
         Span<char> symbol = stackalloc char[5];
 
         for (var index = 0; index < symbol.Length; index++)
@@ -149,26 +118,20 @@ internal static class Wire
         return new string(symbol);
     }
 
-    /// <summary>Posts to /api/auth/register.</summary>
     public static Task<HttpResponseMessage> RegisterAsync(HttpClient client, string email, string password) =>
         client.PostAsJsonAsync("/api/auth/register", new { email, password });
 
-    /// <summary>Posts to /api/auth/login.</summary>
     public static Task<HttpResponseMessage> LoginAsync(HttpClient client, string email, string password) =>
         client.PostAsJsonAsync("/api/auth/login", new { email, password });
 
-    /// <summary>Posts to /api/auth/refresh.</summary>
     public static Task<HttpResponseMessage> RefreshAsync(HttpClient client, string refreshToken) =>
         client.PostAsJsonAsync("/api/auth/refresh", new { refreshToken });
 
-    /// <summary>Posts to /api/auth/logout, which needs the access token as well as the refresh token.</summary>
-    public static Task<HttpResponseMessage> LogoutAsync(
-        HttpClient client,
-        string accessToken,
-        string refreshToken) =>
-        SendAsync(client, HttpMethod.Post, "/api/auth/logout", accessToken, new { refreshToken });
+    // Takes no refresh token: logout rolls the security stamp, retiring every refresh token this user holds at once.
+    public static Task<HttpResponseMessage> LogoutAsync(HttpClient client, string accessToken) =>
+        SendAsync(client, HttpMethod.Post, "/api/auth/logout", accessToken);
 
-    /// <summary>Registers a new account and returns its tokens, asserting the 201 on the way.</summary>
+    // One call: this app maps its own register route, which signs the caller in; MapIdentityApi's answers 200 with an empty body.
     public static async Task<AuthPayload> RegisterSucceedsAsync(
         HttpClient client,
         string email,
@@ -181,7 +144,6 @@ internal static class Wire
         return await ReadTokensAsync(response);
     }
 
-    /// <summary>Reads a token pair out of a successful auth response.</summary>
     public static async Task<AuthPayload> ReadTokensAsync(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -195,7 +157,6 @@ internal static class Wire
         return payload;
     }
 
-    /// <summary>Posts a purchase to /api/holdings.</summary>
     public static Task<HttpResponseMessage> AddHoldingAsync(
         HttpClient client,
         string accessToken,
@@ -204,7 +165,6 @@ internal static class Wire
         decimal price) =>
         SendAsync(client, HttpMethod.Post, "/api/holdings", accessToken, new { ticker, quantity, price });
 
-    /// <summary>Reads /api/holdings, asserting the 200 on the way.</summary>
     public static async Task<IReadOnlyList<HoldingPayload>> ListHoldingsAsync(
         HttpClient client,
         string accessToken)
@@ -220,7 +180,6 @@ internal static class Wire
         return payload;
     }
 
-    /// <summary>Puts a threshold to /api/alerts/settings.</summary>
     public static Task<HttpResponseMessage> SaveAlertSettingAsync(
         HttpClient client,
         string? accessToken,
@@ -235,7 +194,6 @@ internal static class Wire
             accessToken,
             new { ticker, thresholdPercent, windowMinutes, enabled });
 
-    /// <summary>Reads /api/alerts/settings, asserting the 200 on the way.</summary>
     public static async Task<IReadOnlyList<AlertSettingPayload>> ListAlertSettingsAsync(
         HttpClient client,
         string accessToken)
@@ -252,15 +210,13 @@ internal static class Wire
         return payload;
     }
 
-    /// <summary>Posts to /api/alerts/simulate. The body is always sent, with a null ticker if none is named:
-    /// a bodiless POST 415s against a required parameter, so the client never sends one.</summary>
+    // The body is always sent, with a null ticker if none is named: a bodiless POST 415s against a required parameter.
     public static Task<HttpResponseMessage> SimulateAlertAsync(
         HttpClient client,
         string? accessToken,
         string? ticker = null) =>
         SendAsync(client, HttpMethod.Post, "/api/alerts/simulate", accessToken, new { ticker });
 
-    /// <summary>Reads /api/alerts, asserting the 200 on the way.</summary>
     public static async Task<IReadOnlyList<FiredAlertPayload>> ListFiredAlertsAsync(
         HttpClient client,
         string accessToken,
@@ -282,18 +238,16 @@ internal static class Wire
         return payload;
     }
 
-    /// <summary>Posts a candidate key to /api/settings/api-key.</summary>
     public static Task<HttpResponseMessage> SaveApiKeyAsync(HttpClient client, string? accessToken, string apiKey) =>
         SendAsync(client, HttpMethod.Post, ApiKeySettingsPath, accessToken, new { apiKey });
 
-    /// <summary>Calls /api/marketdata/search. The query is sent raw so an empty one can be exercised.</summary>
+    // The query is sent raw so an empty one can be exercised.
     public static Task<HttpResponseMessage> SearchTickersAsync(
         HttpClient client,
         string? accessToken,
         string query) =>
         SendAsync(client, HttpMethod.Get, $"{SearchPath}?q={Uri.EscapeDataString(query)}", accessToken);
 
-    /// <summary>Reads /api/marketdata/search, asserting the 200 on the way.</summary>
     public static async Task<IReadOnlyList<TickerMatchPayload>> SearchSucceedsAsync(
         HttpClient client,
         string accessToken,
@@ -311,7 +265,6 @@ internal static class Wire
         return payload;
     }
 
-    /// <summary>Reads /api/holdings as text, for the assertions a deserialiser cannot make.</summary>
     public static async Task<string> ListHoldingsJsonAsync(HttpClient client, string accessToken)
     {
         using var response = await SendAsync(client, HttpMethod.Get, "/api/holdings", accessToken);
@@ -321,7 +274,6 @@ internal static class Wire
         return await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
     }
 
-    /// <summary>Reads /api/dashboard, asserting the 200 on the way.</summary>
     public static async Task<DashboardPayload> GetDashboardAsync(HttpClient client, string accessToken)
     {
         using var response = await SendAsync(client, HttpMethod.Get, DashboardPath, accessToken);
@@ -335,7 +287,6 @@ internal static class Wire
         return payload;
     }
 
-    /// <summary>Reads /api/dashboard as text, for the assertions a deserialiser cannot make.</summary>
     public static async Task<string> GetDashboardJsonAsync(HttpClient client, string accessToken)
     {
         using var response = await SendAsync(client, HttpMethod.Get, DashboardPath, accessToken);
@@ -345,7 +296,7 @@ internal static class Wire
         return await response.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
     }
 
-    /// <summary>Reads the field names a 400 blames, compared case-insensitively so casing is not the assertion.</summary>
+    // Case-insensitive, so field-name casing is not what the assertion turns on.
     public static async Task<HashSet<string>> FailingFieldsAsync(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);
@@ -361,25 +312,6 @@ internal static class Wire
         return new HashSet<string>(problem.Errors.Keys, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>Signs an access token with the host's own key, carrying exactly the claims asked for and no others.</summary>
-    public static string MintAccessToken(
-        string signingKey,
-        string issuer,
-        string audience,
-        DateTimeOffset expiresAt,
-        IDictionary<string, object>? claims = null) =>
-        new JsonWebTokenHandler().CreateToken(new SecurityTokenDescriptor
-        {
-            Issuer = issuer,
-            Audience = audience,
-            Expires = expiresAt.UtcDateTime,
-            SigningCredentials = new SigningCredentials(
-                new SymmetricSecurityKey(Encoding.UTF8.GetBytes(signingKey)),
-                SecurityAlgorithms.HmacSha256),
-            Claims = claims ?? new Dictionary<string, object>(StringComparer.Ordinal),
-        });
-
-    /// <summary>Sends a request carrying a bearer token.</summary>
     public static async Task<HttpResponseMessage> SendAsync(
         HttpClient client,
         HttpMethod method,
@@ -404,7 +336,6 @@ internal static class Wire
         return await client.SendAsync(request);
     }
 
-    /// <summary>Renders a response for a failing assertion's message.</summary>
     public static async Task<string> Describe(HttpResponseMessage response)
     {
         ArgumentNullException.ThrowIfNull(response);

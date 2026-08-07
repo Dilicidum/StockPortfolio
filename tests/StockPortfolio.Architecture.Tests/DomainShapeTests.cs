@@ -5,23 +5,18 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Rule 3 — no public settable property under a Modules.*.Domain namespace.</summary>
 public sealed class DomainShapeTests
 {
     private const string IsExternalInitTypeName = "System.Runtime.CompilerServices.IsExternalInit";
 
-    /// <summary>The three .Domain assemblies.</summary>
     public static TheoryData<string> DomainAssemblies =>
         [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, "Domain"))];
 
-    /// <summary>Rule 3, per module.</summary>
     [Theory]
     [MemberData(nameof(DomainAssemblies))]
     public void DomainType_ExposesNoPublicSetter(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
         var violations = assembly.GetTypes()
             .Where(IsDomainType)
@@ -39,7 +34,6 @@ public sealed class DomainShapeTests
                 + "PropertyAccessMode.PreferField writes the backing field and never calls it.");
     }
 
-    /// <summary>Proves rule 3 discriminates: the shapes the domain actually uses must all read as clean, and a.</summary>
     [Fact]
     public void DomainSetterRule_AcceptsTheDomainShapes_AndRejectsAPublicSetter()
     {
@@ -51,7 +45,6 @@ public sealed class DomainShapeTests
             .ShouldContain(nameof(ViolatingShape.Mutable), Case.Sensitive);
     }
 
-    /// <summary>Presses the button on the smoke detector: rule 3 passes by finding nothing, so it must find.</summary>
     [Fact]
     public void DomainSetterRule_SeesTheRealDomainTypes_SoAnEmptyResultMeansSomething()
     {
@@ -63,15 +56,14 @@ public sealed class DomainShapeTests
             .ToList();
 
         scanned.ShouldContain(
-            typeof(User).FullName!,
-            "Rule 3's filter no longer selects User, so the rule scans a smaller set than it reports.");
+            typeof(UserPreferences).FullName!,
+            "Rule 3's filter no longer selects UserPreferences, so the rule scans a smaller set than it "
+                + "reports. It is the only entity Identity.Domain still owns — User and RefreshToken "
+                + "belong to ASP.NET Core Identity now.");
 
-        scanned.ShouldContain(
-            typeof(RefreshToken).FullName!,
-            "Rule 3's filter no longer selects RefreshToken, so the rule scans a smaller set than it reports.");
-
-        SolutionAssemblies.IsDomainNamespace(typeof(User).Namespace).ShouldBeTrue(
-            typeof(User).Namespace + " is a module's domain namespace; not recognising it empties rule 3.");
+        SolutionAssemblies.IsDomainNamespace(typeof(UserPreferences).Namespace).ShouldBeTrue(
+            typeof(UserPreferences).Namespace
+                + " is a module's domain namespace; not recognising it empties rule 3.");
 
         SolutionAssemblies.IsDomainNamespace("StockPortfolio.Modules.Identity.Application").ShouldBeFalse(
             "Application is not Domain. Widening the filter would make rule 3 police types it has no "
@@ -79,6 +71,15 @@ public sealed class DomainShapeTests
 
         SolutionAssemblies.IsDomainNamespace("StockPortfolio.Shared.Kernel").ShouldBeFalse(
             "Shared.Kernel is not a module, so it carries no module's domain namespace.");
+
+        // AppUser inherits public setters from IdentityUser and still passes, because the scan asks for DeclaredOnly.
+        scanned.ShouldContain(
+            typeof(AppUser).FullName!,
+            "AppUser is scanned by rule 3 like any other domain type. It is not excused.");
+
+        DescribeMutableProperties(typeof(AppUser)).ShouldBeEmpty(
+            "AppUser declares no properties of its own, so rule 3 has nothing to police. If this ever "
+                + "reports something, the type has grown a public setter and should get a private one.");
     }
 
     private static bool IsDomainType(Type type) =>
@@ -96,7 +97,7 @@ public sealed class DomainShapeTests
 
     private static bool HasPublicSetter(PropertyInfo property)
     {
-        // A record's EqualityContract is emitted by the compiler and carries no setter anyway; named.
+        // EqualityContract is compiler-emitted and carries no setter of the author's.
         if (string.Equals(property.Name, "EqualityContract", StringComparison.Ordinal)
             || property.IsDefined(typeof(CompilerGeneratedAttribute), inherit: false))
         {

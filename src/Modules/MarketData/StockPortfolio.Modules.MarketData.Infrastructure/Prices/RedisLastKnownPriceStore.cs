@@ -9,7 +9,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Prices;
 
-/// <summary>The dashboard's only fallback when the provider is down. Never trimmed, never allowed to throw out.</summary>
 internal sealed partial class RedisLastKnownPriceStore(
     IConnectionMultiplexer multiplexer,
     ILogger<RedisLastKnownPriceStore> logger) : ILastKnownPriceStore
@@ -33,7 +32,6 @@ internal sealed partial class RedisLastKnownPriceStore(
 
         try
         {
-            // One MGET for the whole missing set: a string type is what makes that one round trip.
             var values = await multiplexer.GetDatabase()
                 .StringGetAsync([.. ordered.Select(ticker => (RedisKey)(KeyPrefix + ticker.Value))]);
 
@@ -66,9 +64,6 @@ internal sealed partial class RedisLastKnownPriceStore(
         {
             var database = multiplexer.GetDatabase();
 
-            // Awaited, not FireAndForget: that flag only returns the default value early, it does not
-            // stop connection and backlog-timeout exceptions surfacing here - and awaiting is what makes
-            // `redis-cli GET marketdata:last:AAPL` non-racy right after a dashboard load.
             await Task.WhenAll(quotes.Select(quote =>
                 database.StringSetAsync(KeyPrefix + quote.Ticker.Value, Encode(quote.Price, quote.ObservedAt))));
         }
@@ -78,11 +73,9 @@ internal sealed partial class RedisLastKnownPriceStore(
         }
     }
 
-    /// <summary>InvariantCulture explicitly: a comma separator here would corrupt every stored price silently.</summary>
     internal static string Encode(decimal price, DateTimeOffset at) =>
         string.Create(CultureInfo.InvariantCulture, $"{price}:{at.ToUnixTimeMilliseconds()}");
 
-    /// <summary>A corrupt entry is "no last-known price", never a throw — the provider is already down.</summary>
     internal static bool TryDecode(string? encoded, out LastPrice price)
     {
         price = default;

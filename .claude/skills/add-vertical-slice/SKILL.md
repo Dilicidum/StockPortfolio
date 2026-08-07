@@ -65,7 +65,7 @@ New entity → EF configuration, converters for any new converter-backed type (r
 `Properties<T>()` and `DefaultTypeMapping<T>()`), then a migration:
 
 ```bash
-dotnet ef migrations add <Name> --context <M>DbContext --output-dir Persistence/Migrations --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Api
+dotnet ef migrations add <Name> --context <M>DbContext --output-dir Persistence/Migrations --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Host
 ```
 
 ### 4 · Api
@@ -76,12 +76,13 @@ Requests/<UseCase>Request.cs             what binds off the wire
 Validators/<UseCase>RequestValidator.cs  shape only — no I/O
 ```
 
-Then the endpoint: `Task<IResult>`, `.Match<IResult>` with **every lambda parameter named**, the command
+Then the endpoint: `Task<IResult>`, `.Match` with **every lambda parameter named** and no type argument —
+arms call `Results.X(...)`, not `TypedResults.X(...)`, which is what lets the type argument go — the command
 built with `new`. Route parameters stay their own delegate parameters. Declare every status the route can
 emit; put a status on the group only when it is genuinely universal.
 
 ### 5 · Wire it
-`src/Api/Program.cs` — `Add<M>Module`, `Add<M>Api`, `Map<M>Endpoints`. If the module is new, `src/Migrator/Program.cs`
+`src/Host/Program.cs` — `Add<M>Module`, `Add<M>Api`, `Map<M>Endpoints`. If the module is new, `src/Migrator/Program.cs`
 too. Nothing enforces this; a missed `Map` builds, registers, passes every test, and serves nothing.
 
 ### 6 · Tests

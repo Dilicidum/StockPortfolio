@@ -31,7 +31,6 @@
     "suggestionsFor": "Підказки для поля «{{label}}»"
   },
   "loading": "Завантаження",
-  "emptyTableFallback": "Поки що нічого немає.",
   "splashLabel": "Відновлення сеансу",
   "fallbackError": "Щось пішло не так. Спробуйте ще раз.",
   "requestFailed": "Запит не вдався."

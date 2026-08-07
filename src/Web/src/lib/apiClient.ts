@@ -6,14 +6,8 @@ import {
   type TokenPair,
 } from './tokenStore'
 
-/**
- * Empty string means "same origin", which is the docker-compose case: nginx
- * serves the SPA and proxies /api to the API container, so no CORS at all.
- * GitHub Pages bakes the Azure Container Apps origin in at build time.
- */
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? ''
 
-/** RFC 7807. `errors` is the ASP.NET Core ValidationProblemDetails extension. */
 export interface ProblemDetails {
   type?: string
   title?: string
@@ -34,11 +28,6 @@ export class ApiError extends Error {
     this.problem = problem
   }
 
-  /**
-   * Field-level errors keyed by camelCase field name. ASP.NET Core emits
-   * PascalCase keys ("Email"), react-hook-form knows the field as "email",
-   * so normalise here rather than at every call site.
-   */
   get fieldErrors(): Record<string, string[]> {
     const raw = this.problem?.errors
     if (!raw) return {}
@@ -55,7 +44,6 @@ export class ApiError extends Error {
 interface RequestOptions {
   method?: string
   body?: unknown
-  /** Attach the bearer token and refresh-and-retry on 401. Default true. */
   authenticated?: boolean
   signal?: AbortSignal
 }
@@ -96,37 +84,16 @@ async function send(path: string, options: RequestOptions): Promise<Response> {
     method: options.method ?? 'GET',
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    // Kept, but not for the reason this comment used to give. There is no
-    // cookie in any deployment (see lib/tokenStore.ts), so nothing here relies
-    // on credentials being sent. Removing it would relax the CORS contract the
-    // API is already configured for, which is not a change worth making blind.
     credentials: 'include',
     signal: options.signal ?? null,
   })
 }
 
-/**
- * THE DEDUPE. A dashboard fires half a dozen queries at once; when the access
- * token has just expired every one of them comes back 401 within the same tick.
- * Without this, each would POST /api/auth/refresh, the server would rotate the
- * refresh token six times, and five of the six responses would arrive holding a
- * token that has already been superseded — the user is logged out at random,
- * only under load, only sometimes. Classic thundering herd.
- *
- * One in-flight promise, shared by every caller, cleared when it settles.
- * `??=` only evaluates the right-hand side when the slot is empty, and the
- * assignment completes synchronously before `doRefresh` can resolve, so the
- * `.finally` that nulls it can never run before the slot is populated.
- *
- * There is a test that asserts exactly this with an MSW request counter.
- */
 let refreshInFlight: Promise<string> | null = null
 
 async function doRefresh(): Promise<string> {
   const response = await send('/api/auth/refresh', {
     method: 'POST',
-    // Read at call time, never captured: another tab may have rotated it since
-    // this request was queued, and a superseded token is a 401.
     body: { refreshToken: getRefreshToken() },
     authenticated: false,
   })
@@ -148,7 +115,6 @@ export function refreshAccessToken(): Promise<string> {
   return refreshInFlight
 }
 
-/** Test seam. Never call this from application code. */
 export function __resetRefreshInFlight(): void {
   refreshInFlight = null
 }
@@ -156,8 +122,6 @@ export function __resetRefreshInFlight(): void {
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   let response = await send(path, options)
 
-  // One refresh-and-retry, and only one. If the retry is also rejected the
-  // session is genuinely gone and looping would just DoS our own login page.
   if (response.status === 401 && options.authenticated !== false) {
     await refreshAccessToken()
     response = await send(path, options)

@@ -16,7 +16,6 @@ internal sealed partial class RedisPollLease(
 
     private const string InFlightKey = "marketdata:cycle-inflight";
 
-    /// <summary>Only presence is ever read, so the value is a placeholder rather than data.</summary>
     private const string Held = "1";
 
     public async Task<bool> TryAcquireAsync(DateTimeOffset now, CancellationToken ct)
@@ -25,9 +24,7 @@ internal sealed partial class RedisPollLease(
         {
             var database = multiplexer.GetDatabase();
 
-            // The claim first. Losing it means another replica already owns this minute, and the in-flight
-            // flag must then not be touched at all — releasing one this replica does not hold would let two
-            // cycles overlap, which is the single thing the second key exists to prevent.
+            // The claim first: a refused claim must leave the in-flight key untouched, or releasing it deletes the winner's and lets two cycles overlap.
             var claimed = await database.StringSetAsync(
                 ClaimKey(now, options.Interval), Held, options.Interval * 2, false, When.NotExists);
 
@@ -36,8 +33,6 @@ internal sealed partial class RedisPollLease(
                 return false;
             }
 
-            // Not keyed to the minute: this is what a cycle still running from an earlier minute holds, and
-            // a minute key can say nothing about a neighbouring minute.
             return await database.StringSetAsync(
                 InFlightKey, Held, options.Interval * 5, false, When.NotExists);
         }
@@ -45,7 +40,6 @@ internal sealed partial class RedisPollLease(
         {
             LogAcquireFailed(logger, ex);
 
-            // Skip the cycle rather than run it: with Redis unreachable there is nowhere to put a sample.
             return false;
         }
     }
@@ -62,14 +56,8 @@ internal sealed partial class RedisPollLease(
         }
     }
 
-    /// <summary>The cycle this instant belongs to, counted from the epoch so every replica agrees.</summary>
     internal static string ClaimKey(DateTimeOffset now, TimeSpan interval)
     {
-        // Keyed to the INTERVAL, not to the calendar minute. The key's lifetime is interval * 2, so a
-        // minute-named key only survives its own minute while the interval is at least half a minute -
-        // set the interval to 15s and the claim expires inside the minute it names, letting a second
-        // replica claim that same minute. Deriving the name from the same number as the lifetime is what
-        // keeps "one winner per cycle" true at every interval rather than only at the default one.
         var seconds = Math.Max(1L, (long)interval.TotalSeconds);
 
         return ClaimPrefix

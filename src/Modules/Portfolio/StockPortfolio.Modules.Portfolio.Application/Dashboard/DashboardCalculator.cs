@@ -7,13 +7,10 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Portfolio.Application.Dashboard;
 
-/// <summary>The P&amp;L arithmetic, pure: rows in, prices in, a clock reading in, the result out.</summary>
 public static class DashboardCalculator
 {
-    /// <summary>Percent crosses the wire as a string; a bare decimal would be a JSON number.</summary>
     private const string PercentFormat = "0.00";
 
-    /// <summary>Joins positions to prices and names, and computes every figure the dashboard shows.</summary>
     public static GetDashboardResult Calculate(
         IReadOnlyList<HoldingRow> rows,
         IReadOnlyDictionary<string, QuotedPrice> prices,
@@ -26,9 +23,6 @@ public static class DashboardCalculator
 
         var currency = rows.Count > 0 ? rows[0].AveragePrice.Currency : Money.UsdCurrencyCode;
 
-        // One portfolio, one currency: every figure below is stamped with this code, including the
-        // QuotedPrice values, which carry no currency of their own. Money.EnsureSameCurrency would
-        // refuse a mixed set, but the sums here are bare decimals and so never ask it.
         var foreign = rows.FirstOrDefault(
             row => !string.Equals(row.AveragePrice.Currency, currency, StringComparison.Ordinal));
 
@@ -60,8 +54,7 @@ public static class DashboardCalculator
 
             totalValue += value;
 
-            // Cost is summed over the SAME subset as Value. Including an unpriced position's cost here
-            // would report a loss the size of that position on a portfolio that is up.
+            // Summed over the same subset as Value: an unpriced position's cost here reports a false loss.
             totalCost += cost;
             pricedCount++;
 
@@ -90,8 +83,6 @@ public static class DashboardCalculator
                 new Money(totalValue, currency),
                 new Money(totalCost, currency),
                 new Money(totalValue - totalCost, currency),
-                // Null, never "0.00", when no position could be priced: the same argument Weight makes
-                // one level down. Zero here would report an exactly break-even portfolio.
                 Percent(totalValue - totalCost, totalCost),
                 rows.Count,
                 pricedCount),
@@ -109,8 +100,6 @@ public static class DashboardCalculator
 
         if (line.Quote is not { } quote)
         {
-            // Weight is null rather than 0: zero claims "this is 0% of your portfolio", and the truth
-            // is that nobody knows. The unpriced position is out of the denominator entirely.
             return new DashboardPosition(
                 line.Row.Id,
                 line.Row.Ticker,
@@ -139,19 +128,15 @@ public static class DashboardCalculator
             new Money(line.Value - line.Cost, currency),
             Percent(line.Value - line.Cost, line.Cost),
             Percent(line.Value, totalValue),
-
-            // When this app fetched it, never Finnhub's last-trade time — that freezes at Friday's close.
             quote.ObservedAt,
             quote.IsLastKnown);
     }
 
-    /// <summary>A share of a total as a display string, or null when the total says nothing.</summary>
     private static string? Percent(decimal part, decimal whole) =>
         whole == 0m ? null : Format(part / whole * 100m);
 
     private static string Format(decimal value) =>
         value.ToString(PercentFormat, CultureInfo.InvariantCulture);
 
-    /// <summary>One row carried between the two passes; weight needs the denominator the first pass builds.</summary>
     private readonly record struct Line(HoldingRow Row, decimal Cost, QuotedPrice? Quote, decimal Value);
 }

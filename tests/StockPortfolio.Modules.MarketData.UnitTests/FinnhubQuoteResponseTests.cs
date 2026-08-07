@@ -33,8 +33,7 @@ public sealed class FinnhubQuoteResponseTests
     {
         var response = Parse("""{"c":0,"h":0,"l":0,"o":0,"pc":0,"d":null,"dp":null,"t":0}""");
 
-        // No price this cycle, identical to a fetch failure. An all-zero body is never read as evidence
-        // that the ticker does not exist - that question goes to /search, which can actually answer it.
+        // An all-zero body is never read as proof the ticker does not exist; only /search can answer that.
         response.Price.ShouldBeNull();
     }
 

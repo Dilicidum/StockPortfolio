@@ -5,7 +5,6 @@ using StockPortfolio.Modules.Portfolio.Domain;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence.Configurations;
 
-// Maps DashboardSettings to portfolio.dashboard_settings.
 internal sealed class DashboardSettingsConfiguration : IEntityTypeConfiguration<DashboardSettings>
 {
     public void Configure(EntityTypeBuilder<DashboardSettings> builder)

@@ -1,14 +1,4 @@
 #!/usr/bin/env node
-// Fails the build when the two locale trees disagree about which keys exist. `fallbackLng` is
-// off (see src/lib/i18n.ts), so a key missing from Ukrainian renders as a raw key path in the
-// UI — ugly, honest, and easy to miss in a screen full of other short strings. This is the net
-// that is supposed to catch it before a reviewer does.
-//
-// One namespace file per language pair (src/locales/en/<ns>.json vs src/locales/uk/<ns>.json),
-// flattened to dotted key paths and diffed both ways: present in en but missing in uk, and the
-// reverse. A namespace file that exists on only one side is reported the same way, one missing
-// key at a time, rather than as a separate "missing file" case — from the parity check's point
-// of view a whole absent file is just every one of its keys missing.
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -40,7 +30,6 @@ function flatten(value, prefix, into) {
   into.add(prefix)
 }
 
-/** Every key in every namespace, as `namespace:dotted.path`. */
 function readKeySet(language) {
   const keys = new Set()
 
@@ -60,7 +49,6 @@ function readKeySet(language) {
 
     const fileKeys = new Set()
     flatten(parsed, '', fileKeys)
-    // flatten() seeds the set with '' when the file is a bare {}; drop it, it names nothing.
     fileKeys.delete('')
 
     for (const key of fileKeys) keys.add(`${namespace}:${key}`)

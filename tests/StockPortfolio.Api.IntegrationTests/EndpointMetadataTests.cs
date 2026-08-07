@@ -11,17 +11,13 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>What .Produces declares against what the route actually returned, now that no typed union does it.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class EndpointMetadataTests(ApiFixture fixture)
 {
-    /// <summary>The names WithName gives each module's routes, keyed by the module that ships them.</summary>
     private static readonly Dictionary<string, string[]> ExpectedRouteNames = new(StringComparer.Ordinal)
     {
-        // The /api/auth five, plus the /api/settings pair.
         ["Identity"] = ["Register", "Login", "Refresh", "Logout", "GetCurrentUser", "GetAppearance", "SaveAppearance"],
 
-        // Five under /api/holdings, the dashboard, plus the /api/settings/dashboard pair.
         ["Portfolio"] =
         [
             "GetHoldings",
@@ -34,72 +30,54 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             "SaveDashboardSettings",
         ],
 
-        // The two that ship in every environment, plus the BYOK settings trio; the dev nudge is not
-        // mapped in all.
         ["MarketData"] = ["GetMarketDataHealth", "SearchTickers", "GetApiKeyStatus", "SaveApiKey", "RemoveApiKey"],
 
-        // The settings pair, history, and the two-step handshake the stream needs.
+        // The alert feed is a SignalR hub, not a minimal-API endpoint, so it carries no route name or Produces metadata to check.
         ["Alerts"] =
         [
             "GetAlertSettings",
             "SaveAlertSetting",
             "GetAlerts",
-            "CreateStreamTicket",
-            "StreamAlerts",
             "SimulateAlert",
         ],
     };
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The names WithName gives the /api/auth and /api/settings routes.</summary>
     private static string[] AuthRouteNames => ExpectedRouteNames["Identity"];
 
-    /// <summary>The five names WithName gives Portfolio's routes.</summary>
     private static string[] PortfolioRouteNames => ExpectedRouteNames["Portfolio"];
 
-    /// <summary>MarketData's names.</summary>
     private static string[] MarketDataRouteNames => ExpectedRouteNames["MarketData"];
 
-    /// <summary>Alerts' names.</summary>
     private static string[] AlertsRouteNames => ExpectedRouteNames["Alerts"];
 
-    /// <summary>The Identity routes, as theory data.</summary>
     public static TheoryData<string> AuthRoutes => [.. AuthRouteNames];
 
-    /// <summary>The eight Portfolio routes, as theory data.</summary>
     public static TheoryData<string> PortfolioRoutes => [.. PortfolioRouteNames];
 
-    /// <summary>The MarketData routes, as theory data.</summary>
     public static TheoryData<string> MarketDataRoutes => [.. MarketDataRouteNames];
 
-    /// <summary>The Alerts routes, as theory data.</summary>
     public static TheoryData<string> AlertsRoutes => [.. AlertsRouteNames];
 
-    /// <summary>Presses the button on the smoke detector: the two rules below filter, so the filter must match.</summary>
     [Fact]
     public void EndpointDataSource_ExposesTheIdentityRoutes() => ShouldExposeExactly(AuthRouteNames);
 
-    /// <summary>The same button for the Portfolio half, which was added a phase later and could have been missed.</summary>
     [Fact]
     public void EndpointDataSource_ExposesTheEightPortfolioRoutes() => ShouldExposeExactly(PortfolioRouteNames);
 
-    /// <summary>And for MarketData, whose routes ship in every environment — unlike the dev-only nudge.</summary>
     [Fact]
     public void EndpointDataSource_ExposesTheMarketDataRoutes() => ShouldExposeExactly(MarketDataRouteNames);
 
-    /// <summary>And for Alerts, the fourth module — the one C11 was written about.</summary>
     [Fact]
     public void EndpointDataSource_ExposesTheAlertsRoutes() => ShouldExposeExactly(AlertsRouteNames);
 
-    /// <summary>The rule the three above cannot make: a module nobody maps is a module nobody tests.</summary>
     [Fact]
     public void EveryModuleWithAnApiAssembly_ContributesAtLeastOneMappedRoute()
     {
         var modules = MappedModules();
 
-        // A rule that passes by finding nothing needs a companion assertion that fails if the search
-        // finds nothing. Raise this the commit a fourth module's endpoints are mapped, not before.
+        // A rule that passes by finding nothing needs a companion that fails if the search finds nothing; raise this when a module's endpoints are mapped.
         modules.Count.ShouldBe(
             4,
             "The set of loaded .Api assemblies is derived, not listed, so an empty or short set would "
@@ -122,7 +100,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         }
     }
 
-    /// <summary>The check the typed Results union used to make: a status the route emits must be a status it.</summary>
     [Theory]
     [InlineData("Register", "fresh", 201)]
     [InlineData("Register", "duplicate", 409)]
@@ -146,7 +123,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
-    /// <summary>The Portfolio half of the same matrix. POST declares both 201 and 200, which is where drift hides.</summary>
     [Theory]
     [InlineData("GetHoldings", "bearer", 200)]
     [InlineData("GetHoldings", "anonymous", 401)]
@@ -173,8 +149,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
-    /// <summary>The health route is anonymous by design, so 200 is the only status a caller can drive.
-    /// Search is behind sign-in, and an unusable query is a 200 with an empty list rather than a 400.</summary>
+    // The health route is anonymous, so 200 is the only status a caller can drive; an unusable search query is a 200 with an empty list.
     [Theory]
     [InlineData("GetMarketDataHealth", "anonymous", 200)]
     [InlineData("SearchTickers", "bearer", 200)]
@@ -188,7 +163,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
-    /// <summary>The alert settings pair. Both 409s are driven, because they come from different checks.</summary>
+    // Both 409s are driven, because they come from different checks.
     [Theory]
     [InlineData("GetAlertSettings", "bearer", 200)]
     [InlineData("GetAlertSettings", "anonymous", 401)]
@@ -201,9 +176,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
     [InlineData("GetAlerts", "bearer", 200)]
     [InlineData("GetAlerts", "silly-limit", 200)]
     [InlineData("GetAlerts", "anonymous", 401)]
-    [InlineData("CreateStreamTicket", "bearer", 200)]
-    [InlineData("CreateStreamTicket", "anonymous", 401)]
-    [InlineData("StreamAlerts", "no-ticket", 401)]
     [InlineData("SimulateAlert", "watched", 202)]
     [InlineData("SimulateAlert", "nothing-to-simulate", 409)]
     [InlineData("SimulateAlert", "bad-ticker", 400)]
@@ -218,25 +190,21 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         await ShouldDeclareWhatItReturnedAsync(routeName, scenario, expectedStatus);
     }
 
-    /// <summary>A declared failure that claims no problem+json is a lie about what the client will parse.</summary>
     [Theory]
     [MemberData(nameof(AuthRoutes))]
     public void AuthRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
         ShouldDeclareProblemJsonForEveryFailure(routeName);
 
-    /// <summary>The same rule over the holdings routes, whose 401 and 500 come from the group rather than the route.</summary>
     [Theory]
     [MemberData(nameof(PortfolioRoutes))]
     public void PortfolioRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
         ShouldDeclareProblemJsonForEveryFailure(routeName);
 
-    /// <summary>And over MarketData's, whose only declared failure is the 500 every route can reach.</summary>
     [Theory]
     [MemberData(nameof(MarketDataRoutes))]
     public void MarketDataRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
         ShouldDeclareProblemJsonForEveryFailure(routeName);
 
-    /// <summary>And over the alert settings pair, whose 409 is the only 409 outside /register.</summary>
     [Theory]
     [MemberData(nameof(AlertsRoutes))]
     public void AlertsRoute_ProblemStatuses_DeclareProblemJson(string routeName) =>
@@ -299,7 +267,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 + "not the one the host built — both rules pass over an empty set and enforce nothing.");
     }
 
-    /// <summary>Every module that ships an .Api assembly, read from what the host loaded rather than a list.</summary>
     private static List<string> MappedModules() =>
         AppDomain.CurrentDomain.GetAssemblies()
             .Select(assembly => assembly.GetName().Name)
@@ -310,7 +277,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             .Order(StringComparer.Ordinal)
             .ToList();
 
-    /// <summary>Every name the host's endpoints carry, unfiltered — the set a module must intersect.</summary>
     private HashSet<string> MappedRouteNames() =>
         _fixture.Services.GetRequiredService<EndpointDataSource>()
             .Endpoints
@@ -319,7 +285,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             .Select(name => name!)
             .ToHashSet(StringComparer.Ordinal);
 
-    /// <summary>Reads the response metadata off the endpoint the host actually built.</summary>
     private IReadOnlyList<IProducesResponseTypeMetadata> DeclaredResponses(string routeName)
     {
         var endpoints = EndpointsByName([.. ExpectedRouteNames.Values.SelectMany(names => names)]);
@@ -340,7 +305,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 && routeNames.Contains(pair.Name, StringComparer.Ordinal))
             .ToDictionary(pair => pair.Name!, pair => pair.Endpoint, StringComparer.Ordinal);
 
-    /// <summary>Drives one named scenario over real HTTP and reports the status it came back with.</summary>
     private static async Task<HttpStatusCode> CallAsync(HttpClient client, string routeName, string scenario)
     {
         switch (routeName, scenario)
@@ -415,7 +379,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             {
                 var tokens = await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail("metadata-logout"));
 
-                using var response = await Wire.LogoutAsync(client, tokens.AccessToken, tokens.RefreshToken);
+                using var response = await Wire.LogoutAsync(client, tokens.AccessToken);
 
                 return response.StatusCode;
             }
@@ -631,8 +595,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             {
                 var token = await SignedInAsync(client, "metadata-dashboard");
 
-                // A position first: an empty portfolio short-circuits before the read model materialises
-                // anything, so the 200 would prove nothing about the projection behind it.
+                // A position first: an empty portfolio short-circuits before the read model materialises anything, so the 200 would prove nothing.
                 _ = await OpenPositionAsync(client, token, "AAPL");
 
                 using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/dashboard", token);
@@ -820,8 +783,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             {
                 var token = await SignedInAsync(client, "metadata-alert-415");
 
-                // A media type the route cannot read is what produces 415. An ABSENT body is a 400,
-                // not a 415 — checked against the running host, which is why this sends text/plain.
+                // A media type the route cannot read is what produces 415; an absent body is a 400, which is why this sends text/plain.
                 using var request = new HttpRequestMessage(HttpMethod.Put, Wire.AlertSettingsPath)
                 {
                     Content = new StringContent(
@@ -883,40 +845,6 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
                 return response.StatusCode;
             }
 
-            case ("CreateStreamTicket", "bearer"):
-            {
-                var token = await SignedInAsync(client, "metadata-ticket");
-
-                using var response = await Wire.SendAsync(
-                    client,
-                    HttpMethod.Post,
-                    "/api/alerts/stream-ticket",
-                    token);
-
-                return response.StatusCode;
-            }
-
-            case ("CreateStreamTicket", "anonymous"):
-            {
-                using var response = await Wire.SendAsync(
-                    client,
-                    HttpMethod.Post,
-                    "/api/alerts/stream-ticket");
-
-                return response.StatusCode;
-            }
-
-            case ("StreamAlerts", "no-ticket"):
-            {
-                // Only the refusal is driven here. A ticket that IS accepted holds the response open
-                // forever by design, and TestServer does not hand a never-ending body back to a client
-                // — see StockPortfolio.Api.IntegrationTests.AlertStreamTests for where the accepted
-                // path is proven instead.
-                using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/alerts/stream");
-
-                return response.StatusCode;
-            }
-
             case ("SimulateAlert", "watched"):
             {
                 var token = await SignedInAsync(client, "metadata-simulate");
@@ -959,8 +887,7 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
             {
                 var token = await SignedInAsync(client, "metadata-simulate-bodiless");
 
-                // An ABSENT body is 400, not 415 — driven here because this is the one route whose
-                // client is documented as always sending a body precisely to avoid the other one.
+                // An absent body is 400, not 415 — driven here because this route's client always sends a body precisely to avoid the other one.
                 using var response = await Wire.SendAsync(
                     client,
                     HttpMethod.Post,
@@ -1001,11 +928,9 @@ public sealed class EndpointMetadataTests(ApiFixture fixture)
         }
     }
 
-    /// <summary>Registers a throwaway account and returns its access token.</summary>
     private static async Task<string> SignedInAsync(HttpClient client, string prefix) =>
         (await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail(prefix))).AccessToken;
 
-    /// <summary>Opens one position and returns its id, so the update and delete scenarios have something to aim at.</summary>
     private static async Task<Guid> OpenPositionAsync(HttpClient client, string accessToken, string ticker)
     {
         using var response = await Wire.AddHoldingAsync(client, accessToken, ticker, 10m, 100m);

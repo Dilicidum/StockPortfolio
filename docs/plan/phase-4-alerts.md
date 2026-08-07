@@ -209,28 +209,34 @@ matter, that is a fresh argument to make on its own merits.
 connected only decides whether it also arrives right now. A failed push then costs nothing — the row is
 there and the panel picks it up on its next history fetch.
 
-Alerts are pushed over a **one-way server-to-browser stream**, not WebSockets. Two consequences follow from
-that choice and neither is optional.
+Alerts are pushed over **WebSockets, using the framework's own real-time library**, which is the technology
+the brief names. The library owns the parts that are easy to write badly — reconnection, keeping an idle
+connection open, and carrying a message to whichever replica holds the connection. Three consequences
+follow, and none of them is optional.
 
-**A ticket handshake.** The browser cannot attach a login header to this kind of connection, and the SPA and
-the API are on different origins permanently, so cross-origin cookies are not dependable. The page asks an
-authenticated endpoint for a short-lived, single-use ticket and opens the stream with it. Thirty seconds,
-deleted the moment it is used. A long-lived token in a query string ends up in access logs, browser history
-and proxy logs; a spent thirty-second ticket does not meaningfully.
+**WebSockets are the only transport, and the negotiation step is skipped.** These are one decision. Carrying
+messages between replicas through Redis normally requires each browser to keep reaching the replica it first
+connected to. The documented exemption from that needs both halves — a single transport and no negotiation —
+so allowing a fallback transport quietly brings the requirement back, and alerts then arrive for some users
+and not others as soon as there is more than one replica.
 
-**A twenty-second heartbeat.** The hosting platform closes an idle request after four minutes, and four is
-both the default and the floor on the plan being used — raising it costs more than the rest of the stack put
-together. So the stream must send something every twenty seconds. The stream API has no comment mechanism,
-so the heartbeat is a real named event that the client ignores. The same traffic keeps the connection above
-the server's minimum response data rate, which applies to this kind of stream even though it does not apply
-to WebSockets.
+**The credential travels in the URL.** The browser cannot attach a login header to this kind of connection,
+and the SPA and the API are on different origins permanently, so cross-origin cookies are not dependable
+either. The library's own answer is to send the access token as a query parameter; the server reads it back
+from there, and only for the hub's path. Without that path restriction every route in the application would
+accept a credential in its URL. The browser renews an expiring token inside the callback the library invokes
+before each attempt, because a reconnection after a long outage would otherwise present a dead one for ever.
+
+**One claim decides who a message is for.** Addressing a message to a user asks a provider for that user's
+id, and the built-in provider reads a claim these tokens do not carry. With the wrong claim every alert is
+delivered to nobody, and nothing fails, logs or appears on screen. This is the single most dangerous thing
+in the feature and it is covered by a test that names the claim.
 
 **Fan-out across replicas is mandatory, not an optimisation.** An alert can be produced on one replica while
-the user's stream is held by another. Every replica subscribes to a Redis channel and whichever one holds
-the stream writes it out. Without this, alerts silently stop arriving for half the users the moment there is
-more than one replica.
+the user's connection is held by another. This is one line of configuration rather than a component of ours,
+and without it alerts silently stop arriving for half the users the moment there is more than one replica.
 
-**There is no replay and no backfill.** No cursor, no last-event id, no "the last 24 hours on connect". The
+**There is no replay and no backfill.** No cursor, no message ids, no "the last 24 hours on connect". The
 requirement asks for an event when a threshold is breached, background checking, and a manual trigger — not
 offline delivery. Fired alerts are saved, the panel loads recent ones with an ordinary request when it
 mounts, and the stream only ever pushes new ones. On a dropped connection the panel refetches its history
@@ -254,14 +260,13 @@ does not exist on the deployed site — which is why Simulate has to exist.
 GET   /api/alerts/settings
 PUT   /api/alerts/settings
 GET   /api/alerts?limit=50
-POST  /api/alerts/stream-ticket
-GET   /api/alerts/stream?ticket=…
 POST  /api/alerts/simulate
 ```
 
-Everything except the stream itself is bearer-authenticated; the stream is authenticated by the ticket. The
-stream is the only anonymous route in the application, and the reason has to stay written next to it: the
-browser's stream client cannot set a header, and the two origins are permanent.
+The alert feed is not in that list because it is not an ordinary route: it is the real-time library's own
+endpoint, mounted at `/api/alerts/stream`, and it carries no documented status codes or response shape of
+its own. Every route above is bearer-authenticated by a header; the feed is authenticated by the same token
+in the query string, for the reason above.
 
 Money in the payload is serialised as strings, like everywhere else — **and the threshold the user saves is
 a plain number, which is not a contradiction.** The rule that survives is narrower than "percentages are
@@ -273,21 +278,21 @@ outright and the server is about to parse it into a decimal either way.
 
 ## 6. Frontend
 
-One stream connection for the whole application, opened once inside the authenticated layout, never per
-component. A held-open stream permanently occupies one of the browser's six connections per origin, and
-React's development mode will happily open two if the effect is not written to survive being invoked twice.
+One connection for the whole application, opened once inside the authenticated layout, never per component.
+A held-open connection permanently occupies one of the browser's six per origin, and React's development
+mode will happily open two if the effect is not written to survive being invoked twice.
 
-The browser's built-in reconnect cannot be used, because the ticket in the URL has already been spent by the
-time it retries. So a dropped connection is closed, a fresh ticket fetched, and a new connection opened with
-backoff. Losing free reconnection is the price of header-less authentication.
+Reconnection is the library's, with a retry schedule that never gives up — the default one stops after four
+attempts, which would leave a tab silently disconnected after a short outage with nothing ever trying again.
+When a connection comes back, the panel refetches its history rather than replaying anything.
 
 Two places show alerts: the panel on the dashboard, which is the mockup's right-hand column, and a
 notifications screen showing the same data with a longer history. Both are titled around *recent activity*
 rather than *active alerts*, and every row carries a timestamp — a price alert is a moment that passed, not
 a condition that persists, and the wording should not imply otherwise.
 
-The live indicator in the shell says "Live (SSE)". Consistency between what is claimed and what was built is
-graded, and labelling this a WebSocket is a self-inflicted wound.
+The live indicator in the shell names the transport that is actually in use. Consistency between what is
+claimed and what was built is graded, and naming the wrong one is a self-inflicted wound.
 
 ---
 
@@ -339,13 +344,14 @@ deployed, so neither an alert arriving there nor a stream surviving four minutes
 - Nudge twice inside the cooldown and only one alert arrives.
 - Nudge back and forth across the threshold repeatedly and alerts stay bounded rather than one per cycle.
 - With no alerts configured anywhere, nothing is polled and the dashboard is unchanged.
-- The notifications screen lists history; the shell badge reads "Live (SSE)"; the panel is usable at 375px.
-- Alerts arrive on the deployed site from the deployed API, and the stream survives past four minutes.
+- The notifications screen lists history; the shell badge names the real transport; the panel is usable at
+  375px.
+- Alerts arrive on the deployed site from the deployed API, and the connection survives past four minutes.
 - The alerts schema is reached by the alerts database user, with its own migration history table — sharing
   one history table across contexts corrupts all of their bookkeeping.
-- The README records: why a one-way stream rather than WebSockets, the ticket handshake and why it exists,
-  the heartbeat and the four-minute platform limit, why replay was dropped, and which false-positive
-  constraint was chosen and why.
+- The README records: why the framework's real-time library rather than a hand-written stream, where the
+  credential travels and why, which claim decides who a message is for, why replay was dropped, and which
+  false-positive constraint was chosen and why.
 
 ## Reference
 

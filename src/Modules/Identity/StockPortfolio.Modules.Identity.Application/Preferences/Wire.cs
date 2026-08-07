@@ -2,7 +2,6 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Application.Preferences;
 
-// Maps ThemeChoice and LanguageChoice to and from their wire spellings, shared by the read and write sides.
 internal static class Wire
 {
     public static string Theme(ThemeChoice theme) => theme switch

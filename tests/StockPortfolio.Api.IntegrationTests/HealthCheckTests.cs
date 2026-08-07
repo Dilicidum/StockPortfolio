@@ -7,7 +7,6 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The liveness/readiness split, which is only worth having if the two endpoints actually differ.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class HealthCheckTests(ApiFixture fixture)
 {
@@ -16,7 +15,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>Readiness is healthy, and both dependency checks are the reason.</summary>
     [Fact]
     public async Task Health_Ready_ReportsPostgresAndRedis()
     {
@@ -34,13 +32,30 @@ public sealed class HealthCheckTests(ApiFixture fixture)
             .CheckHealthAsync(TestContext.Current.CancellationToken);
 
         report.Status.ShouldBe(HealthStatus.Healthy);
-        report.Entries.Keys.ShouldContain("postgres");
-        report.Entries.Keys.ShouldContain("redis");
-        report.Entries["postgres"].Status.ShouldBe(HealthStatus.Healthy);
-        report.Entries["redis"].Status.ShouldBe(HealthStatus.Healthy);
+
+        // One entry per database login, not one for "postgres": readiness once probed the Identity role alone and reported healthy regardless.
+        string[] expected =
+        [
+            "postgres-identity",
+            "postgres-portfolio",
+            "postgres-alerts",
+            "postgres-marketdata",
+            "redis",
+        ];
+
+        foreach (var name in expected)
+        {
+            report.Entries.Keys.ShouldContain(name);
+            report.Entries[name].Status.ShouldBe(HealthStatus.Healthy);
+        }
+
+        // Pins the count as well as the names: a module wired nowhere contributes no check, and a per-name loop would never notice.
+        report.Entries.Count.ShouldBe(
+            expected.Length,
+            "Every module registers its own Postgres check in its Add<M>Module. A count that drifts "
+                + "means a module stopped contributing one, or an unexpected check appeared.");
     }
 
-    /// <summary>Liveness answers 200 with Postgres and Redis both unreachable.</summary>
     [Fact]
     public async Task Health_Live_IgnoresDependencies()
     {
@@ -58,7 +73,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
         ready.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, await Wire.Describe(ready));
     }
 
-    /// <summary>Both probes are anonymous — an authenticated probe is an unreachable probe.</summary>
     [Fact]
     public async Task Health_Endpoints_AreAnonymous()
     {

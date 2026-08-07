@@ -9,20 +9,6 @@ beforeEach(() => {
   __resetRefreshInFlight()
 })
 
-/**
- * The failure this prevents:
- *
- * A dashboard fires several queries at once. The access token has just expired,
- * so every one of them comes back 401 in the same tick. If each 401 triggers
- * its own POST /api/auth/refresh, the server rotates the refresh token N times
- * and N-1 of the responses carry a token that was already superseded before it
- * arrived. The user is logged out at random, only under concurrency, only
- * sometimes — and it reproduces on nobody's machine.
- *
- * The fix is a single shared in-flight promise. This test is the proof, and it
- * counts requests rather than inspecting internals so it keeps working if the
- * implementation of the dedupe changes.
- */
 it('collapses concurrent 401s into exactly one refresh call', async () => {
   let refreshCalls = 0
   let meCalls = 0
@@ -41,14 +27,11 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
 
     http.post('*/api/auth/refresh', async () => {
       refreshCalls += 1
-      // A real refresh is a network round trip. The delay keeps every 401 inside
-      // the in-flight window, which is what makes this deterministic rather
-      // than a race that happens to pass.
       await delay(40)
       return HttpResponse.json({
         accessToken: 'fresh-token',
         refreshToken: 'rotated-refresh-token',
-        accessExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+        expiresIn: 900,
       })
     }),
   )
@@ -56,7 +39,7 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
   setTokens({
     accessToken: 'stale-token',
     refreshToken: 'original-refresh-token',
-    accessExpiresAt: new Date(Date.now() - 1_000).toISOString(),
+    expiresIn: -1,
   })
 
   const CONCURRENCY = 10
@@ -66,7 +49,6 @@ it('collapses concurrent 401s into exactly one refresh call', async () => {
 
   expect(refreshCalls).toBe(1)
 
-  // Every caller still got its answer: one 401 and one retry each.
   expect(results).toHaveLength(CONCURRENCY)
   for (const result of results) {
     expect(result.email).toBe('holder@example.com')
@@ -88,18 +70,16 @@ it('starts a new refresh once the previous one has settled', async () => {
       return HttpResponse.json({
         accessToken: 'fresh-token',
         refreshToken: 'rotated',
-        accessExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+        expiresIn: 900,
       })
     }),
   )
 
-  setTokens({ accessToken: 'stale-token', refreshToken: 'r', accessExpiresAt: '' })
+  setTokens({ accessToken: 'stale-token', refreshToken: 'r', expiresIn: 0 })
   await apiFetch('/api/auth/me')
   expect(refreshCalls).toBe(1)
 
-  // The slot must be released when the promise settles, or the second expiry
-  // would reuse a resolved promise holding a token that is now stale too.
-  setTokens({ accessToken: 'stale-token', refreshToken: 'r', accessExpiresAt: '' })
+  setTokens({ accessToken: 'stale-token', refreshToken: 'r', expiresIn: 0 })
   await apiFetch('/api/auth/me')
   expect(refreshCalls).toBe(2)
 })

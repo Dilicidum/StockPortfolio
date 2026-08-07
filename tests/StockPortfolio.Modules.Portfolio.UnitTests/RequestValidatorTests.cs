@@ -4,7 +4,6 @@ using StockPortfolio.Modules.Portfolio.Api.Validators;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Shape validation, the layer that answers 400 before a handler ever runs.</summary>
 public sealed class RequestValidatorTests
 {
     private static readonly AddHoldingRequestValidator Add = new();
@@ -33,10 +32,7 @@ public sealed class RequestValidatorTests
             .Errors.Select(error => error.PropertyName)
             .ShouldContain(field);
 
-    // numeric(18,6) holds twelve integer digits, so 1e12 is the first value the INSERT would refuse
-    // with 22003. Caught here it is a 400 naming the field; missed here it is a bare 500.
-    // Decimal literals rather than InlineData: 999999999999.999999 has eighteen significant digits and
-    // xUnit's double-to-decimal conversion keeps fifteen, which would silently test 1e12 instead.
+    // Decimal literals, not InlineData: xUnit's double conversion keeps fifteen significant digits and would silently test 1e12.
     [Fact]
     public void Add_AcceptsTheLargestValueTheColumnHolds() =>
         Add.Validate(new AddHoldingRequest(
@@ -85,8 +81,7 @@ public sealed class RequestValidatorTests
             .Errors.Select(error => error.PropertyName)
             .ShouldContain(field);
 
-    // The request is the only thing that binds off the wire, and it carries no user field. If one is
-    // ever added, a client could post holdings into someone else's portfolio.
+    // Add a user field to the wire contract and a client could post holdings into someone else's portfolio.
     [Fact]
     public void AddHoldingRequest_CarriesNoUserField() =>
         typeof(AddHoldingRequest)

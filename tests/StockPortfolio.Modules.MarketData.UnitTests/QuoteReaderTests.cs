@@ -42,7 +42,6 @@ public sealed class QuoteReaderTests
 
         await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
-        // One writer in QuoteReader, so the fake and Finnhub paths record identically.
         store.Written.ShouldHaveSingleItem().Price.ShouldBe(187.42m);
     }
 
@@ -61,7 +60,7 @@ public sealed class QuoteReaderTests
             ["AAPL", "MSFT", "TSLA"],
             TestContext.Current.CancellationToken);
 
-        // Seventeen-of-twenty in miniature: one failure must not discard the two that succeeded.
+        // One failure must not discard the two that succeeded — IsLastKnown is what separates a served price from a fallback.
         prices.Count.ShouldBe(3);
         prices["AAPL"].IsLastKnown.ShouldBeFalse();
         prices["TSLA"].IsLastKnown.ShouldBeFalse();
@@ -144,8 +143,6 @@ public sealed class QuoteReaderTests
         provider.LastApiKeyOverride.ShouldBeNull();
     }
 
-    /// <summary>The kill switch must actually kill: a stored key sits in the repository, but with BYOK
-    /// disabled it must never be read, decrypted or handed to the provider.</summary>
     [Fact]
     public async Task GetCurrentPrices_WhenByokIsDisabled_NeverReadsTheStoredKey()
     {
@@ -159,7 +156,6 @@ public sealed class QuoteReaderTests
         provider.LastApiKeyOverride.ShouldBeNull();
     }
 
-    /// <summary>The test §Step 4b exists for: a revoked key must not stay invisible behind a stale price.</summary>
     [Fact]
     public async Task GetCurrentPrices_WhenTheProviderRefusesTheUsersKey_MarksItRejected()
     {
@@ -174,7 +170,6 @@ public sealed class QuoteReaderTests
         repository.Saved.ShouldHaveSingleItem().LastRejectedAt.ShouldNotBeNull();
     }
 
-    /// <summary>The other half: an outage must degrade quietly rather than brand a good key bad.</summary>
     [Fact]
     public async Task GetCurrentPrices_WhenTheProviderCannotAnswerForTheUsersKey_DoesNotMarkItRejected()
     {

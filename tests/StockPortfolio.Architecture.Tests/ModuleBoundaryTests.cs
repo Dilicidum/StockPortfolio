@@ -3,13 +3,12 @@ using Shouldly;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Rule 1 — a module reaches another module only through its .Contracts assembly — plus the discovery.</summary>
 public sealed class ModuleBoundaryTests
 {
-    /// <summary>Every first-party assembly the rules run over.</summary>
-    public static TheoryData<string> ScannedAssemblies => [.. SolutionAssemblies.ScannedNames];
+    // An assembly declaring no type has its project references trimmed out of metadata, so a rule over it walks nothing and reports green.
+    public static TheoryData<string> ScannedAssemblies =>
+        [.. SolutionAssemblies.ScannedNames.Where(SolutionAssemblies.HasCode)];
 
-    /// <summary>The guard against a false green.</summary>
     [Fact]
     public void ExpectedAssemblies_AllLoadByName_SoNoRuleScansAnEmptySet()
     {
@@ -29,7 +28,6 @@ public sealed class ModuleBoundaryTests
                 + Describe(missing));
     }
 
-    /// <summary>The second half of the guard.</summary>
     [Fact]
     public void PopulatedAssemblies_AreNotEmptyShells_SoTheRulesAreNotAllSkipped()
     {
@@ -49,7 +47,6 @@ public sealed class ModuleBoundaryTests
             SolutionAssemblies.NameOf("Portfolio", "Infrastructure"),
             SolutionAssemblies.NameOf("Portfolio", "Api"),
 
-            // Phase 4 populates Alerts one layer at a time; this list grows with each.
             SolutionAssemblies.NameOf("Alerts", "Contracts"),
             SolutionAssemblies.NameOf("Alerts", "Domain"),
             SolutionAssemblies.NameOf("Alerts", "Application"),
@@ -74,12 +71,10 @@ public sealed class ModuleBoundaryTests
                 + Describe(shells));
     }
 
-    /// <summary>The third part of the guard: which assemblies are skipped is a decision, not a drift.</summary>
     [Fact]
     public void EmptyShells_AreExactlyThePhasesNotYetBuilt()
     {
-        // Hard-coded on purpose: this is the list of rules currently not enforced, so it must change by hand.
-        // Ordinal order, because the assertion below compares the two lists in order.
+        // Hard-coded on purpose — this is the list of rules not enforced — and in ordinal order, because the assertion compares in order.
         string[] expected =
         [
             "StockPortfolio.Modules.Identity.Contracts",
@@ -93,28 +88,25 @@ public sealed class ModuleBoundaryTests
         actual.ShouldBe(
             expected,
             ignoreOrder: false,
-            "The set of empty-shell assemblies has moved. Every name on this list is an assembly the "
-                + "rules below silently skip rather than enforce, so the list is the honest count of what "
-                + "is not being checked — a rule that skips everywhere reports green while enforcing nothing:"
+            "The set of empty-shell assemblies has moved. No rule below generates a case for a name on "
+                + "this list, so the list is the honest count of what is not being checked — and this "
+                + "test is the only thing that says so out loud:"
                 + Environment.NewLine
                 + Describe(expected.Except(actual, StringComparer.Ordinal)
                     .Select(name => name + " now carries code — delete it from the expected list, and "
                         + "check the rules it just switched on actually pass"))
                 + Environment.NewLine
                 + Describe(actual.Except(expected, StringComparer.Ordinal)
-                    .Select(name => name + " has become an empty shell — every rule over it is now "
-                        + "silently skipping, which is a regression, not a pass")));
+                    .Select(name => name + " has become an empty shell — every rule over it has just "
+                        + "stopped running, which is a regression, not a pass")));
     }
 
-    /// <summary>Rule 1.</summary>
     [Theory]
     [MemberData(nameof(ScannedAssemblies))]
     public void Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts(string assemblyName)
     {
         // No composition-root exemption: this project references neither host, so neither is ever scanned.
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        SkipIfEmptyShell(assembly, assemblyName);
 
         _ = SolutionAssemblies.TryParseModuleLayer(assemblyName, out var ownModule, out _);
 
@@ -134,7 +126,6 @@ public sealed class ModuleBoundaryTests
                 + "go through Contracts, or move the type you need into Contracts as a record of primitives.");
     }
 
-    /// <summary>Rule 1, second half.</summary>
     [Theory]
     [InlineData("StockPortfolio.Shared.Kernel")]
     [InlineData("StockPortfolio.Shared.Api")]
@@ -155,7 +146,6 @@ public sealed class ModuleBoundaryTests
                 + Describe(violations));
     }
 
-    /// <summary>Presses the button on the smoke detector.</summary>
     [Theory]
     [InlineData("StockPortfolio.Modules.Portfolio.Domain", true)]
     [InlineData("StockPortfolio.Modules.Portfolio.Application", true)]
@@ -175,20 +165,6 @@ public sealed class ModuleBoundaryTests
         SolutionAssemblies.TryParseModuleLayer(referenceName, out var module, out var layer)
         && !string.Equals(module, ownModule, StringComparison.Ordinal)
         && !string.Equals(layer, SolutionAssemblies.ContractsLayer, StringComparison.Ordinal);
-
-    internal static void SkipIfEmptyShell(Assembly assembly, string assemblyName)
-    {
-        if (SolutionAssemblies.IsEmptyShell(assembly))
-        {
-            // Portfolio and MarketData are shells until their phase lands.
-            Assert.Skip(
-                assemblyName
-                    + " declares no StockPortfolio type yet (empty shell project), so its reference "
-                    + "metadata is trimmed to System.Runtime and this rule has nothing to check. The "
-                    + "assembly loads and is scanned, so the rule goes live by itself with the first "
-                    + "type the module gains.");
-        }
-    }
 
     internal static string Describe(IEnumerable<string> lines) =>
         string.Join(Environment.NewLine, lines.Select(line => "  - " + line));

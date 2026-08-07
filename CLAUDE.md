@@ -1,6 +1,6 @@
 # StockPortfolio
 
-Stock-portfolio tracker: live quotes, P&L, threshold alerts over SSE. .NET 10 modular monolith + React SPA.
+Stock-portfolio tracker: live quotes, P&L, threshold alerts pushed over SignalR. .NET 10 modular monolith + React SPA.
 
 Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0 completion is the acceptance gate** — auth, quotes via TanStack Query, TanStack Router with 4+ routes, portfolio CRUD, dashboard with totals and P&L, parameterised DB access, and `docker compose up` bringing the whole stack up in one command. P1 and P2 add points; P0 failing means nothing else counts.
 
@@ -45,14 +45,14 @@ Three levels, each with one job.
 
 A plan holds ideas, decisions, reasoning, behaviour and architecture. It never holds class names, method names, file paths, line numbers, task numbers or test names. Domain words and public API routes are fine.
 
-Phases 1, 2 and 3 have shipped, so they have no implementation plan any more. **Phase 4 has not.** It is
-built and verified locally, and a phase is done when it runs in a browser *and is deployed* — so its
-implementation plan is still in `docs/plan/`, carrying the deployment and browser-verification tasks that
-close it. Delete it on the day those pass, not before.
+Phases 1 to 5 have shipped, so none of them has an implementation plan any more. **Phase 6 is in flight**, so
+`phase-6-implementation.md` exists and carries its build order, its file names and its deployment and
+browser-verification tasks. Delete it on the day those pass, not before — a phase is done when it runs in a
+browser *and is deployed*, not when its tests pass.
 
 A plan is short enough to read from start to finish in one sitting. When something changes, change it everywhere and leave only the new version. Do not write down what it used to say — git keeps that.
 
-**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. **It is at seven today**: Phase 4 shipped and its implementation plan went with it. A phase ships when it runs in a browser and is deployed, not when its tests pass, so the plan outlives the last commit of code by however long verification takes.
+**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. **It is at eight today**, the eighth being Phase 6's. The plan outlives the last commit of code by however long verification takes.
 
 ## Reference documents
 
@@ -91,18 +91,18 @@ npm --prefix src/Web test
 
 # migrations: --project is the module's Infrastructure, --startup-project is always the host
 dotnet ef migrations add <Name> --context <Module>DbContext --output-dir Persistence/Migrations \
-  --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Api
+  --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Host
 
 az deployment group what-if -g <rg> -f infra/main.bicep    # before any deploy
 ```
 
-`/openapi/v1.json` is served in Development only — which `docker-compose.override.yml` makes the default, so it *is* reachable at `:8080` on a plain `docker compose up`, as well as from `dotnet run --project src/Api`.
+`/openapi/v1.json` is served in Development only — which `docker-compose.override.yml` makes the default, so it *is* reachable at `:8080` on a plain `docker compose up`, as well as from `dotnet run --project src/Host`.
 
 With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a warning. That is deliberate — Finnhub killed its sandbox in 2022, so the demo must work without a key.
 
 ## Architecture
 
-Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. **All four exist.** Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. **All four exist.** Plus `Shared.Kernel`, `Shared.Api`, the `Host` project and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
 **Boundaries are argued from the cost of pulling a module out, not from subdomain labels.** The test for every boundary: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the number of calls bounded, can one side fail while the other keeps working, is there exactly one writer per table. Full reasoning in [docs/reference/module-boundaries.md](docs/reference/module-boundaries.md).
 
@@ -130,7 +130,7 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 
 Two reference rules are enforced by the compiler and checked again by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
-- Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **`Api` host** (that makes the host the place every feature has to touch). `StockPortfolio.Api` is the host; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, no collision.
+- Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **host** (that makes the host the place every feature has to touch). `StockPortfolio.Host` in `src/Host` is the composition root and defines no business routes of its own; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, and now different words.
 - `Shared.Kernel` must stay free of frameworks — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no domain-event machinery: `IDomainEvent`, `IDomainEventHandler` and `IDomainEventPublisher` do not exist. Nothing raises an event, so nothing needs them. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler cannot check this now that Domain is public, so `Architecture.Tests` is the only thing enforcing it — do not weaken or skip those tests.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would turn the kernel into a shared domain, which is exactly what modules exist to prevent.
@@ -168,7 +168,7 @@ The namespace matches the folder, so it stops at the use-case folder (`…Applic
 
 **A handler returns `OneOf<…>` of its outcomes directly.** No `[GenerateOneOf]`, no named union class — `Task<OneOf<TokenPair, EmailAlreadyUsed, InvalidInput>>` says in the signature what a wrapper would hide behind a name, and the DI registration and the endpoint's injected `ICommandHandler<,>` both spell out the same closed generic. `<UseCase>Result` is the **success payload record**, never the union. Failure cases are records beside the use case that returns them, not pooled in an `Errors.cs`; `InvalidInput` (in `Shared.Kernel`) is the one shared failure, because every layer can produce a field-plus-message.
 
-Map to `TypedResults` via `.Match`. Every case must be handled, and that is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed. **Name every `.Match` lambda parameter** — `emailTaken =>`, not `_ =>`. The discard costs the one word that says which case this is.
+Map to a result via `.Match`, and **inside a `.Match` arm write `Results.X(...)`, never `TypedResults.X(...)`.** `TypedResults.Ok` returns `Ok<T>` and `TypedResults.Created` returns `Created<T>`, so a two-arm `.Match` hands the compiler two unrelated types and it refuses to pick one — CS0411, which is why `.Match<IResult>` used to be spelled out at every call site. `Results.X(...)` returns plain `IResult`, so every arm agrees and no `.Match` needs a type argument. The helpers in `ProblemDetailsExtensions` return `IResult` for the same reason. Outside a `.Match` — a plain `return TypedResults.Ok(result);` at the end of a handler — `TypedResults` stays. Every case must be handled, and that is structural: `.Match` takes one delegate per case, so adding a case breaks every call site. Never silence CS8509 with `_ => throw`, and never `switch` over `.Value` — that is the only way to lose the guarantee. No suppressor package is needed or installed. **Name every `.Match` lambda parameter** — `emailTaken =>`, not `_ =>`. The discard costs the one word that says which case this is.
 
 **Rich domain, and no base class.** There is no `AggregateRoot<TId>`; each entity declares its own `Id`. An entity has **exactly one constructor**: private, taking every mapped value, assigning and nothing else. No parameterless constructor, no object initialiser, no public setter — a half-built entity is not representable, and the static `Create(...)` returning a OneOf is the only way in.
 
@@ -196,7 +196,7 @@ Known and accepted: two simultaneous registrations of one address can both pass 
 
 Shape validation is an **endpoint filter, not a DI decorator**. A decorator would have to return an unconstrained `TResult` and cannot build a failure value; a filter sits in the HTTP pipeline and can `return TypedResults.ValidationProblem(...)` directly. Inject `IValidator<T>`, never `IEnumerable<IValidator<T>>` — the collection form silently validates nothing when a validator is missing. Validators do no I/O: "is this email taken?" is a context question and belongs in the handler as a result case. `LoggingDecorator` stays a decorator; it has no `TResult` problem. Do not use the built-in .NET 10 `AddValidation()` — it is driven by DataAnnotations attributes and is awkward for conditional or cross-field rules.
 
-**Endpoint handlers return `Task<IResult>`.** Not `Task<Results<Created<T>, ProblemHttpResult, …>>` — the typed union repeats in the signature what `.Produces(...)` already declares, and it grows a generic argument every time a case is added. `.Match<IResult>(...)` still forces every case to be handled, because that comes from the union's size, not from the return type.
+**Endpoint handlers return `Task<IResult>`.** Not `Task<Results<Created<T>, ProblemHttpResult, …>>` — the typed union repeats in the signature what `.Produces(...)` already declares, and it grows a generic argument every time a case is added. `.Match(...)` still forces every case to be handled, because that comes from the union's size, not from the return type.
 
 The trade is worth knowing: the typed union made the compiler reject a result the signature had not declared. `.Produces(...)` metadata is now the **only** description of what a route emits, so it can fall out of step with the code and nothing will fail. That is why the next rule says to check against a live response.
 
@@ -208,6 +208,10 @@ The trade is worth knowing: the typed union made the compiler reject a result th
 
 **Comments: one line, and only where the code cannot say it.** No `<remarks>`, no `<param>`/`<returns>`/`<exception>` blocks, no banner rules. A doc comment is a single `/// <summary>…</summary>`. If a comment must span lines to make sense, the reasoning belongs in `docs/plan/` or a commit message, not in the file.
 
+**`src/Web` carries no comments at all** — application code, tests, `vite.config.ts`, `nginx.conf`, the `Dockerfile` and `.env.example` alike. Every one was deleted deliberately: about 1,800 lines, a fifth of the folder. Of the 359 blocks under `src/`, 303 narrated the code, argued with a version that no longer existed, or restated an API contract the generated OpenAPI document already owns; 43 more repeated something this file already said. The 12 facts that were genuinely load-bearing became Traps entries below, which is why several of those entries are about the browser. **Do not reintroduce a comment there.** A fact worth writing down goes in Traps, where one place holds it and it cannot rot beside code that has moved on. This rule is the frontend only — C# keeps the one-line rule above.
+
+**Three lines in `src/Web` look like comments and are not**: the `/// <reference types="…" />` at the top of `vite.config.ts` and `src/vite-env.d.ts`, and the `#!` on `scripts/check-locale-parity.mjs`. They are instructions to TypeScript and to the shell. Deleting the first one breaks `npm run typecheck` with an error about `test` not existing on `UserConfigExport`, two steps from the cause.
+
 **Money is `decimal` server-side and serialised as strings.** Never compute money in the browser. Weights and percentages are computed server-side too.
 
 The rule is narrower than "every percentage is a string", and the alert threshold is where that shows. A figure the **server computes** goes out as a string, because that is where precision is lost when a browser parses it. A value the **user typed** arrives as a plain JSON number, because `JsonNumberHandling.Strict` is registered and a quoted number would be rejected outright — the server is about to parse it into a `decimal` either way. So a saved threshold is a number inbound, while a fired alert's change and endpoint figures are strings outbound.
@@ -216,23 +220,25 @@ The rule is narrower than "every percentage is a string", and the alert threshol
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** **821 passing and 2 skipped of 823 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** **723 passing, nothing skipped, of 723 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
-| Assembly | Passed | Skipped |
-|---|---|---|
-| `Shared.Kernel.UnitTests` | 21 | 0 |
-| `Modules.Identity.UnitTests` | 112 | 0 |
-| `Modules.Portfolio.UnitTests` | 115 | 0 |
-| `Modules.MarketData.UnitTests` | 176 | 0 |
-| `Modules.Alerts.UnitTests` | 114 | 0 |
-| `Architecture.Tests` | 55 | **2** |
-| `Api.IntegrationTests` | 228 | 0 |
+| Assembly | Passed |
+|---|---|
+| `Shared.Kernel.UnitTests` | 21 |
+| `Modules.Identity.UnitTests` | 15 |
+| `Modules.Portfolio.UnitTests` | 115 |
+| `Modules.MarketData.UnitTests` | 182 |
+| `Modules.Alerts.UnitTests` | 108 |
+| `Architecture.Tests` | 60 |
+| `Api.IntegrationTests` | 222 |
 
-The browser tests are counted separately by `npm --prefix src/Web test` — **59 passing across 12 files**. These are the only test counts in the repository; do not copy them into another document.
+The browser tests are counted separately by `npm --prefix src/Web test` — **64 passing across 13 files**. These are the only test counts in the repository; do not copy them into another document.
 
-**Both skips are architecture rules waiting on an empty assembly.** A rule that skips checks nothing. Both are `Identity.Contracts` — rule 1 (`Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts`) and rule 2 (`ContractsAssembly_ReferencesNoPersistence`) — and both are correct: nothing reaches into Identity, so its `.Contracts` is deliberately empty. `EmptyShells_AreExactlyThePhasesNotYetBuilt` fixes the exact list of empty assemblies, so one appearing or disappearing is a deliberate edit rather than a silent change in what is enforced. The number of empty assemblies and the number of skips are different quantities and any match between them is a coincidence — read both from the test source, never from here. Quoting a passing count without the skip count hides all of this.
+**Nothing skips, and `Identity.Contracts` is why that took work.** It is empty on purpose — nothing depends on Identity at runtime, so its `.Contracts` has nothing to hold. An empty assembly has its project references trimmed out of the metadata by the compiler, so a rule walking them finds an empty list and reports green. That used to be handled by skipping the two rules over it. It is now handled by **not generating a case at all**: `ScannedAssemblies` and `AssembliesFor` filter on `SolutionAssemblies.HasCode`, computed at run time. Add a type to `Identity.Contracts` and both rules switch themselves back on with no edit — verified by doing it, which took the architecture suite from 60 tests to 62.
 
-**A rule that skips is not a rule, and Phase 4 proved it the expensive way.** Creating Alerts' five projects empty took the skip count from 2 to 9, and it fell back to 2 one layer at a time as each was filled. In between, rule 1 reported green over `Alerts.Application` and proved nothing: with no type in that assembly the compiler trims its project references straight out of assembly metadata, so there was nothing to walk. Do not read a green rule over a layer you have not populated as evidence of anything.
+`EmptyShells_AreExactlyThePhasesNotYetBuilt` hard-codes the list of assemblies no rule runs over, so that filter can never become a quiet hole: the same experiment turned it red. **Read the list from that test, never from here.** `MemberData_NamesTheLayerEachRuleClaims` derives its expected count the same way, so a rule pointed at the wrong layer is still caught.
+
+**A rule that reports green over an empty assembly is not a rule, and Phase 4 proved it the expensive way.** Creating Alerts' five projects empty put seven more assemblies in that state, and it fell back one layer at a time as each was filled. In between, rule 1 was green over `Alerts.Application` and proved nothing. Do not read a green rule over a layer you have not populated as evidence of anything.
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was checked by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while still reporting green. `ReferenceWalker_FindsEdgesThatDoExist` protects against the same class of mistake permanently: a rule that passes by finding nothing needs a companion test that fails if the search finds nothing.
 
@@ -242,7 +248,7 @@ Phase 4 met the same shape twice more. A price-window member carries its timesta
 
 ## Where Identity is not a safe template
 
-Identity was the only built module for a phase and a half, so it is what gets copied. It has no background service, no outbound HTTP, no SSE, no value object and no dependency on another module — five of its answers are wrong elsewhere, and each one fails quietly. Decide these before writing a module, not after.
+Identity was the only built module for a phase and a half, so it is what gets copied. It has no background service, no outbound HTTP, no pushed messages, no value object and no dependency on another module — five of its answers are wrong elsewhere, and each one fails quietly. Decide these before writing a module, not after.
 
 | Identity does | Wrong for | Decide instead |
 |---|---|---|
@@ -250,7 +256,7 @@ Identity was the only built module for a phase and a half, so it is what gets co
 | Validates all config eagerly in `Add<M>Module` | MarketData. A missing `Finnhub__ApiKey` is a *supported* state, so `FinnhubOptions.FromConfiguration` does not throw and `AddMarketDataModule` uses `FakeQuoteProvider` instead. Eager validation there would take down `docker compose up`, which is the P0 gate | Validate eagerly only what the module genuinely cannot run without |
 | Value converters are only for ids | Portfolio's `Ticker`, and all six of Alerts'. Identity has no value object that is not an id, so "id" and "type needing a converter" happen to name the same set. Alerts needed one converter per id, one per value object, **and** an enum-to-string for the alert direction — the count is only ever found by listing the mapped types | A converter for every custom mapped type; register both `Properties<T>()` and `DefaultTypeMapping<T>()` |
 | Canonical form is a `public static` on the entity (`User.NormaliseEmail`) | Anything with a value object. Email is a bare `string` with nowhere else to live; `Ticker` canonicalises in its own factory | Canonicalise in the value object where there is one; a static on the entity only for bare primitives |
-| Two host wire-ups finish a module | MarketData needs three (`AddMarketDataModule`, `AddMarketDataApi`, `MapMarketDataEndpoints`) — and the count is not the interesting part. It injects `IConnectionMultiplexer`, which `AddStockPortfolioRedis` registers, and nothing in the module says so. Delete or reorder that one line in `Program.cs` and the dashboard fails on the first request rather than at startup. Alerts needs the same three **plus two host adapters and a startup consistency check**, none of which any module declares | Count the wire-ups the module needs **and the host services it silently assumes**. `Add` + `Map` does not mean wired |
+| Two host wire-ups finish a module | MarketData needs three (`AddMarketDataModule`, `AddMarketDataApi`, `MapMarketDataEndpoints`) — and the count is not the interesting part. It injects `IConnectionMultiplexer`, which `AddStockPortfolioRedis` registers, and nothing in the module says so. Delete or reorder that one line in `Program.cs` and the dashboard fails on the first request rather than at startup. Alerts needs the same three **plus two host adapters, a startup consistency check, and `AddSignalR` with its Redis backplane**, none of which any module declares — and its publisher is registered by `AddAlertsApi`, not `AddAlertsModule`, because `IHubContext` is ASP.NET Core and `.Infrastructure` may not reference it | Count the wire-ups the module needs **and the host services it silently assumes**. `Add` + `Map` does not mean wired |
 
 ## Traps
 
@@ -276,14 +282,27 @@ Each of these costs a day if you meet it cold.
 - **`AddStandardResilienceHandler`'s defaults do nothing useful, and its validator can stop the host from starting.** `CircuitBreaker.MinimumThroughput` ships at 100, so the breaker can never open for a twenty-ticker dashboard — it is configured down to 10. And `HttpStandardResilienceOptionsCustomValidator` registers with `AddOptionsWithValidateOnStart`, so `AttemptTimeout > TotalRequestTimeout`, or `SamplingDuration < 2 × AttemptTimeout`, takes the host down at startup — which takes down `docker compose up`, the P0 gate. The shipped values satisfy both (5 s < 15 s; 30 s ≥ 10 s).
 - **Finnhub's `/quote` cannot tell a non-existent symbol from a healthy one that blipped.** Both come back as `c: 0` — present, zero — so a check written as "`/quote` returned a non-null, non-zero `c`" answers *unknown* to every temporary failure and would permanently reject a valid holding after one bad second. The check is `/search?q=` with an **exact case-insensitive match on `result[].symbol`**, never `count > 0`, because `/search` matches company names as well as symbols — `q=appl` returns Applied Materials, Applovin and Science Applications International beside Apple, all verified against the live provider on 2026-08-06. Do not use `q=AAP` returning `AAPL` as the example: it is the one every earlier draft of this file used and it is **false** — that query returns `AAP` and `AAPJ` and no Apple at all. A null search result means the provider could not answer, and the check then **says yes** — a Finnhub outage must not reject a purchase. The only primary evidence is [Finnhub-API#54](https://github.com/finnhubio/Finnhub-API/issues/54), intermittent all-zero responses for AAPL/TSLA/FB. Entitlement failures come back as **401 or 403**, both with the same body, and neither is ever retried.
 - **BYOK key verification is the one `IQuoteProvider` method that must not fail open, and `FakeQuoteProvider` needs its own invented rule to prove it.** Every other method on the interface fails open — a provider outage must not block a purchase — but `VerifyKeyAsync` is checking the key itself, so an unanswerable check must never be read as valid. With no `Finnhub__ApiKey` configured the fake is the *only* provider there is, so if it accepted every candidate key the rejected and unanswerable arms of the whole feature would be unreachable in every test and every local demo. The rule it uses instead — accept sixteen characters or more, reject anything shorter and the literal `"unknown"` sentinel, never answer `Unknown` at all — is invented behaviour with no source of truth outside the code, which is exactly the kind of thing a later pass "simplifies" back to always-true. There is deliberately no `Unknown` verdict from the fake: a fake that pretends the provider is down is a fake nobody could reason about, so length is the only axis it can say no on.
-- **Never add `UseResponseCompression()`** — it buffers `text/event-stream` and the alert feed dies silently.
-- **ACA `requestIdleTimeout` is 4 minutes and 4 is the floor** on Consumption. The SSE heartbeat must fire every 20s. `SseFormatter` has no comment API, so use a named `ping` event. **Every frame must be named, including the alert itself** — an unnamed frame arrives at the browser as `message`, and a client listening for `alert` never sees it. A named event with no listener is dropped before it reaches any code, which is exactly why the ping costs nothing.
+- **The alert feed is SignalR, and three of its settings are load-bearing together.** The browser is pinned to **WebSockets only** *and* **skips the negotiate step**, because that pair is the documented exemption from sticky sessions with a Redis backplane — it needs both halves, so allowing a fallback transport silently reintroduces the requirement and a browser routed to the wrong replica gets no alerts. The hub is mapped at `/api/alerts/stream`, which is the prefix nginx already forwards upgrades on. SignalR's own keepalive (about every 15s) is what keeps the connection under the platform's four-minute idle close; there is no hand-written heartbeat any more.
+- **`Clients.User(...)` matches a claim these tokens do not carry.** The built-in provider reads `nameidentifier`; this app issues `sub`. Without `SubjectClaimUserIdProvider` every alert is delivered to nobody, with no exception and no log line — `AlertStreamTests` pins both the registration and the claim name.
+- **A browser cannot set a header on the hub connection**, so SignalR's client sends the token as `?access_token=`. `BearerTokenEvents.OnMessageReceived` reads it, and the `StartsWithSegments` path check is what stops every other route in the app accepting a credential in its URL.
 - **ACA liveness must not check Postgres or Redis.** A brief dependency failure then becomes a container restart loop, turning a degraded app into a down one.
 - **TanStack Query v5.89.0 renamed the mutation callbacks' `TContext` generic to `TOnMutateResult` and *added* a new `context` (`{ client, meta, mutationKey }`) as the last parameter of each**; `mutationFn` gained a second argument. **Argument positions did not move** — the `onMutate` snapshot is still argument 3 in `onError`/`onSuccess` and 4 in `onSettled` — so rollback code written before 5.89 still compiles and still restores the correct value. Pinned version is 5.101.4.
 - **Tailwind v4 has no config file.** `darkMode: 'class'` does not exist; dark mode is `@custom-variant` in CSS. The failure is silent — `dark:` classes just never apply.
+- **Tailwind v4's `@theme` snapshots a variable's value unless you write `@theme inline`.** Without `inline` a colour freezes at whichever scheme was active when it was read, and light/dark stops following `data-theme`. Nothing errors.
+- **A page-wide token refresh must be one shared promise, not one per request.** When the access token expires every query on the page comes back 401 in the same tick. Without a single in-flight refresh, each one posts to `/api/auth/refresh`, the server rotates the refresh token once per call, and every response but the last carries a token the server has already retired — so the user is signed out at random, and only under load.
+- **TanStack Router does not type-check a link target held in a plain `string`.** `ToPathOption` short-circuits on `string extends TTo ? string : …`, so only an inline literal `to="/somewhere"` on a `<Link>` is checked. A nav list whose `to` is declared `string` compiles happily with a route that does not exist and 404s at runtime — check every such entry against `routeTree.gen.ts` by hand.
+- **Firing one optimistic mutation per row in a loop makes them all share one snapshot.** Each `onMutate` snapshots the whole list before applying its own change, so several started without awaiting capture the same pre-loop list, and one failed request rolls back every sibling that had already succeeded. Apply all the optimistic changes in a single `setQueryData` instead.
+- **`setQueryData` on a query nothing has fetched yet makes it look fresh.** It stamps `dataUpdatedAt`, so the query stays fresh for its whole `staleTime` and never fetches. Push a live alert into an unseeded history cache and the panel shows that one row and no history at all. Write into the cache only when it already holds something.
+- **The browser's `storage` event fires in every tab except the one that wrote.** That is the whole cross-tab sign-out mechanism: removing the token key tells the others and nothing else is needed. Do not react to a *changed* token — two tabs would then race to spend a single-use refresh token. The query that re-identifies the user after a sign-in elsewhere needs `staleTime: 0`, or the global 30s default hands back the identity already cached in this tab, the new token is never exchanged, and the tab sits "signed in" with no access token.
+- **`//evil.example` gets past a `startsWith('/')` check.** The browser reads a protocol-relative URL as an absolute one, so a `?redirect=` guard written that way sends a freshly signed-in user to somebody else's site. A backslash does the same wherever a parser normalises it to a slash. Accept only same-origin, path-absolute targets.
+- **SignalR's default reconnect gives up after four attempts.** Roughly two minutes of outage and the browser stops trying for ever — no error, no log line, the badge still claiming a connection. The client must supply its own retry list that never runs out.
+- **SignalR asks for the access token before every request it makes, including each reconnect attempt.** Hand back whatever token is already in hand and a reconnect after expiry 401s for ever, so the factory has to refresh rather than return.
+- **`useSuspenseQuery` throws on error by default**, so any rejected read lands in TanStack Router's built-in error panel — no shell, no nav, no retry — unless the route declares its own error component. `invalidateQueries` from a mutation's `onSettled` reaches it too, so a failed write can tear the page down a moment after the optimistic rollback repaired it.
+- **`useSyncExternalStore` demands the same object back every time it asks.** Return a freshly built snapshot on each call and React re-renders for ever; keep one frozen object and swap it only on a real change.
+- **jsdom applies no CSS, so a layout hidden with `display: none` is still findable in a test.** The desktop table and its mobile-card twin both match a text query, so every such assertion is ambiguous until the query is scoped to one of them.
 - **Data Protection keys must be persisted to Postgres**, or every ACA revision leaves stored BYOK ciphertext unreadable.
 - **ASP.NET Core listens on 8080**, not 80. `targetPort: 8080` in Bicep.
-- **React 19 StrictMode runs effects twice.** The SSE hook needs a `cancelled` flag and `clearTimeout` in cleanup, or you hold two of the browser's six connections per origin.
+- **React 19 StrictMode runs effects twice.** The alert hook's cleanup must call `stop()`, or you hold two of the browser's six connections per origin. SignalR rejects a `start()` on a connection already stopped, which is what absorbs the torn-down first pass.
 - **`docker-entrypoint-initdb.d` passes no `-v` to psql.** A `.sql` file using `:'password'` variables is a syntax error and, with `ON_ERROR_STOP=1`, aborts init — so `docker compose up` fails from a clean clone. Wrap it in a `.sh` that supplies the variables.
 - **`CREATE SCHEMA … AUTHORIZATION migrator` needs `GRANT migrator TO CURRENT_USER` first.** Compose runs as superuser so it passes locally; the Azure Flexible Server admin is not a superuser and the migration job fails on first deploy.
 - **`beforeLoad` is synchronous; React effects run after the first render.** Load the session *before* mounting `RouterProvider`, or a hard refresh of a protected route always bounces to `/login` — which is the session-persistence requirement failing while every test passes.
@@ -336,15 +355,15 @@ The cost of that is a replica billed at the active rate around the clock — an 
 
 Cost is bounded by **time, not by budget**. Pay-as-you-go has no Azure spending limit, and a budget only sends email — it cannot stop anything. `deploy.yml` stamps a `deleteAfter` tag on the resource group and `teardown.yml` deletes the group once that date passes. Live deployment: resource group `stockportfolio-rg` in `polandcentral`, ~$1.26/day measured while the API still scaled to zero and higher from the first Phase 4 deploy onwards, API at `stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io`, SPA at `dilicidum.github.io/StockPortfolio`. Postgres Flexible B1ms and Azure Managed Redis Balanced B0 with HA off — **not** Azure Cache for Redis, which is retiring.
 
-The SPA and the API are on different origins and always will be, so the SSE endpoint uses a single-use 30-second ticket rather than a header. GitHub Pages needs `404.html` copied from `index.html` plus a Vite `base` and a matching router `basepath`.
+The SPA and the API are on different origins and always will be, so the alert hub authenticates from the query string rather than a header — which is SignalR's own answer to it, not ours. GitHub Pages needs `404.html` copied from `index.html` plus a Vite `base` and a matching router `basepath`.
 
 ## Deliberately not built
 
 These were considered and cut. Don't reintroduce them without asking.
 
-- **Alert replay** — no cursor, no `Last-Event-ID`, no 24h backfill. Req 9 asks for an event on breach, a background check, and a simulate button. History is a plain `GET`; the stream hook re-runs the query on reconnect.
+- **Alert replay** — no cursor, no message ids, no 24h backfill. Req 9 asks for an event on breach, a background check, and a simulate button. History is a plain `GET`; the hook re-runs that query from `onreconnected`, which is the whole of how the gap is closed.
 - **Watchlist** — «перелік акцій» in req 8 sits inside *dashboard settings*, so it means which of your holdings show on the dashboard. That is `is_visible` on `holdings`.
 - **A cached ticker table in MarketData** — the poll list is read live each cycle, from Alerts. Removing it also removed two event handlers, a reconciliation pass and a way for the two lists to disagree.
 - **Raw SQL** — see Conventions.
 - **Trading-hours gating** — dropped entirely. It existed to stop pointless polling outside market hours; the poller now only runs for tickers with an active alert, and the dashboard fetches on demand, so there is nothing to gate.
-- **WebSockets and SignalR** — SSE is the transport. The README carries the comparison; the UI badge says "Live (SSE)", never "WS Live".
+- **A hand-written alert stream** — server-sent events, a single-use connection ticket and a hand-rolled reconnect were all built and then deleted in favour of SignalR over WebSockets, which is what the brief lists. Roughly 450 lines of our code became about 60. Do not reintroduce any of it: the ticket, the heartbeat and the backoff table are all things the library does. The README carries the comparison; the UI badge says "Live (WebSocket)".

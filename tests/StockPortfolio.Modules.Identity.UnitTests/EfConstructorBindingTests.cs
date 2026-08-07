@@ -6,7 +6,6 @@ using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Proves EF Core can materialise the entities even though neither has a parameterless constructor.</summary>
 public sealed class EfConstructorBindingTests
 {
     private static IModel BuildModel()
@@ -19,26 +18,7 @@ public sealed class EfConstructorBindingTests
         return context.Model;
     }
 
-    [Fact]
-    public void User_HasNoParameterlessConstructor()
-    {
-        typeof(User).GetConstructors(
-                System.Reflection.BindingFlags.Instance
-                | System.Reflection.BindingFlags.Public
-                | System.Reflection.BindingFlags.NonPublic)
-            .ShouldNotContain(c => c.GetParameters().Length == 0);
-    }
-
-    [Fact]
-    public void RefreshToken_HasNoParameterlessConstructor()
-    {
-        typeof(RefreshToken).GetConstructors(
-                System.Reflection.BindingFlags.Instance
-                | System.Reflection.BindingFlags.Public
-                | System.Reflection.BindingFlags.NonPublic)
-            .ShouldNotContain(c => c.GetParameters().Length == 0);
-    }
-
+    // UserPreferences is the only entity this module still maps itself; User and RefreshToken are ASP.NET Core Identity's.
     [Fact]
     public void UserPreferences_HasNoParameterlessConstructor()
     {
@@ -50,8 +30,6 @@ public sealed class EfConstructorBindingTests
     }
 
     [Theory]
-    [InlineData(typeof(User))]
-    [InlineData(typeof(RefreshToken))]
     [InlineData(typeof(UserPreferences))]
     public void Entity_BindsItsAllArgsConstructor_ForMaterialisation(Type clrType)
     {
@@ -72,16 +50,15 @@ public sealed class EfConstructorBindingTests
     }
 
     [Fact]
-    public void User_BindsEveryMappedPropertyThroughTheConstructor()
+    public void UserPreferences_BindsEveryMappedPropertyThroughTheConstructor()
     {
-        var entityType = BuildModel().FindEntityType(typeof(User))!;
+        var entityType = BuildModel().FindEntityType(typeof(UserPreferences))!;
 
         var bound = entityType.ConstructorBinding!.ParameterBindings
             .SelectMany(p => p.ConsumedProperties)
             .Select(p => p.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        // Every scalar EF persists must arrive through the constructor; anything EF had to set afterwards.
         foreach (var property in entityType.GetProperties())
         {
             bound.ShouldContain(

@@ -4,13 +4,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>History is a plain GET — there is no replay, so this list is the whole of "what did I miss".</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AlertHistoryTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>An empty list, not a 404: the panel reads this on every dashboard mount.</summary>
     [Fact]
     public async Task History_ForAUserWithNoAlerts_IsAnEmptyList()
     {
@@ -20,7 +18,7 @@ public sealed class AlertHistoryTests(ApiFixture fixture)
         (await Wire.ListFiredAlertsAsync(client, token)).ShouldBeEmpty();
     }
 
-    /// <summary>The SPA calls /api/alerts with no trailing slash, and a group root is easy to map wrong.</summary>
+    // The SPA calls /api/alerts with no trailing slash, and a group root is easy to map wrong.
     [Fact]
     public async Task History_IsServedAtTheGroupRoot_WithoutATrailingSlash()
     {
@@ -36,7 +34,6 @@ public sealed class AlertHistoryTests(ApiFixture fixture)
                 + await Wire.Describe(response));
     }
 
-    /// <summary>A limit nobody could mean is clamped, not refused. An out-of-range list is still a list.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -49,7 +46,6 @@ public sealed class AlertHistoryTests(ApiFixture fixture)
         (await Wire.ListFiredAlertsAsync(client, token, limit)).ShouldBeEmpty();
     }
 
-    /// <summary>One user's alerts are their own; nothing else keeps them apart.</summary>
     [Fact]
     public async Task History_IsScopedToTheCaller()
     {

@@ -3,11 +3,12 @@
 Stock-portfolio tracker: live quotes, profit/loss, and threshold alerts pushed in real time.
 .NET 10 modular monolith + React 19 SPA, Postgres and Redis, all of it up with one command.
 
-> **Status: Phase 4 of 6.** Authentication, routing and session persistence (Phase 1); portfolio CRUD
+> **Status: Phase 5 of 6.** Authentication, routing and session persistence (Phase 1); portfolio CRUD
 > with create-or-merge (Phase 2); the live dashboard — real prices, totals, profit and loss, weights
-> and honest freshness stamps (Phase 3); and threshold alerts over SSE with the price poller behind
-> them (Phase 4) are done and green. Phases 1 to 3 are deployed; Phase 4 runs locally and has not been
-> deployed yet. See [docs/plan/00-overview.md](docs/plan/00-overview.md).
+> and honest freshness stamps (Phase 3); threshold alerts pushed over SignalR with the price poller behind
+> them (Phase 4); and the settings surface — theme, English and Ukrainian, refresh interval, per-position
+> visibility and a per-user market-data key encrypted at rest (Phase 5) are done and green. Phase 6 is
+> graceful failure, and is not built. See [docs/plan/00-overview.md](docs/plan/00-overview.md).
 
 ---
 
@@ -67,19 +68,20 @@ Then repeat steps 1 to 6 against the deployed site, watching that the alert conn
 four minutes — the hosting platform closes idle connections at four minutes and will not go higher,
 which is the whole reason the connection sends something every twenty seconds.
 
-Steps 7 to 9 need Phase 5, which is not built yet.
+All twelve steps run today. Phase 6 adds the stop-a-dependency cases to this list.
 
 ---
 
 ## Architecture
 
 Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each five projects, plus
-`Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator`. Thirty-two projects in all.
+`Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator`. Thirty-one projects in all, seven of them
+test projects.
 
-**MarketData has no database.** One `DbContext` and one Postgres schema per module is the rule, and
-this is the stated exception rather than an oversight: everything MarketData persists is a single
-Redis key per ticker, so an empty context would buy a zero-table migration and a history row for no
-behaviour. The `marketdata` schema exists and is empty until Phase 5's per-user API keys need it.
+**All four modules have a database.** One `DbContext` and one Postgres schema per module is the rule, and
+MarketData was the stated exception for three phases: everything it persisted was a Redis key per ticker, so
+an empty context would have bought a zero-table migration for no behaviour. Phase 5 ended that — the
+`marketdata` schema now holds the per-user provider keys and the key ring that encrypts them.
 
 ```
 .Api  ──▶ Application ──▶ Domain ──▶ Shared.Kernel
@@ -121,20 +123,24 @@ handler interface, a publisher and a `SaveChanges` interceptor were never writte
 dependency graph is three edges — `Portfolio → MarketData`, `Alerts → MarketData`, `Alerts → Portfolio` —
 nothing depends on Alerts, and nothing depends on Identity.
 
-**SSE, not WebSockets.** The brief lists WebSockets; the task-giver also said to use whatever we
-judge appropriate. Alerts are strictly server→client, one-way, low-frequency.
+**SignalR over WebSockets, which is what the brief lists.** This was built twice. The first version
+was hand-written server-sent events, chosen because alerts are strictly one-way and a full-duplex
+protocol buys a direction nothing uses. That reasoning was sound and the conclusion was still wrong:
+one-way is an argument about the *protocol*, and what it cost was our own code.
 
-| | SSE | WebSockets |
+| | Hand-written SSE | SignalR over WebSockets |
 |---|---|---|
-| Direction needed | server→client only ✅ | full duplex, unused |
-| Reconnect | automatic, in the browser | hand-rolled |
-| Transport | plain HTTP; proxies, CDNs and ACA ingress just work | needs upgrade support end to end |
-| Auth | no header on `EventSource` → ticket handshake | same problem |
-| Cost | one `text/event-stream` response | a second protocol to operate |
+| Matches the brief | no — a stated technology, missed | yes |
+| Fan-out across replicas | our Redis pub/sub, ~75 lines | `AddStackExchangeRedis(...)`, one line |
+| Auth without a header | our ticket: mint, store, redeem, 86 lines | `accessTokenFactory`, one line |
+| Reconnect | our backoff, our state machine | `withAutomaticReconnect([...])` |
+| Keeping the connection open | our 20-second `ping` frame | built in, about every 15s |
+| Sticky sessions | not needed | not needed, given WebSockets-only + `skipNegotiation` |
+| Readable with `curl` | yes | no |
 
-We took the trade knowingly. A grader reading the brief literally may score it as a miss;
-real-time is a P1 item, so it cannot fail the P0 gate either way. What that choice then forces — the
-ticket handshake and the heartbeat — is under [Alerts](#alerts).
+About 450 lines of ours became about 60. The one thing genuinely lost is that the wire is no longer
+plain text you can read in a terminal. What the choice still forces — where the credential travels,
+and which claim decides who a message is for — is under [Alerts](#alerts).
 
 **No raw SQL.** The brief permits raw SQL or a query builder and asks only for parameterisation.
 EF Core makes parameterisation structural rather than a discipline — and the claim is *proved*, not
@@ -143,9 +149,9 @@ asserted: a `DbCommandInterceptor` in the test fixture registers a user whose em
 
 **One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from
 `identity.users` fails with SQLSTATE `42501`. There is a test for exactly that, because a module
-boundary you cannot demonstrate is a diagram, not a boundary. Three roles are in use — `identity_svc`,
-`portfolio_svc` and `alerts_svc`. `marketdata_svc` and its schema are created and inert until Phase 5's
-per-user provider keys need them.
+boundary you cannot demonstrate is a diagram, not a boundary. All four roles are in use — `identity_svc`,
+`portfolio_svc`, `alerts_svc` and, since Phase 5, `marketdata_svc`, which sat created and inert until the
+per-user provider keys needed it.
 
 **Money is `decimal` server-side and serialised as strings.** `System.Text.Json` writes `decimal` as
 a JSON number and `JSON.parse` turns it into a double, which destroys the arithmetic at the
@@ -363,11 +369,11 @@ is sized against. The interval is a per-user preference, 60 seconds by default b
 cadence for a stock dashboard regardless of which provider answers it, not because of any one provider's
 quota. The interval control offers 15s / 30s / 60s / 5m and the faster options are the user's to spend.
 
-Two things bound the damage rather than fix it. Outbound calls go through a single process-wide token bucket
-(25 tokens, refilling at 1/second) with fan-out capped at 4 concurrent requests, so twenty tickers resolve in
-roughly 1.25 seconds at a peak of about 16 calls/second — comfortably under the 30/second burst cap, and the
-bucket cannot release more than 25 at once regardless. And a symbol the budget refuses simply falls back to
-its last known price, like any other failure.
+What bounds the damage is not a quota counter. There was one — a process-wide token bucket sized to this
+provider's free tier — and Phase 5 deleted it, because architecting around one provider's quota is exactly
+what the brief says not to do. What paces the calls now is the provider's own back-off delay being honoured,
+the circuit breaker, a fan-out capped at 4 concurrent requests, and per-ticker isolation. A symbol that comes
+back refused falls back to its last known price, like any other failure.
 
 ### Adding a holding checks the symbol exists, and fails open
 
@@ -471,35 +477,37 @@ Friday-close-to-Monday-open gap is not a sharp move. And a stale feed suppresses
 because no new data must never read as "nothing moved". The cooldown is per user *and* ticker *and*
 direction, so a drawdown cooldown does not mask the run-up that follows it.
 
-### A one-way stream, not WebSockets
+### The push, and the two settings that make it work
 
-Alerts only ever travel server to browser, a few times an hour. The full comparison is in the table
-under [Decisions worth defending](#decisions-worth-defending); the short version is that a full-duplex
-protocol buys a direction nothing uses and costs a second protocol to operate, upgrade support in every
-proxy between here and the browser, and a hand-rolled reconnect. The shell badge says **"Live (SSE)"**,
-never "WS Live", because claiming a transport the code does not use is a self-inflicted wound.
+Alerts travel server to browser, a few times an hour, over a SignalR hub at `/api/alerts/stream`. The
+comparison with the hand-written version it replaced is under
+[Decisions worth defending](#decisions-worth-defending). The shell badge says **"Live (WebSocket)"**,
+because claiming a transport the code does not use is a self-inflicted wound.
 
-Two consequences follow from that choice and neither is optional.
+Three things about it are ours rather than the library's, and each fails silently if it is wrong.
 
-**A ticket handshake.** The browser's `EventSource` client cannot set an `Authorization` header, and the
-SPA and the API sit on different origins permanently, so a cross-origin cookie is not dependable either
-— Safari blocks third-party cookies outright. So the page asks an authenticated endpoint for a ticket,
-and opens the stream with it in the query string. The ticket is 32 random bytes, lives thirty seconds,
-and is read and deleted in a single Redis operation — a read followed by a delete would let two
-connections redeem the same one. A long-lived token in a URL ends up in access logs, browser history and
-proxy logs; a spent thirty-second ticket does not, meaningfully.
+**WebSockets only, and no negotiation.** These are one decision, not two. The Redis backplane normally
+requires a browser to keep reaching the replica it first connected to — sticky sessions. The documented
+exemption needs *both* WebSockets as the only transport *and* skipping SignalR's negotiate round trip.
+Allow a fallback transport and the requirement comes back without anything saying so: alerts then arrive
+for some users and not others, only with more than one replica, only in production.
 
-The price of header-less authentication is that the browser's free reconnect cannot be used: by the time
-it retries, the ticket in the URL is spent. So a dropped connection is closed deliberately, a fresh
-ticket fetched, and a new connection opened with backoff.
+**The credential travels in the URL.** A browser cannot put an `Authorization` header on this kind of
+connection, and the SPA and the API sit on different origins permanently, so a cross-origin cookie is
+not dependable either — Safari blocks third-party cookies outright. SignalR's answer is to send the
+access token as a query parameter, and the server reads it back from there. That read is scoped to the
+hub's path: without the check, every route in the app would accept a credential in its URL, and every
+access log would hold one. The browser refreshes the token inside the factory SignalR calls before each
+attempt, because a reconnect after a long outage would otherwise present an expired one for ever.
 
-**A twenty-second heartbeat.** Azure Container Apps closes an idle request after **four minutes**, and
-four minutes is both the default and the floor on Consumption — raising it means a plan that costs more
-than the rest of the stack put together. So the stream sends something every twenty seconds. The .NET
-SSE writer has no comment mechanism, so the heartbeat is a real named `ping` event that the client
-ignores; a named event with no listener is dropped by `EventSource` before it reaches any code, which is
-what makes it free. The alert frame is named too — an unnamed frame arrives as `message` and a client
-listening for `alert` never sees it.
+**One claim decides who a message is for.** `Clients.User(...)` asks a provider for the id, and the
+built-in provider reads a claim these tokens do not carry. With the wrong one, every alert is delivered
+to nobody — no exception, no log line, nothing on screen. A test pins both that our provider is
+registered and that it names the same claim the tokens are issued with.
+
+Staying connected is no longer our problem. Azure Container Apps closes an idle request after four
+minutes, and four is both the default and the floor on Consumption; SignalR's own keepalive runs about
+every fifteen seconds, so the hand-written heartbeat that used to exist here is gone.
 
 Fan-out across replicas is mandatory rather than an optimisation. An alert can be produced on one
 replica while the user's stream is held by another, so every replica subscribes to a Redis channel per
@@ -648,10 +656,11 @@ spending limit and a budget only emails, so the deploy stamps a `deleteAfter` ta
 group and a scheduled workflow deletes the whole group once that date passes. Deploying extends the
 window; not deploying lets it expire.
 
-The SPA and the API sit on different origins and always will, which drives three things, and all three
-are now built: an explicit CORS policy in exactly one layer, a ticket handshake for SSE (because
-`EventSource` cannot set headers), and a 20-second heartbeat, since ACA's `requestIdleTimeout` is 4
-minutes and 4 is also the floor on Consumption.
+The SPA and the API sit on different origins and always will, which drives two things, and both are
+now built: an explicit CORS policy in exactly one layer that allows credentials, and the alert hub
+authenticating from the query string, because no browser can put a header on that connection. ACA's
+`requestIdleTimeout` is 4 minutes and 4 is also the floor on Consumption; SignalR's keepalive covers it
+without anything of ours running.
 
 **The API no longer scales to zero.** `minReplicas` is 1, because the quote poller has to run between
 requests and a sleeping replica evaluates nothing. That removes the cold start on the first request of a
@@ -662,11 +671,11 @@ entire life, so at 100 a few dozen connected browsers would scale on user count 
 
 Every connection string carries `Maximum Pool Size=2`: B1ms allows 35 user connections, and a
 different username is a different Npgsql pool. What matters is **what opens a pool, not what is
-defined**. The database creates five roles and four schemas, but the API registers exactly three
-`DbContext`s (Identity, Portfolio and Alerts), so there are **three pools per replica**: 2 replicas × 3
-pools × 2 = **12**, leaving 23 spare. MarketData has no database and opens nothing; `migrator` runs as a
-separate job, not alongside the API. The Npgsql default of 100 would ask for 600. Count `AddDbContext`
-calls rather than roles — this arithmetic has been published wrong before.
+defined**. The database creates five roles and four schemas, and the API registers exactly four
+`DbContext`s — Identity, Portfolio, Alerts and, since Phase 5, MarketData — so there are **four pools per
+replica**: 2 replicas × 4 pools × 2 = **16**, leaving 19 spare. `migrator` runs as a separate job, not
+alongside the API. The Npgsql default of 100 would ask for 800. Count `AddDbContext` calls rather than
+roles — this arithmetic has been published wrong before.
 
 ---
 
@@ -674,14 +683,14 @@ calls rather than roles — this arithmetic has been published wrong before.
 
 Stated plainly rather than left for you to find.
 
-- **Phase 4 is not deployed.** It is green locally and in CI. The two conditions that can only be
-  checked against the public URL — an alert arriving from the deployed API, and a stream still alive
-  after four minutes there — are unproven.
+- **Phase 5 is not deployed.** It is green locally and in CI. What can only be checked against the
+  public URL is unproven there — an alert arriving from the deployed API, a stream still alive after
+  four minutes, and a saved provider key still readable after a redeploy.
 - **`what-if` has never been read by a human.** `az` is not installed on the development machine.
   `ci.yml`'s **Bicep build** job compiles the templates and `deploy.yml` runs `what-if` in the runner
-  immediately before deploying, so both run — nobody has compared the output by eye. Phase 3 changed
-  zero lines of Bicep; Phase 4 is the first phase since Phase 1 that changes any, which makes it the
-  first one where reading that output would actually tell you something.
+  immediately before deploying, so both run — nobody has compared the output by eye. Phase 6 adds a
+  third probe and removes dead parameters, so it is a phase where reading that output would actually
+  tell you something.
 - **The free tier is a ceiling, and nothing in the app models it any more.** The client-side token
   bucket that used to pace calls at sixty a minute was removed in Phase 5: it was sized to one
   provider's free plan and the brief says free-tier limits are not a problem here. What survives is
@@ -691,10 +700,11 @@ Stated plainly rather than left for you to find.
   open the breaker for everybody.
 - **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
   `TODO`. They work and are exercised by tests; they have not been signed off.
-- **The readiness probe checks one database role of four.** It opens the Identity connection and
-  registers under the unqualified name `postgres`, so `portfolio_svc`, `alerts_svc` or
-  `marketdata_svc` could be unreachable while readiness still reports healthy and traffic keeps
-  arriving. Tracked in [docs/deferred-work.md](docs/deferred-work.md) as **C7**.
+- **Readiness treats a cache outage as an inability to serve traffic.** All four database logins are
+  probed now, each under its own name, which is what closed **C7**. Redis is probed beside them and
+  reports the same way, so Redis being down answers 503 on `/health/ready` and the platform withdraws
+  every replica — turning "alerts are suppressed" into "the API is unreachable". The cache should
+  report *degraded*, which keeps a container serving. Phase 6 owns it.
 - **The portfolio table has no price or profit/loss columns.** Those live on the dashboard, which is
   the screen that fetches prices. This is a decision, not an omission: adding them to the holdings
   table would make a CRUD screen pay the provider fan-out on every render.

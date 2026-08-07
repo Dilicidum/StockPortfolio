@@ -1,6 +1,5 @@
 namespace StockPortfolio.Modules.MarketData.Domain;
 
-/// <summary>One row of the Data Protection key ring. The framework owns the format; this owns the bytes.</summary>
 public sealed class KeyRingEntry
 {
     private KeyRingEntry(Guid id, string friendlyName, string xml)

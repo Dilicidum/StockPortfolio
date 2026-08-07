@@ -4,41 +4,31 @@ using System.Reflection;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Discovery and reference-graph helpers shared by the architecture rules.</summary>
 internal static class SolutionAssemblies
 {
     private const string ModulePrefix = "StockPortfolio.Modules.";
 
-    /// <summary>The one layer of a module every other module is allowed to see.</summary>
     public const string ContractsLayer = "Contracts";
 
-    /// <summary>The four modules of the monolith.</summary>
     public static ImmutableArray<string> ModuleNames { get; } =
         ["Alerts", "Identity", "Portfolio", "MarketData"];
 
-    /// <summary>The five projects each module is built from, innermost first.</summary>
     public static ImmutableArray<string> LayerNames { get; } =
         [ContractsLayer, "Domain", "Application", "Infrastructure", "Api"];
 
-    /// <summary>The assemblies that must exist for the rules below to mean anything.</summary>
     public static ImmutableArray<string> ExpectedNames { get; } = BuildExpectedNames();
 
-    /// <summary>Everything the rules run over: ExpectedNames plus any other first-party assembly that turns up next.</summary>
     public static ImmutableArray<string> ScannedNames { get; } = BuildScannedNames();
 
-    /// <summary>Composes the assembly name of one module layer.</summary>
     public static string NameOf(string module, string layer) => ModulePrefix + module + "." + layer;
 
-    /// <summary>Loads an assembly by simple name, throwing if it is not there.</summary>
     public static Assembly Get(string simpleName) => Assembly.Load(new AssemblyName(simpleName));
 
-    /// <summary>Reports whether an assembly name belongs to this solution.</summary>
     public static bool IsFirstParty([NotNullWhen(true)] string? name) =>
         name is not null
         && name.StartsWith("StockPortfolio.", StringComparison.Ordinal)
         && !name.EndsWith(".Tests", StringComparison.Ordinal);
 
-    /// <summary>Splits a module assembly name into its module and layer.</summary>
     public static bool TryParseModuleLayer(
         string? assemblyName,
         [NotNullWhen(true)] out string? module,
@@ -66,7 +56,6 @@ internal static class SolutionAssemblies
             && LayerNames.Contains(layer, StringComparer.Ordinal);
     }
 
-    /// <summary>Reports whether a namespace sits under some module's .Domain.</summary>
     public static bool IsDomainNamespace(string? ns)
     {
         if (ns is null || !ns.StartsWith(ModulePrefix, StringComparison.Ordinal))
@@ -88,12 +77,12 @@ internal static class SolutionAssemblies
             || afterModule.StartsWith("Domain.", StringComparison.Ordinal);
     }
 
-    /// <summary>Reports whether an assembly holds no code of ours yet — an empty shell project.</summary>
     public static bool IsEmptyShell(Assembly assembly) =>
         !assembly.GetTypes().Any(type =>
             type.Namespace?.StartsWith("StockPortfolio", StringComparison.Ordinal) == true);
 
-    /// <summary>Walks the first-party reference graph from rootName and returns the shortest reference path to an.</summary>
+    public static bool HasCode(string simpleName) => !IsEmptyShell(Get(simpleName));
+
     public static string? FindForbiddenReferencePath(string rootName, Func<string, bool> isForbidden)
     {
         ArgumentNullException.ThrowIfNull(isForbidden);

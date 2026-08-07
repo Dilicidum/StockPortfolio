@@ -31,7 +31,6 @@
     "suggestionsFor": "{{label}} suggestions"
   },
   "loading": "Loading",
-  "emptyTableFallback": "Nothing here yet.",
   "splashLabel": "Restoring session",
   "fallbackError": "Something went wrong. Please try again.",
   "requestFailed": "Request failed."

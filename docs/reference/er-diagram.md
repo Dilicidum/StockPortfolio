@@ -216,8 +216,7 @@ That risk profile is what licenses a different store.
 | `marketdata:claim:{cycle}` | string | decides *who* polls this cycle | expires shortly after the cycle |
 | `marketdata:cycle-inflight` | string | decides *whether* any cycle is running | expires, and is deleted when the cycle ends |
 | `alerts:cooldown:{user}:{ticker}:{direction}` | string | present means suppressed | expires after the user's cooldown |
-| `alerts:ticket:{ticket}` | string | who a live-stream ticket belongs to | expires in thirty seconds, deleted on first use |
-| `alerts:user:{user}` | channel | fired alerts, fanned out to whichever copy holds the stream | — |
+| `stockportfolio:signalr:*` | channels | fired alerts, fanned out to whichever copy holds the browser's connection. Written and read by the real-time library, not by this application | — |
 
 **All eight exist.** The first two shipped with the dashboard; the rest arrived with alerting.
 

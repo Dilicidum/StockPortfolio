@@ -10,18 +10,14 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 
-/// <summary>The live provider. Fetches and returns; recording what was fetched belongs to QuoteReader.</summary>
 internal sealed partial class FinnhubQuoteProvider(
     HttpClient client,
     IHttpClientFactory httpClientFactory,
     TimeProvider clock,
     ILogger<FinnhubQuoteProvider> logger) : IQuoteProvider
 {
-    /// <summary>Four in flight, to bound sockets rather than to pace requests — that is Finnhub's job now.</summary>
     private const int MaxDegreeOfParallelism = 4;
 
-    /// <summary>The second named client MarketDataModule registers, so a revoked user key trips a breaker
-    /// that is theirs alone rather than the one every dashboard and the poller share.</summary>
     internal const string ByokClientName = "FinnhubByok";
 
     public string Name => "Finnhub";
@@ -55,14 +51,10 @@ internal sealed partial class FinnhubQuoteProvider(
         return [.. quotes];
     }
 
-    /// <summary>Existence by exact symbol match on /search, never off a quote body — see the comment inside.</summary>
     public async Task<bool> SymbolExistsAsync(Ticker ticker, CancellationToken ct)
     {
         try
         {
-            // /quote answers c:0 for a symbol that does not exist AND for a healthy one Finnhub blipped
-            // on, so it cannot tell the two apart and would answer "known" to everything. /search can,
-            // and null still means the provider could not answer, so an outage never rejects a purchase.
             return await SearchAsync(ticker.Value, ct) is not { } matches || matches.Contains(ticker.Value);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -72,13 +64,10 @@ internal sealed partial class FinnhubQuoteProvider(
         }
     }
 
-    /// <summary>The same /search call the existence check makes, keeping the names instead of discarding them.</summary>
     public async Task<IReadOnlyList<SymbolMatch>> SearchSymbolsAsync(string query, CancellationToken ct)
     {
         try
         {
-            // Empty rather than a throw on every failure below: search is a convenience over a field that
-            // still accepts a typed symbol, so an outage must degrade to no suggestions and nothing else.
             return await SearchAsync(query, ct) is { } response ? response.Suggestions() : [];
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -88,21 +77,15 @@ internal sealed partial class FinnhubQuoteProvider(
         }
     }
 
-    /// <summary>Checks a CANDIDATE key, never the app's own. Unlike every method above, this does not
-    /// fail open: a timeout, a 5xx or an open circuit is Unknown, never Accepted.</summary>
+    /// <summary>Checks a CANDIDATE key. Unlike every method above this does not fail open: unanswerable is never Accepted.</summary>
     public async Task<KeyVerdict> VerifyKeyAsync(string apiKey, CancellationToken ct)
     {
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, new Uri("search?q=AAPL", UriKind.Relative));
 
-            // Overrides the client's default X-Finnhub-Token for this one request: HttpClient only
-            // copies a default header onto the outgoing request when the request has not already set it.
             request.Headers.Add("X-Finnhub-Token", apiKey);
 
-            // The BYOK client, not the shared one: a candidate key must not trip the breaker every
-            // dashboard and the poller share, and must not be told the provider is unreachable because
-            // that unrelated breaker happens to be open.
             using var response = await httpClientFactory.CreateClient(ByokClientName).SendAsync(request, ct);
 
             if (response.IsSuccessStatusCode)
@@ -125,14 +108,11 @@ internal sealed partial class FinnhubQuoteProvider(
         }
     }
 
-    /// <summary>401 and 403 carry the same body and mean the same thing here; neither is ever retried.</summary>
     internal static bool IsUnauthorised(HttpStatusCode status) =>
         status is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden;
 
     private async Task<Quote?> FetchOneAsync(Ticker ticker, string? apiKeyOverride, CancellationToken ct)
     {
-        // ObservedAt is when this app fetched, never Finnhub's t: t freezes at Friday's close, which would
-        // render every weekend dashboard amber while the provider is perfectly healthy.
         return await GetQuoteAsync(ticker, apiKeyOverride, ct) is { Price: { } price }
             ? new Quote(ticker, price, clock.GetUtcNow())
             : null;
@@ -144,8 +124,6 @@ internal sealed partial class FinnhubQuoteProvider(
 
         using var request = new HttpRequestMessage(HttpMethod.Get, new Uri(path, UriKind.Relative));
 
-        // A header on the request wins over the client's default, so the key travels per request rather
-        // than per client — and the client itself is a separate one, so a revoked key trips its own breaker.
         if (apiKeyOverride is not null)
         {
             request.Headers.Add("X-Finnhub-Token", apiKeyOverride);

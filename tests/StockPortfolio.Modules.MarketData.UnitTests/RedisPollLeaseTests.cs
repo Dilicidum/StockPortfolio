@@ -16,8 +16,6 @@ public sealed class RedisPollLeaseTests
     [Fact]
     public void ClaimKey_IsOneKeyPerCycle()
     {
-        // The whole point of this key: two replicas that wake in the same cycle must compute the same
-        // string, and the same replica a cycle later must not.
         RedisPollLease.ClaimKey(Utc.AddSeconds(18), Minute).ShouldBe(RedisPollLease.ClaimKey(Utc, Minute));
         RedisPollLease.ClaimKey(Utc.AddMinutes(1), Minute).ShouldNotBe(RedisPollLease.ClaimKey(Utc, Minute));
     }
@@ -25,10 +23,7 @@ public sealed class RedisPollLeaseTests
     [Fact]
     public void ClaimKey_IsNamedByTheIntervalNotTheCalendarMinute()
     {
-        // The bug this replaces: the key was named by the minute while its lifetime was interval * 2, so
-        // at any interval under 30s the claim expired INSIDE the minute it named and a second replica
-        // could claim that same minute - losing the one guarantee the key exists to give. Two instants
-        // 18s apart are one cycle at a 60s interval and different cycles at a 15s one.
+        // Named by the calendar minute, a claim living under 30s expires inside the minute it names and a second replica claims it.
         var fifteen = TimeSpan.FromSeconds(15);
 
         RedisPollLease.ClaimKey(Utc.AddSeconds(18), fifteen)
@@ -38,8 +33,7 @@ public sealed class RedisPollLeaseTests
     [Fact]
     public void ClaimKey_IsTheSameInstantEverywhere_NotTheLocalClockFace()
     {
-        // Same instant, written with a +05:00 offset. A key built off the local clock face would let a
-        // replica in another zone claim its own cycle and both would poll.
+        // A key built off the local clock face would let a replica in another zone claim its own cycle, and both would poll.
         RedisPollLease.ClaimKey(Utc.ToOffset(TimeSpan.FromHours(5)), Minute)
             .ShouldBe(RedisPollLease.ClaimKey(Utc, Minute));
     }
@@ -52,8 +46,7 @@ public sealed class RedisPollLeaseTests
         var lease = new RedisPollLease(
             multiplexer, Options(), NullLogger<RedisPollLease>.Instance);
 
-        // False, not a throw and not true: an unreachable Redis has nowhere to put a sample, so running the
-        // cycle anyway would burn provider budget for nothing.
+        // False, not a throw and not true: an unreachable Redis has nowhere to put a sample, so the cycle must not run.
         (await lease.TryAcquireAsync(Utc, TestContext.Current.CancellationToken)).ShouldBeFalse();
 
         await Should.NotThrowAsync(() => lease.ReleaseAsync(TestContext.Current.CancellationToken));

@@ -17,7 +17,6 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure;
 
-/// <summary>Handler registrations, kept out of PortfolioModule so the public seam stays one method.</summary>
 internal static class DependencyInjection
 {
     internal static IServiceCollection AddPortfolioHandlers(this IServiceCollection services)

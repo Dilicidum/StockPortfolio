@@ -23,35 +23,12 @@ import { EditHoldingForm, type EditHoldingValues } from '../../portfolio/EditHol
 import { holdingsQuery, type Holding } from '../../portfolio/holdingsApi'
 import { useAddHolding, useRemoveHolding, useUpdateHolding } from '../../portfolio/useHoldingMutations'
 
-/**
- * THE FIRST LOADER IN THE APPLICATION, and deliberately so.
- *
- * Holdings are the page — there is nothing worth rendering without them, so the
- * router waits and the component below can use `useSuspenseQuery` and never see
- * an `undefined`. Phase 3's quotes are the opposite case and must NOT get a
- * loader: a slow provider would then hold the whole route hostage.
- *
- * `queryClient` comes from router context, never the module singleton, or the
- * memory routers the tests build would warm a different cache than the one the
- * component reads.
- */
 export const Route = createFileRoute('/_authenticated/portfolio')({
   loader: ({ context: { queryClient } }) => queryClient.ensureQueryData(holdingsQuery),
   component: PortfolioPage,
   errorComponent: PortfolioError,
 })
 
-/**
- * ROUTE-LEVEL, not a router-wide `defaultErrorComponent`. A router-wide default also
- * covers /login and /register, which are not inside `AppShell` — so it could not render
- * the shell, which is the whole point of having one here.
- *
- * Without it, `useSuspenseQuery` (`throwOnError` defaults to true) hands any holdings
- * rejection to TanStack Router's built-in "Something went wrong!" panel: no shell, no
- * nav, no retry. The `invalidateQueries` in every mutation's `onSettled` reaches it
- * too, so a failed mutation could tear the page down a moment after the optimistic
- * rollback had repaired it.
- */
 function PortfolioError({ error }: ErrorComponentProps) {
   const router = useRouter()
   const { t } = useTranslation(['portfolio', 'common'])
@@ -62,8 +39,6 @@ function PortfolioError({ error }: ErrorComponentProps) {
         {error.message || t('error.fallback')}
       </Alert>
 
-      {/* `router.invalidate()` re-runs the loader, which re-runs `ensureQueryData`
-          against a query that holds an error and no data — so it refetches. */}
       <div className="sm:max-w-[200px]">
         <Button onClick={() => void router.invalidate()}>{t('common:actions.tryAgain')}</Button>
       </div>
@@ -71,48 +46,18 @@ function PortfolioError({ error }: ErrorComponentProps) {
   )
 }
 
-/**
- * zod v4 spelling: `z.string()` / `z.coerce.number()` at the top level, not the v3
- * `z.string().email()` chain. Every message is a KEY rather than a sentence, so
- * phase 5's i18n can translate it without editing a validation rule; until then the
- * key itself is what shows, which is ugly and honest rather than pretty and wrong.
- *
- * The regex mirrors `Ticker`'s `^[A-Z]{1,5}$` on the server but accepts lower case,
- * because the server canonicalises. This copy saves a round trip; it is not the
- * authority, and where the two disagree the server's 400 lands under the field.
- */
 const addHoldingSchema = z.object({
   ticker: z.string().regex(/^[A-Za-z]{1,5}$/, 'errors.ticker.format'),
   quantity: z.coerce.number().positive('errors.quantity.positive'),
   price: z.coerce.number().positive('errors.price.positive'),
 })
 
-/** What the inputs hold (strings off the DOM) versus what the schema hands the submit (numbers). */
 type AddHoldingInput = z.input<typeof addHoldingSchema>
 type AddHoldingValues = z.output<typeof addHoldingSchema>
 
-/**
- * Invested is summed from the server's own per-row figures, never recomputed from
- * quantity x price. The server rounds the average to 6dp on store; multiplying a
- * rounded average in float64 here would disagree with it, and a totals row is exactly
- * where such a disagreement accumulates until someone notices it on a screenshot.
- *
- * `Number(...)` on a money string is a float, and that is acceptable ONLY because this
- * value is displayed and then thrown away. It must never be sent back or compared.
- *
- * DEFERRED, not overlooked — this is the `CLAUDE.md` "never compute money in the
- * browser" breach, carried one more phase. Phase 3's server-computed equivalent is
- * `GetDashboardResult.totals.cost`, and the only way to reach it is `/api/dashboard`,
- * which fans out one provider HTTP call per position against a 60-calls-per-minute
- * budget. Spending that budget from a page that shows no prices is a worse trade than
- * the breach. The real fix is a cost total on `GET /api/holdings`' own response, which
- * no phase has scheduled yet.
- */
 function totalInvested(holdings: Holding[]): string {
   const total = holdings.reduce((sum, holding) => sum + Number(holding.invested.amount), 0)
 
-  // `i18n.language`, not `undefined` ("browser default") — same reasoning as
-  // `lib/format.ts`'s `formatMoney`, which this figure deliberately does not go through.
   return total.toLocaleString(i18n.language, {
     style: 'currency',
     currency: holdings[0]?.invested.currency ?? 'USD',
@@ -128,13 +73,6 @@ export function PortfolioPage() {
   const update = useUpdateHolding()
   const remove = useRemoveHolding()
 
-  /*
-   * PLAIN `useQuery`, NOT a loader and not `useSuspenseQuery`. Thresholds are a decoration
-   * on this page: a position is still addable, correctable and removable with the alerts
-   * module completely down, so a failure here must not reach the route's error component
-   * and replace the whole table. `data ?? []` is the degraded state, and it is the same
-   * page minus one button label.
-   */
   const { data: alertSettings } = useQuery(alertSettingsQuery)
 
   const saveAlert = useMutation({
@@ -148,7 +86,6 @@ export function PortfolioPage() {
   const [editing, setEditing] = useState<Holding | null>(null)
   const [alerting, setAlerting] = useState<Holding | null>(null)
 
-  // The Edit or Alert button that opened the panel, so focus can go back to it on close.
   const editOpenerRef = useRef<HTMLElement | null>(null)
 
   const settingFor = (ticker: string) =>
@@ -175,8 +112,6 @@ export function PortfolioPage() {
       if (result.merged) setMerged(result.holding)
       reset()
     } catch (error) {
-      // A 400's field errors land under their fields; anything else (409, 500)
-      // becomes the banner, exactly as login.tsx does it.
       setFormError(applyServerErrors(error, setError, ['ticker', 'quantity', 'price']))
     }
   })
@@ -190,16 +125,12 @@ export function PortfolioPage() {
 
   function closeEditor() {
     setEditing(null)
-    // Focus is inside a form that is about to unmount. Hand it back to the Edit button
-    // that opened it, rather than letting the browser drop it on <body>.
     editOpenerRef.current?.focus()
   }
 
   function openAlerts(holding: Holding) {
     setFormError('')
     editOpenerRef.current = document.activeElement as HTMLElement | null
-    // One inline panel at a time: two forms sitting above the same table, both with a
-    // Save button, is a guess about which one a keyboard submit belongs to.
     setEditing(null)
     setAlerting(holding)
   }
@@ -209,7 +140,6 @@ export function PortfolioPage() {
     editOpenerRef.current?.focus()
   }
 
-  /** Rejects on failure, which is how `AlertSettingsForm` learns to place the server's errors. */
   async function saveThreshold(values: AlertSettingValues) {
     if (!alerting) return
 
@@ -218,7 +148,6 @@ export function PortfolioPage() {
     closeAlerts()
   }
 
-  /** Rejects on failure, which is how `EditHoldingForm` learns to place the server's errors. */
   async function saveCorrection(values: EditHoldingValues) {
     if (!editing) return
 
@@ -242,19 +171,12 @@ export function PortfolioPage() {
     },
     {
       header: t('positions.columns.actions'),
-      // `numeric` only for its right alignment; `font-sans` puts the word "Edit" back
-      // into the body face, because the monospace half of that flag is for figures.
       numeric: true,
       cell: (holding) => {
         const setting = settingFor(holding.ticker)
 
         return (
         <div className="flex items-center justify-end gap-1 font-sans">
-          {/*
-           * A threshold belongs to a POSITION, so the control that sets it lives on the
-           * row rather than on a settings screen. The label doubles as the current value:
-           * "5% / 15m" is the whole configuration, and there is nowhere else to read it.
-           */}
           <Button
             variant="ghost"
             size="sm"
@@ -275,8 +197,6 @@ export function PortfolioPage() {
           <Button
             variant="ghost"
             size="sm"
-            // Same shape as Remove below: the accessible name names the row, because
-            // "Edit" repeated once per position tells a screen-reader user nothing.
             aria-label={t('rowActions.editAria', { ticker: holding.ticker })}
             onClick={() => openEditor(holding)}
           >
@@ -285,8 +205,6 @@ export function PortfolioPage() {
           <Button
             variant="ghost"
             size="sm"
-            // The visible label is a glyph; the accessible name says which row it acts on,
-            // because "×" repeated once per position tells a screen-reader user nothing.
             aria-label={t('rowActions.removeAria', { ticker: holding.ticker })}
             onClick={() => setRemoving(holding)}
           >
@@ -302,11 +220,6 @@ export function PortfolioPage() {
     <AppShell title={t('title')} subtitle={t('subtitle')}>
       {formError ? <Alert tone="error">{formError}</Alert> : null}
 
-      {/*
-       * The phase's demo moment. Two buys of the same ticker collapse into one row at a
-       * weighted average, and a silent row update would hide the only interesting
-       * business rule in Phase 2. tone="success" renders role="status" (polite).
-       */}
       {merged ? (
         <Alert tone="success">
           {t('mergedNotice', {
@@ -320,12 +233,6 @@ export function PortfolioPage() {
       <Card title={t('addForm.title')}>
         <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {/*
-             * `Controller` rather than `register`, because the combobox has to be able to
-             * WRITE the field — picking "Apple Inc" has to put AAPL in the box — and a
-             * registered uncontrolled input can only be read. It also keeps a keystroke
-             * from re-rendering the positions table, which `watch('ticker')` would.
-             */}
             <Controller
               control={control}
               name="ticker"
@@ -361,12 +268,6 @@ export function PortfolioPage() {
             />
           </div>
 
-          {/*
-           * Disabled while pending. This is the whole client-side defence against the
-           * merge race: two identical POSTs both pass the server's "do you already hold
-           * this?" lookup, one wins the unique index and the other 500s, and a
-           * double-click is the only realistic way to produce two of them.
-           */}
           <div className="sm:max-w-[200px]">
             <Button type="submit" size="lg" disabled={add.isPending}>
               {add.isPending ? t('addForm.submitting') : t('addForm.submit')}
@@ -385,8 +286,6 @@ export function PortfolioPage() {
       >
         {alerting ? (
           <AlertSettingsForm
-            // Keyed on the row for react-hook-form's once-at-mount `defaultValues`, the
-            // same reason the edit form below is keyed.
             key={alerting.id}
             ticker={alerting.ticker}
             setting={settingFor(alerting.ticker)}
@@ -399,9 +298,6 @@ export function PortfolioPage() {
 
         {editing ? (
           <EditHoldingForm
-            // Keyed on the row: react-hook-form reads `defaultValues` once, at mount.
-            // Without the key, opening a second row while one is open would keep the
-            // first row's numbers in the fields.
             key={editing.id}
             holding={editing}
             pending={update.isPending}
@@ -411,8 +307,6 @@ export function PortfolioPage() {
           />
         ) : null}
 
-        {/* No price and no P&L columns on purpose: the dashboard owns them. Adding them here would
-            make a CRUD screen pay MarketData's one-call-per-position fan-out on every render. */}
         <Table
           caption={t('positions.caption')}
           columns={columns}
@@ -428,9 +322,6 @@ export function PortfolioPage() {
         body={removing ? t('removeDialog.body', { ticker: removing.ticker }) : ''}
         confirmLabel={t('removeDialog.confirm')}
         onCancel={() => setRemoving(null)}
-        // No `busy`: the removal is optimistic, so the row is already gone by the time
-        // the request is in flight. Holding a spinner over a table that has already
-        // updated would be a progress indicator for something the user can see finished.
         onConfirm={() => {
           const target = removing
           setRemoving(null)
@@ -438,10 +329,6 @@ export function PortfolioPage() {
 
           setFormError('')
 
-          // `mutate` never throws, so a failed DELETE used to be consumed entirely by
-          // the rollback: the row left, came back a second later, and nothing said why.
-          // That reads as a rendering glitch and invites a second click at a server
-          // that just failed. `mutateAsync` + catch is what the add path already does.
           void remove.mutateAsync(target.id).catch(() => {
             setFormError(t('removeDialog.failure', { ticker: target.ticker }))
           })

@@ -4,8 +4,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using StockPortfolio.Migrator;
 
-// Applies every module's EF migrations, connecting as the `migrator` role.
-
 var configuration = new ConfigurationBuilder()
     .AddEnvironmentVariables()
     .AddCommandLine(args)
@@ -20,7 +18,6 @@ if (string.IsNullOrWhiteSpace(migratorConnectionString))
     return 1;
 }
 
-// Each module binds its own connection string by name.
 var overrides = new Dictionary<string, string?>(StringComparer.Ordinal)
 {
     ["ConnectionStrings:Identity"] = migratorConnectionString,
@@ -36,8 +33,7 @@ var migratorConfiguration = new ConfigurationBuilder()
 
 var services = new ServiceCollection();
 
-// The list lives in MigratedModules, not here: the integration fixture migrates through that same
-// method, so dropping a module from it fails the test suite exactly as it fails docker compose up.
+// The list lives in MigratedModules because the integration fixture migrates through that same method.
 services.AddEveryMigratedModule(migratorConfiguration);
 
 var contextTypes = MigratedModules.DbContextTypesIn(services);

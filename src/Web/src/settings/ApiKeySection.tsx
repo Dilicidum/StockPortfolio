@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import type { TFunction } from 'i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
@@ -6,13 +7,12 @@ import { Button } from '../components/Button'
 import { Card } from '../components/Card'
 import { TextField } from '../components/TextField'
 import { ApiError } from '../lib/apiClient'
-import { fallbackMessage, useSaveState } from '../lib/useSaveState'
+import { fallbackMessage } from '../lib/formErrors'
+import { useSaveState } from '../lib/useSaveState'
 import { apiKeyStatusQuery, removeApiKey, saveApiKey, settingsKeys, type ApiKeyStatus } from './settingsApi'
 import { SaveButton } from './SaveButton'
 
-/** 400 and 503 stay different sentences — a refused key is not the same failure as a provider
- * that merely could not answer, and conflating them is the `c: 0` mistake all over again. */
-function messageFor(error: unknown, t: (key: string) => string): string {
+function messageFor(error: unknown, t: TFunction<['settings', 'common']>): string {
   if (error instanceof ApiError) {
     if (error.status === 400) return t('apiKey.rejectedMessage')
     if (error.status === 503) return t('apiKey.unavailableMessage')
@@ -46,10 +46,6 @@ export function ApiKeySection() {
     onError: (mutationError) => save.fail(messageFor(mutationError, t)),
   })
 
-  // GET /api/settings/api-key returns 404 when bring-your-own-key is switched off on this
-  // deployment. Without this check `data` merely stays undefined, `needsInput` reads as
-  // true, and a working-looking form renders for a feature that is not there — the person
-  // only finds out after typing a key and pressing Save.
   if (isError) {
     return (
       <Card title={t('apiKey.title')}>
@@ -58,7 +54,6 @@ export function ApiKeySection() {
     )
   }
 
-  // Reappears whenever no working key is on file: none was ever saved, or the one saved was refused.
   const needsInput = !data?.configured || data.rejected
 
   return (

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 
@@ -6,23 +7,20 @@ using StockPortfolio.Modules.Identity.Infrastructure.Persistence.Converters;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
-/// <summary>The Identity module's only DbContext.</summary>
-internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> options) : DbContext(options)
+internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> options)
+    : IdentityUserContext<AppUser, Guid>(options)
 {
-    /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "identity";
 
-    /// <summary>The migration history table name.</summary>
     internal const string MigrationsHistoryTableName = "__EFMigrationsHistory";
-
-    public DbSet<User> Users => Set<User>();
-
-    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        // First and not optional: this is what maps AspNetUsers and its three siblings.
+        base.OnModelCreating(modelBuilder);
+
         modelBuilder.HasDefaultSchema(SchemaName);
         modelBuilder.ApplyConfigurationsFromAssembly(
             typeof(IdentityDbContext).Assembly,
@@ -37,12 +35,6 @@ internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> opti
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        configurationBuilder.Properties<UserId>().HaveConversion<UserIdConverter>();
-        configurationBuilder.DefaultTypeMapping<UserId>().HasConversion<UserIdConverter>();
-
-        configurationBuilder.Properties<RefreshTokenId>().HaveConversion<RefreshTokenIdConverter>();
-        configurationBuilder.DefaultTypeMapping<RefreshTokenId>().HasConversion<RefreshTokenIdConverter>();
-
         configurationBuilder.Properties<ThemeChoice>().HaveConversion<ThemeChoiceConverter>();
         configurationBuilder.DefaultTypeMapping<ThemeChoice>().HasConversion<ThemeChoiceConverter>();
 

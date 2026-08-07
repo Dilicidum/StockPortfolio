@@ -1,24 +1,7 @@
 @import "tailwindcss";
 
-/*
- * Tailwind v4 has NO config file. There is no tailwind.config.js and no PostCSS
- * step — `@tailwindcss/vite` in vite.config.ts plus this @import is the whole
- * setup. Consequently `darkMode: 'class'` does not exist; the class strategy is
- * a @custom-variant declared here. Get this wrong and nothing errors: `dark:`
- * utilities are simply never generated.
- *
- * The theme is a server-persisted user setting, applied as data-theme on <html>
- * by the inline script in index.html before first paint. Two places key off it,
- * not one: this @custom-variant, and the palette block below.
- */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/*
- * Palette lifted from the design mock. Defined as plain CSS variables so both
- * schemes can be expressed, then exposed to Tailwind through `@theme inline`
- * (inline = "keep referencing the var, don't snapshot its value"), which is what
- * makes `bg-panel` follow the active scheme instead of freezing the dark value.
- */
 :root {
   --bg: #f5f5f3;
   --panel: #ffffff;
@@ -28,7 +11,6 @@
   --mu: #6c7280;
   --up: oklch(0.55 0.14 152);
   --dn: oklch(0.55 0.17 25);
-  /* Degraded, not failed — the amber a stale price wears, which `Alert` has no tone for. */
   --warn: oklch(0.62 0.15 75);
   --ac: oklch(0.55 0.13 252);
   --ac-soft: oklch(0.55 0.13 252 / 0.1);
@@ -78,11 +60,10 @@
     background-color: var(--bg);
     color: var(--tx);
     font-family: var(--font-sans);
-    font-size: 14px;
+    font-size: 0.875rem;
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Native controls only — the brief bans UI kits, so `select` stays a `select`. */
   input,
   button,
   select,
@@ -93,6 +74,16 @@
   :focus-visible {
     outline: 2px solid var(--ac);
     outline-offset: 2px;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 

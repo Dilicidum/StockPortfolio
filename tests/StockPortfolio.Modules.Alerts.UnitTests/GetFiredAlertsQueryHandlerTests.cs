@@ -9,7 +9,6 @@ using StockPortfolio.Tests.Fakes;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>The limit is a clamp, not a rule, and the row the panel renders is built here.</summary>
 public sealed class GetFiredAlertsQueryHandlerTests
 {
     private const int HistoryLimit = 50;
@@ -21,7 +20,6 @@ public sealed class GetFiredAlertsQueryHandlerTests
     private readonly FakeFiredAlertRepository _alerts;
     private readonly GetFiredAlertsQueryHandler _handler;
 
-    /// <summary>Creates the handler over an in-memory table.</summary>
     public GetFiredAlertsQueryHandlerTests()
     {
         _alerts = new FakeFiredAlertRepository(_journal);
@@ -36,7 +34,6 @@ public sealed class GetFiredAlertsQueryHandlerTests
                 TimeSpan.FromMinutes(3)));
     }
 
-    /// <summary>A limit over the server's ceiling comes back at the ceiling, not as a 400 and not as all of them.</summary>
     [Fact]
     public async Task ALimitOverTheCeiling_IsClampedToIt()
     {
@@ -49,7 +46,6 @@ public sealed class GetFiredAlertsQueryHandlerTests
         rows.Count.ShouldBe(HistoryLimit);
     }
 
-    /// <summary>Zero and negative are somebody asking badly for a list, so they get the smallest one.</summary>
     [Theory]
     [InlineData(0)]
     [InlineData(-7)]
@@ -64,7 +60,6 @@ public sealed class GetFiredAlertsQueryHandlerTests
         rows.Count.ShouldBe(1);
     }
 
-    /// <summary>The rendered row: two decimals on the percentages, and the sentence that names the comparison.</summary>
     [Fact]
     public async Task ARow_CarriesFormattedPercentagesAndTheReasonTheStreamWouldHavePushed()
     {

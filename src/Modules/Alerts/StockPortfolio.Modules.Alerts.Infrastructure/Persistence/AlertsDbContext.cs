@@ -6,13 +6,10 @@ using StockPortfolio.Modules.Alerts.Infrastructure.Persistence.Converters;
 
 namespace StockPortfolio.Modules.Alerts.Infrastructure.Persistence;
 
-/// <summary>The Alerts module's only DbContext.</summary>
 internal sealed class AlertsDbContext(DbContextOptions<AlertsDbContext> options) : DbContext(options)
 {
-    /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "alerts";
 
-    /// <summary>The migration history table name.</summary>
     internal const string MigrationsHistoryTableName = "__EFMigrationsHistory";
 
     public DbSet<AlertSetting> AlertSettings => Set<AlertSetting>();
@@ -35,10 +32,6 @@ internal sealed class AlertsDbContext(DbContextOptions<AlertsDbContext> options)
 
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
-        // Six converters, and every one is registered twice. DefaultTypeMapping is the line people miss:
-        // without it a value used anywhere but a mapped property - a LINQ closure, say - has no mapping
-        // and throws long after model building succeeded. Identity needs only the id half of this,
-        // because it has no value object that is not an id.
         configurationBuilder.Properties<AlertSettingId>().HaveConversion<AlertSettingIdConverter>();
         configurationBuilder.DefaultTypeMapping<AlertSettingId>().HasConversion<AlertSettingIdConverter>();
 

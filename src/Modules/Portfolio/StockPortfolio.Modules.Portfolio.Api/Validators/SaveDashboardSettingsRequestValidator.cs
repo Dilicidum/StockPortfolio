@@ -5,8 +5,6 @@ using StockPortfolio.Modules.Portfolio.Domain;
 
 namespace StockPortfolio.Modules.Portfolio.Api.Validators;
 
-// Shape rules for SaveDashboardSettingsRequest. The range is repeated from RefreshInterval only as a
-// fast edge rejection; RefreshInterval.Create is where the range actually lives.
 public sealed class SaveDashboardSettingsRequestValidator : AbstractValidator<SaveDashboardSettingsRequest>
 {
     public SaveDashboardSettingsRequestValidator()

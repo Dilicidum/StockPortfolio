@@ -5,15 +5,12 @@ using StockPortfolio.Modules.Portfolio.Domain;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence.Configurations;
 
-/// <summary>Maps Holding to portfolio.holdings.</summary>
 internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
 {
     internal const string TableName = "holdings";
 
-    /// <summary>The one real guarantee behind the merge rule: a C# check cannot survive two requests.</summary>
     internal const string UserTickerUniqueIndexName = "ix_holdings_user_id_ticker";
 
-    /// <summary>Fractional shares exist, so an average of $125.333333 must not round to $125.33.</summary>
     private const int MoneyPrecision = 18;
 
     private const int MoneyScale = 6;
@@ -26,7 +23,6 @@ internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
 
         builder.HasKey(h => h.Id);
 
-        // The domain generates a UUIDv7 in HoldingId.New(); the database must not touch it.
         builder.Property(h => h.Id)
             .HasColumnName("id")
             .ValueGeneratedNever();
@@ -45,10 +41,6 @@ internal sealed class HoldingConfiguration : IEntityTypeConfiguration<Holding>
             .HasPrecision(MoneyPrecision, MoneyScale)
             .IsRequired();
 
-        // ComplexProperty, not OwnsOne: an owned type is an entity type and carries identity, so
-        // assigning one Money instance to two properties throws on save. Complex types copy by value.
-        // Mapped member by member because Money's properties are get-only and are therefore not
-        // mapped by convention - a bare ComplexProperty(h => h.AveragePrice) fails at model build.
         builder.ComplexProperty(h => h.AveragePrice, price =>
         {
             price.Property(m => m.Amount)

@@ -1,48 +1,21 @@
 using FluentValidation;
+
 using StockPortfolio.Modules.Identity.Api.Requests;
 
 namespace StockPortfolio.Modules.Identity.Api.Validators;
 
-/// <summary>Shape rules for RegisterUserRequest — the only layer that can answer "is this even an email?".</summary>
 public sealed class RegisterUserRequestValidator : AbstractValidator<RegisterUserRequest>
 {
-    /// <summary>The shortest password accepted, in characters.</summary>
     public const int MinimumPasswordLength = 12;
 
-    /// <summary>The longest password accepted, in characters.</summary>
-    public const int MaximumPasswordLength = 128;
-
-    /// <summary>The longest email address accepted, in characters — the RFC 5321 path limit.</summary>
-    public const int MaximumEmailLength = 254;
-
-    /// <summary>Builds the rule set.</summary>
     public RegisterUserRequestValidator()
     {
-        // Cascade.Stop everywhere: an empty password should produce one actionable message, not "required".
-        RuleFor(request => request.Email)
-            .Cascade(CascadeMode.Stop)
-            .NotEmpty()
-            .WithMessage("Email is required.")
-            .MaximumLength(MaximumEmailLength)
-            .WithMessage("Email must be {MaxLength} characters or fewer.")
-            .EmailAddress()
-            .WithMessage("Email must look like name@example.com.");
+        RuleFor(request => request.Email).NotEmpty().EmailAddress().MaximumLength(256);
+
+        RuleFor(request => request.Password).NotEmpty().MinimumLength(MinimumPasswordLength);
 
         RuleFor(request => request.Password)
-            .Cascade(CascadeMode.Stop)
-            .NotEmpty()
-            .WithMessage("Password is required.")
-            .MinimumLength(MinimumPasswordLength)
-            .WithMessage(
-                "Password must be at least {MinLength} characters. Length beats punctuation — " +
-                "four ordinary words strung together is easier to remember and harder to crack.")
-            .MaximumLength(MaximumPasswordLength)
-            .WithMessage("Password must be {MaxLength} characters or fewer.");
-
-        // A cross-field rule - precisely what DataAnnotations cannot express.
-        RuleFor(request => request.Password)
-            .Must((request, password) => !string.Equals(password, request.Email, StringComparison.OrdinalIgnoreCase))
-            .WithMessage("Password must not be the same as your email address.")
-            .When(request => !string.IsNullOrEmpty(request.Password));
+            .NotEqual(request => request.Email)
+            .WithMessage("The password must not be the email address.");
     }
 }

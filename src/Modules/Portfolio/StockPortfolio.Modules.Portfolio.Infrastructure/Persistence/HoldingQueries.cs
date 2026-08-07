@@ -7,31 +7,21 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 
-/// <summary>The untracked reads: one another module needs, one the dashboard needs.</summary>
 internal sealed class HoldingQueries(PortfolioDbContext context) : IUserHoldsTicker, IDashboardHoldingReader
 {
-    /// <inheritdoc/>
-    public async Task<bool> HoldsAsync(Guid userId, string ticker, CancellationToken ct)
-    {
-        // Parsed rather than trusted: the argument crosses a module boundary as a bare string, and a
-        // symbol that is not a ticker at all is "not held", not an exception on a read.
-        if (!Ticker.Create(ticker).TryPickT0(out var parsed, out _))
-        {
-            return false;
-        }
+    public Task<bool> HoldsAsync(Guid userId, string ticker, CancellationToken ct) =>
+        Ticker.Create(ticker).Match(
+            parsed => HoldsAsync(userId, parsed, ct),
+            badTicker => Task.FromResult(false));
 
-        // AsNoTracking is correct here and only here: this is a read model nothing mutates. The
-        // repository must never gain it. No visibility filter either - a hidden position is still held.
-        return await context.Holdings
+    // No visibility filter: a hidden position is still held.
+    private Task<bool> HoldsAsync(Guid userId, Ticker parsed, CancellationToken ct) =>
+        context.Holdings
             .AsNoTracking()
             .AnyAsync(h => h.UserId == userId && h.Ticker == parsed, ct);
-    }
 
-    /// <inheritdoc/>
     public async Task<IReadOnlyList<HoldingRow>> GetVisibleHoldingsAsync(Guid userId, CancellationToken ct)
     {
-        // AveragePrice's MEMBERS, never AveragePrice itself: Money is rebuilt below, which also keeps
-        // its ToUpperInvariant off the materialiser. No Include here, and a .Select would ignore one.
         var rows = await context.Holdings
             .AsNoTracking()
             .Where(h => h.UserId == userId && h.IsVisible)
@@ -54,7 +44,6 @@ internal sealed class HoldingQueries(PortfolioDbContext context) : IUserHoldsTic
         ];
     }
 
-    /// <summary>What the query materialises: converter-backed ids and scalars, no complex type.</summary>
     private sealed record Projected(
         HoldingId Id,
         Ticker Ticker,

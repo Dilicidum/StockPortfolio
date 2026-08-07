@@ -1,6 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
 
-// CA1716 flags the `Shared` segment because it is a Visual Basic keyword.
 [assembly: SuppressMessage(
     "Naming",
     "CA1716:Identifiers should not match keywords",

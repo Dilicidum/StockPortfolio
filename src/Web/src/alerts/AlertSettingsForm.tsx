@@ -8,18 +8,6 @@ import { TextField } from '../components/TextField'
 import { applyServerErrors, translateFieldError } from '../lib/formErrors'
 import type { AlertSetting } from './alertsApi'
 
-/**
- * A threshold belongs to a POSITION, not to an account — one per user and ticker — so this
- * form is opened from a row on the portfolio page rather than sitting on a settings screen.
- *
- * NO COMPONENT LIBRARY. The window is a native `<select>` and the on/off is an
- * `<input type="checkbox" role="switch">`; the brief bans UI kits and both of those already
- * carry the keyboard behaviour, the focus ring and the accessible state that a hand-rolled
- * div would have to reimplement badly.
- *
- * The message keys match the two other forms, so phase 5's i18n has one place to translate
- * from rather than three.
- */
 const alertSettingSchema = z.object({
   thresholdPercent: z.coerce
     .number()
@@ -29,17 +17,9 @@ const alertSettingSchema = z.object({
   enabled: z.boolean(),
 })
 
-/** What the inputs hold (strings off the DOM) versus what the schema hands the submit. */
 type AlertSettingInput = z.input<typeof alertSettingSchema>
 export type AlertSettingValues = z.output<typeof alertSettingSchema>
 
-/**
- * Capped at an hour, matching the server's `Alerts:MaxWindowMinutes`. "Moved sharply" is a
- * minutes-to-an-hour idea; a move over days is a trend, which is a different product. The
- * server rejects an over-cap window with a 409 naming both numbers, so this list is a
- * convenience rather than the rule — which is why the offered values are a plain array and
- * not derived from anything.
- */
 const WINDOWS = [5, 15, 30, 60]
 
 const DEFAULT_THRESHOLD = 5
@@ -47,10 +27,8 @@ const DEFAULT_WINDOW = 15
 
 export interface AlertSettingsFormProps {
   ticker: string
-  /** The threshold already stored for this position, if there is one. */
   setting?: AlertSetting | undefined
   pending: boolean
-  /** Rejects with the API error: field errors land under their fields, the rest goes to `onError`. */
   onSave: (values: AlertSettingValues) => Promise<void>
   onError: (message: string) => void
   onCancel: () => void
@@ -79,8 +57,6 @@ export function AlertSettingsForm({
     defaultValues: {
       thresholdPercent: String(setting?.thresholdPercent ?? DEFAULT_THRESHOLD),
       windowMinutes: String(setting?.windowMinutes ?? DEFAULT_WINDOW),
-      // A new threshold arrives switched on: nobody opens this panel to create a
-      // disabled rule, and the switch is right there to turn an existing one off.
       enabled: setting?.enabled ?? true,
     },
   })
@@ -89,9 +65,6 @@ export function AlertSettingsForm({
     try {
       await onSave(values)
     } catch (error) {
-      // Same split as every other form here: a 400's field errors go under their fields,
-      // and the two 409s — you do not hold this ticker, that window is longer than the
-      // server keeps history for — become the page banner.
       onError(applyServerErrors(error, setError, ['thresholdPercent', 'windowMinutes']))
     }
   })
@@ -146,11 +119,6 @@ export function AlertSettingsForm({
         </div>
       </div>
 
-      {/*
-       * `role="switch"` on a real checkbox: the input keeps space-to-toggle, the focus ring
-       * and `aria-checked` for free, and the role is what makes a screen reader announce
-       * "on"/"off" rather than "checked". A div with a click handler has none of that.
-       */}
       <label htmlFor={switchId} className="text-mu flex items-center gap-2.5 text-[12.5px]">
         <input
           id={switchId}

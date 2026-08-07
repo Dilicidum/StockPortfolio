@@ -2,9 +2,7 @@ using System.Net;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>A stub transport that answers with one fixed status and counts how many times it was asked.
-/// With <paramref name="thenOk"/>, every call after the first answers 200 with a minimal quote body,
-/// so a caller can prove a retry happened rather than just that the first attempt failed.</summary>
+// A stub transport answering one fixed status; with thenOk every call after the first answers 200, so a retry is provable.
 internal sealed class CountingHandler(
     HttpStatusCode status,
     string body = "{}",

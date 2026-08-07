@@ -5,7 +5,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Persistence.Configurations;
 
-/// <summary>Maps KeyRingEntry to marketdata.data_protection_keys.</summary>
 internal sealed class KeyRingEntryConfiguration : IEntityTypeConfiguration<KeyRingEntry>
 {
     internal const string TableName = "data_protection_keys";
@@ -14,7 +13,6 @@ internal sealed class KeyRingEntryConfiguration : IEntityTypeConfiguration<KeyRi
     {
         builder.ToTable(TableName);
 
-        // The domain generates a UUIDv7 in KeyRingEntry.Create(); the database must not touch it.
         builder.Property(entry => entry.Id)
             .HasColumnName("id")
             .ValueGeneratedNever();

@@ -10,13 +10,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-// The dashboard settings pair under /api/settings, driven end to end over HTTP against a real Postgres.
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class DashboardSettingsTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    // A user who has never touched settings gets the default row, without anything being written.
     [Fact]
     public async Task Get_ForANewUser_ReturnsSixtySeconds()
     {
@@ -34,7 +32,6 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         payload.RefreshIntervalSeconds.ShouldBe(60);
     }
 
-    // What was saved is what a following read returns.
     [Fact]
     public async Task Put_ThenGet_ReturnsWhatWasSaved()
     {
@@ -65,7 +62,6 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         fetchedPayload.RefreshIntervalSeconds.ShouldBe(120);
     }
 
-    // Shape validation rejects an interval outside 10..300 before any handler runs.
     [Fact]
     public async Task Put_WithAnOutOfRangeInterval_Returns400()
     {
@@ -85,7 +81,6 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         (await Wire.FailingFieldsAsync(response)).ShouldContain("RefreshIntervalSeconds");
     }
 
-    // No token, no settings — the group's RequireAuthorization applies to both routes.
     [Fact]
     public async Task Get_Anonymous_Is401()
     {
@@ -96,7 +91,7 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    // A media type the route cannot read is what actually produces a 415 — checked against the running host.
+    // A media type the route cannot read is what actually produces 415; an absent body is a 400.
     [Fact]
     public async Task Put_WithWrongContentType_ReturnsWhateverItReallyReturns()
     {
@@ -114,7 +109,6 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType, await Wire.Describe(response));
     }
 
-    // The default row is built in memory and never persisted, so no row exists after the first read.
     [Fact]
     public async Task Get_ForANewUser_WritesNothing()
     {
@@ -128,6 +122,8 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
             JsonSerializerOptions.Web, TestContext.Current.CancellationToken);
         user.ShouldNotBeNull();
 
+        var userId = user.Id;
+
         using var response = await Wire.SendAsync(client, HttpMethod.Get, Wire.DashboardSettingsPath, token);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
 
@@ -137,7 +133,7 @@ public sealed class DashboardSettingsTests(ApiFixture fixture)
         await using var command = new NpgsqlCommand(
             "SELECT count(*) FROM portfolio.dashboard_settings WHERE user_id = @userId",
             connection);
-        command.Parameters.AddWithValue("userId", user.Id);
+        command.Parameters.AddWithValue("userId", userId);
 
         var count = await command.ExecuteScalarAsync(TestContext.Current.CancellationToken);
 

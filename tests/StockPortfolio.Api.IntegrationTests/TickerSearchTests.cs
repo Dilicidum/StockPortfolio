@@ -4,18 +4,16 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>Search end to end, and the company names it leaves behind on the two tables that show them.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class TickerSearchTests(ApiFixture fixture)
 {
-    /// <summary>The name the keyless catalogue gives AAPL. The suite never runs against the live provider.</summary>
+    // The name the keyless catalogue gives AAPL; the suite never runs against the live provider.
     private const string AppleName = "Apple Inc";
 
     private const string MicrosoftName = "Microsoft Corporation";
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The form behind it is signed in, so the route is too.</summary>
     [Fact]
     public async Task Search_Anonymous_Is401()
     {
@@ -26,7 +24,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>`docker compose up` with no API key is the acceptance gate, and this is it working.</summary>
     [Fact]
     public async Task Search_KnownPrefix_ListsTheSymbolAndItsCompanyName()
     {
@@ -43,7 +40,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         apple.Description.ShouldBe(AppleName);
     }
 
-    /// <summary>Fuzzy on purpose: the exact-match rule belongs to the existence check, not to a list.</summary>
     [Fact]
     public async Task Search_PartialSymbol_IsAllowedToMatchMoreThanTheSymbolItself()
     {
@@ -57,7 +53,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
             + "nothing for every query that is not already the answer");
     }
 
-    /// <summary>Every suggestion must be a symbol the add-position form will then accept.</summary>
     [Fact]
     public async Task Search_EverySuggestion_CanBeAdded()
     {
@@ -88,7 +83,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         (await Wire.SearchSucceedsAsync(client, token, query)).ShouldBeEmpty();
     }
 
-    /// <summary>q omitted entirely, which is what an unbound query string looks like on the wire.</summary>
     [Fact]
     public async Task Search_QueryParameterMissing_Is200AndEmpty()
     {
@@ -103,7 +97,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
             .ShouldBe("[]");
     }
 
-    /// <summary>A search outage must not block someone recording a purchase they really made.</summary>
     [Fact]
     public async Task Search_ProviderCannotAnswer_Is200AndEmptyNeverAnError()
     {
@@ -123,13 +116,11 @@ public sealed class TickerSearchTests(ApiFixture fixture)
             .Trim()
             .ShouldBe("[]");
 
-        // The form still works with search dead, which is the whole reason the empty list is a 200.
         using var added = await Wire.AddHoldingAsync(client, tokens.AccessToken, "AAPL", 1m, 10m);
 
         added.IsSuccessStatusCode.ShouldBeTrue(await Wire.Describe(added));
     }
 
-    /// <summary>A bare array, matching GET /api/holdings rather than wrapping the list in an object.</summary>
     [Fact]
     public async Task Search_ResponseIsABareArray()
     {
@@ -144,7 +135,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         body.ShouldContain("\"description\":", Case.Sensitive, body);
     }
 
-    /// <summary>The cache learns from the search, and the holdings page reads it without touching a provider.</summary>
     [Fact]
     public async Task Holdings_AfterASearch_CarryTheCompanyName()
     {
@@ -170,7 +160,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
             "a symbol nobody has ever searched for has no cached name, and the row still lists");
     }
 
-    /// <summary>Null, not absent: no client can tell an absent member from a null one.</summary>
     [Fact]
     public async Task Holdings_WithNoCachedName_SerialiseNameAsAnExplicitNull()
     {
@@ -209,20 +198,17 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         body.ShouldContain("\"name\":null", Case.Sensitive, $"a row's name is absent rather than null: {body}");
     }
 
-    /// <summary>The holdings page must never wait on the provider, so a dead one must not cost it names.</summary>
     [Fact]
     public async Task Holdings_ProviderDown_StillCarryTheirCachedNames()
     {
         var (client, token) = await SignedInAsync("names-provider-down");
 
-        // Warm on the shared host. Two hosts, one Redis container — which is the only reason the
-        // dead-provider host below has a name to find at all.
+        // Warmed on the shared host: two hosts, one Redis container, which is the only reason the dead-provider host below finds a name.
         await WarmAsync(client, token, "aapl", "AAPL");
 
         await using var host = _fixture.CreateHostWithQuoteProvider(ScriptedQuoteProvider.ServingNothing);
         using var deadClient = host.CreateClient();
 
-        // The same token: both hosts share the signing key, issuer and audience, and the JWT is self-contained.
         await AddSucceedsAsync(deadClient, token, "AAPL");
 
         var holdings = await Wire.ListHoldingsAsync(deadClient, token);
@@ -233,7 +219,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
             + "provider rather than from the cache — which is the dependency it exists without");
     }
 
-    /// <summary>Redis down means names disappear and nothing else changes. That is the correct thing to lose.</summary>
     [Fact]
     public async Task Holdings_RedisDown_StillListEveryPositionWithoutNames()
     {
@@ -254,7 +239,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         only.Quantity.ShouldBe(1m);
     }
 
-    /// <summary>Search results themselves are not cached, so a repeat query still asks the provider.</summary>
     [Fact]
     public async Task Search_RepeatedQuery_StillAnswers()
     {
@@ -266,7 +250,6 @@ public sealed class TickerSearchTests(ApiFixture fixture)
         second.Select(match => match.Symbol).ShouldBe(first.Select(match => match.Symbol));
     }
 
-    /// <summary>Runs a search purely for its side effect on the name cache.</summary>
     private static async Task WarmAsync(HttpClient client, string token, string query, string expected)
     {
         var matches = await Wire.SearchSucceedsAsync(client, token, query);

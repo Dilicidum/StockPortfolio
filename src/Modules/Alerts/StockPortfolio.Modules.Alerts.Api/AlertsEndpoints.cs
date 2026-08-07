@@ -6,50 +6,47 @@ using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.DependencyInjection;
 
 using OneOf;
 using OneOf.Types;
 
 using StockPortfolio.Modules.Alerts.Api.Requests;
+using StockPortfolio.Modules.Alerts.Api.Streaming;
 using StockPortfolio.Modules.Alerts.Api.Validators;
 using StockPortfolio.Modules.Alerts.Application.Abstractions;
 using StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 using StockPortfolio.Modules.Alerts.Application.Settings.Commands.SaveAlertSetting;
 using StockPortfolio.Modules.Alerts.Application.Settings.Queries.GetAlertSettings;
 using StockPortfolio.Modules.Alerts.Application.Simulation.Commands.SimulateAlert;
-using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.IssueStreamTicket;
-using StockPortfolio.Modules.Alerts.Application.Streaming.Commands.RedeemStreamTicket;
 using StockPortfolio.Shared.Api;
 using StockPortfolio.Shared.Kernel;
 using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Alerts.Api;
 
-/// <summary>The Alerts module's inbound HTTP surface, under /api/alerts, and the one DI seam.</summary>
 public static class AlertsEndpoints
 {
-    /// <summary>Where a threshold and its history live.</summary>
     private const string BasePath = "/api/alerts";
 
-    /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
 
-    /// <summary>What the stream answers with, and the reason UseResponseCompression must never be added.</summary>
-    private const string SseContentType = "text/event-stream";
+    public const string HubPath = "/api/alerts/stream";
 
-    /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
     public static IServiceCollection AddAlertsApi(this IServiceCollection services)
     {
         services.AddValidatorsFromAssemblyContaining<SaveAlertSettingRequestValidator>();
 
+        services.AddScoped<IAlertPublisher, SignalRAlertPublisher>();
+
+        services.AddSingleton<IUserIdProvider, SubjectClaimUserIdProvider>();
+
         return services;
     }
 
-    /// <summary>Maps the alert routes onto /api/alerts.</summary>
     public static IEndpointRouteBuilder MapAlertsEndpoints(this IEndpointRouteBuilder app)
     {
-        // Every route needs a bearer token and every route can 500, so both are declared once here.
         var group = app.MapGroup(BasePath)
             .RequireAuthorization()
             .WithTags("Alerts")
@@ -78,25 +75,6 @@ public static class AlertsEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
-        group.MapPost("/stream-ticket", CreateStreamTicketAsync)
-            .WithName("CreateStreamTicket")
-            .WithSummary("Mints a single-use, 30-second ticket for the alert stream.")
-            .WithDescription("Sent with no body, like logout. The ticket exists because the browser's event-source client cannot set an Authorization header.")
-            .Produces<IssueStreamTicketResult>(StatusCodes.Status200OK);
-
-        // AllowAnonymous, and it is the only route in the application that is: the ticket in the query
-        // string IS the authentication. EventSource cannot set a header, and the SPA and the API are on
-        // different origins in every deployment target, permanently.
-        group.MapGet("/stream", StreamAlertsAsync)
-            .AllowAnonymous()
-            .WithName("StreamAlerts")
-            .WithSummary("The alert feed, as server-sent events.")
-            .WithDescription("Named 'alert' events carry one notification each; a named 'ping' every 20 seconds keeps the connection under the platform's four-minute idle close.")
-            // Produces<string>, not Produces: with no response type the generator drops the content
-            // type as well, and /openapi/v1.json then says only "200 OK" for the one route whose media
-            // type is the whole contract. Read back from the document, not from this line.
-            .Produces<string>(StatusCodes.Status200OK, SseContentType);
-
         group.MapPut("/settings", SaveAlertSettingAsync)
             .AddEndpointFilter<ValidationFilter<SaveAlertSettingRequest>>()
             .WithName("SaveAlertSetting")
@@ -107,10 +85,11 @@ public static class AlertsEndpoints
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
+        app.MapHub<AlertsHub>(HubPath);
+
         return app;
     }
 
-    /// <summary>Fires one alert on demand.</summary>
     private static async Task<IResult> SimulateAlertAsync(
         SimulateAlertRequest request,
         ClaimsPrincipal principal,
@@ -124,53 +103,16 @@ public static class AlertsEndpoints
 
         var result = await handler.Handle(new SimulateAlertCommand(userId, request.Ticker), ct);
 
-        return result.Match<IResult>(
-            // 202, not 200: the row is written here but the arrival happens on a connection this
-            // request knows nothing about, and there is no body worth inventing.
-            simulated => TypedResults.Accepted((string?)null),
+        return result.Match(
+            simulated => Results.Accepted((string?)null),
 
             nothing => ProblemDetailsExtensions.ConflictProblem(Describe(nothing)));
     }
 
-    /// <summary>Says which of the two ways there was nothing to simulate, because the fixes differ.</summary>
     private static string Describe(NoPositionToSimulate nothing) => nothing.Ticker is null
         ? "You have no enabled threshold to simulate. Set one on a position first."
         : $"You have no enabled threshold on {nothing.Ticker}, so there is nothing to simulate for it.";
 
-    /// <summary>Mints a ticket for the stream.</summary>
-    private static async Task<IResult> CreateStreamTicketAsync(
-        ClaimsPrincipal principal,
-        ICommandHandler<IssueStreamTicketCommand, IssueStreamTicketResult> handler,
-        CancellationToken ct)
-    {
-        if (!TryReadUserId(principal, out var userId, out var rejection))
-        {
-            return rejection;
-        }
-
-        return TypedResults.Ok(await handler.Handle(new IssueStreamTicketCommand(userId), ct));
-    }
-
-    /// <summary>Redeems the ticket and holds the connection open until the browser lets go.</summary>
-    private static async Task<IResult> StreamAlertsAsync(
-        string? ticket,
-        ICommandHandler<RedeemStreamTicketCommand, OneOf<Guid, TicketNotRecognised>> handler,
-        IAlertStreamSubscriber subscriber,
-        TimeProvider clock,
-        CancellationToken ct)
-    {
-        var redeemed = await handler.Handle(new RedeemStreamTicketCommand(ticket ?? string.Empty), ct);
-
-        return redeemed.Match<IResult>(
-            userId => AlertFeed.Result(userId, subscriber, clock, ct),
-
-            // Expired, spent and never-issued get the same answer on purpose: a caller who can tell
-            // them apart can tell whether a ticket it did not mint ever existed.
-            unrecognised => ProblemDetailsExtensions.UnauthorizedProblem(
-                "That stream ticket is expired, already used, or was never issued. Ask for another."));
-    }
-
-    /// <summary>Lists the caller's recent alerts.</summary>
     private static async Task<IResult> GetFiredAlertsAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetFiredAlertsQuery, IReadOnlyList<GetFiredAlertsResult>> handler,
@@ -182,13 +124,10 @@ public static class AlertsEndpoints
             return rejection;
         }
 
-        // An absent ?limit= asks for as many as the server is willing to give, which is the same
-        // number the handler would clamp anything larger down to.
         return TypedResults.Ok(
             await handler.Handle(new GetFiredAlertsQuery(userId, limit ?? int.MaxValue), ct));
     }
 
-    /// <summary>Lists the caller's thresholds.</summary>
     private static async Task<IResult> GetAlertSettingsAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetAlertSettingsQuery, IReadOnlyList<GetAlertSettingsResult>> handler,
@@ -202,7 +141,6 @@ public static class AlertsEndpoints
         return TypedResults.Ok(await handler.Handle(new GetAlertSettingsQuery(userId), ct));
     }
 
-    /// <summary>Sets or changes one threshold.</summary>
     private static async Task<IResult> SaveAlertSettingAsync(
         SaveAlertSettingRequest request,
         ClaimsPrincipal principal,
@@ -225,21 +163,17 @@ public static class AlertsEndpoints
                 request.Enabled),
             ct);
 
-        return result.Match<IResult>(
-            saved => TypedResults.Ok(saved),
+        return result.Match(
+            saved => Results.Ok(saved),
 
-            // 409 rather than 400: the body is well formed and the request is refused by the state of
-            // the portfolio, which the caller can fix by buying the position.
             notHeld => ProblemDetailsExtensions.ConflictProblem(
                 $"You hold no position in {notHeld.Ticker}, so there is nothing to set a threshold on."),
 
-            // Both numbers, because "too long" without the cap is a message nobody can act on.
             tooLong => ProblemDetailsExtensions.ConflictProblem(Describe(tooLong)),
 
             invalid => invalid.ToValidationProblem());
     }
 
-    /// <summary>Names the window asked for and the cap it broke, so the caller can pick a legal one.</summary>
     private static string Describe(WindowExceedsRetention tooLong)
     {
         var requested = tooLong.RequestedMinutes.ToString(CultureInfo.InvariantCulture);
@@ -249,10 +183,8 @@ public static class AlertsEndpoints
             + "A move measured over days is a trend, not a sharp move.";
     }
 
-    /// <summary>Reads the subject claim. Totality over a string?, not a security control.</summary>
     private static bool TryReadUserId(ClaimsPrincipal principal, out Guid userId, out IResult rejection)
     {
-        // OnTokenValidated already rejects a subject-less token; this only gives null a branch.
         if (Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out userId))
         {
             rejection = TypedResults.Empty;

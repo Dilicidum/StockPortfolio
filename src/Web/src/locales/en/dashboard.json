@@ -36,10 +36,11 @@
     "observedAtTitle": "Observed at {{observedAt}}"
   },
   "refresh": {
-    "every15s": "every 15s",
-    "every30s": "every 30s",
-    "every60s": "every 60s",
-    "every5m": "every 5m"
+    "15": "every 15s",
+    "30": "every 30s",
+    "60": "every 60s",
+    "120": "every 2m",
+    "300": "every 5m"
   },
   "freshness": {
     "waiting": "Waiting for the first response…",
