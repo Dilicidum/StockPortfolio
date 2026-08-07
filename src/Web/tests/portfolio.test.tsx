@@ -230,8 +230,8 @@ describe('portfolio', () => {
     server.use(
       http.delete('*/api/holdings/:id', () =>
         HttpResponse.json(
-          { title: 'Service unavailable', detail: 'The database is not reachable.', status: 503 },
-          { status: 503, headers: { 'Content-Type': 'application/problem+json' } },
+          { title: 'Not Found', detail: 'No such position.', status: 404 },
+          { status: 404, headers: { 'Content-Type': 'application/problem+json' } },
         ),
       ),
       http.get('*/api/holdings', () => HttpResponse.json([AAPL])),
@@ -243,7 +243,7 @@ describe('portfolio', () => {
     await user.click(row().getByRole('button', { name: /remove aapl/i }))
     await user.click(screen.getByRole('button', { name: /^remove$/i }))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(/the database is not reachable/i)
+    expect(await screen.findByRole('alert')).toHaveTextContent(/no such position/i)
     expect(screen.getByRole('alert')).not.toHaveTextContent(/could not remove aapl/i)
   })
 
