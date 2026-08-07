@@ -9,7 +9,8 @@ Stock-portfolio tracker: live quotes, profit/loss, and threshold alerts pushed i
 > price poller behind them (Phase 4); the settings surface — theme, English and Ukrainian, refresh
 > interval, per-position visibility and a per-user market-data key encrypted at rest (Phase 5); and
 > graceful failure — every dependency can be stopped and the app stays usable (Phase 6). Phase 6 is
-> green in both test suites and has not yet been walked through by hand or deployed.
+> green in both test suites and deployed. The by-hand browser walkthrough against the public URL is not
+> finished.
 > See [docs/plan/00-overview.md](docs/plan/00-overview.md).
 
 ---

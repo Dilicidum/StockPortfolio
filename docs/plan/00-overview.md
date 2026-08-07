@@ -214,8 +214,10 @@ Cut on purpose. Don't reintroduce without asking.
 
 ## Known gaps
 
-- **Nothing since phase 4 has been deployed**, so phases 5 and 6 are proven locally and in CI and unproven
-  against the public URL. A phase is done when it works in a browser *and* is deployed.
+- **Phases 5 and 6 are deployed, and the walkthrough against the public URL is not finished.** The three
+  probes, the four database logins, the cache and the real price provider all answer correctly there, and the
+  SPA loads with no console error. What is unproven on the public URL is everything a person has to click:
+  registering, adding a position, an alert arriving, and the stream still alive after four minutes.
 - **Market holidays are not handled.** A stored price ages by open-market minutes against a fixed weekday
   session, so on a public holiday the price column goes blank an hour into a market that never opened. The
   failure is cosmetic and corrects itself the next trading day.

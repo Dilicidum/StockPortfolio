@@ -7,7 +7,7 @@
 |---|---|
 | API | `https://stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` |
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
-| Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-20` (the 2026-08-06 deploy plus 14 days) |
+| Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-21` (the 2026-08-07 deploy plus 14 days) |
 
 The `deleteAfter` date decides when `teardown.yml` destroys the resource group. Read it from the
 resource group's own tag before relying on it; every deploy moves it.

@@ -25,7 +25,7 @@ Add `[skip ci]` to the commit message when a push should **not** deploy.
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
 | Burn rate | **Read it, do not quote it** — see below |
 | Running | **Phase 4, deployed and verified 2026-08-06** (PR #6, run 31087381000) |
-| Deletes itself on | **`deleteAfter`** — expected 2026-08-20 after that deploy, but **read the group's tag**; this line is a note, not the value |
+| Deletes itself on | **`deleteAfter`** — expected 2026-08-21 after that deploy, but **read the group's tag**; this line is a note, not the value |
 
 `/api/marketdata/health` returns `{"provider":"Finnhub"}` on the live API, so the deployed dashboard
 serves genuine prices rather than the fake. **Any deploy re-stamps `deleteAfter` to that day + 14**,
