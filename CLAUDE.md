@@ -9,8 +9,8 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 **All six phases are functionally complete.** `dotnet build` is clean at 0 warnings and `docker compose up`
 brings the whole stack up from a clean volume. Phase 5 shipped the settings surface: a theme applied before
 the first paint, English and Ukrainian, a saved dashboard refresh interval, a visibility toggle per position,
-and a per-user market-data API key encrypted at rest. **Phase 6 is built and not yet verified in a browser
-or deployed**, which is what a phase being *done* requires — so its implementation plan stays.
+and a per-user market-data API key encrypted at rest. **Phase 6 is built and deployed**; what is left is the
+by-hand browser walkthrough against the public URL.
 
 **Phase 5 closed a P0 gap, not just extras.** The brief lists the minimum routes as login, dashboard,
 portfolio and **settings**, and the settings route did not exist until this phase.
@@ -42,59 +42,6 @@ Still open:
   language negotiation.
 - The by-hand browser walkthrough against the public URL is unfinished. The probes, the four database logins, the cache and the real price provider all answer correctly there, and the SPA loads clean; what is unproven is everything a person has to click.
 
-`docs/deferred-work.md` is the register for anything deferred, unbuilt or rejected. Something described in a plan and missing from the code belongs there too, not only defects found in code that exists. Read it before assuming an unimplemented feature is simply "not that phase yet".
-
-## `docs/` is a working folder, not part of the repository
-
-**`README.md` is the only documentation that ships.** Everything under `docs/` — the plans, the reference documents, the runbook and the register — is deliberately untracked and lives only in a working tree. That is why every path to it below is written plain rather than as a link: a link would resolve for you and 404 for anyone reading this on GitHub.
-
-Two consequences. **If you cloned this repository you do not have `docs/`**, and nothing in it is required to work in the code — this file carries the conventions and the traps, and `README.md` carries the architecture. And **`docs/` is not backed up by git**, so a file deleted there is gone; `git restore` will not bring it back.
-
-## Plans
-
-Three levels, each with one job.
-
-1. **The overall plan** — `docs/plan/00-overview.md`. The whole system: the core ideas, the decisions, how it behaves, why it behaves that way, and the flow from one end to the other.
-2. **One plan per phase** — the decisions for that phase, in more detail.
-3. **One implementation plan per phase** — the tasks and the order to build them in. It is written when the phase starts and **deleted when the phase ships**. It is the only place where file names and type names belong.
-
-A plan holds ideas, decisions, reasoning, behaviour and architecture. It never holds class names, method names, file paths, line numbers, task numbers or test names. Domain words and public API routes are fine.
-
-Phases 1 to 5 have shipped, so none of them has an implementation plan any more. **Phase 6 is in flight**, so
-`phase-6-implementation.md` exists and carries its build order, its file names and its deployment and
-browser-verification tasks. Delete it on the day those pass, not before — a phase is done when it runs in a
-browser *and is deployed*, not when its tests pass.
-
-A plan is short enough to read from start to finish in one sitting. When something changes, change it everywhere and leave only the new version. Do not write down what it used to say — git keeps that.
-
-**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. **It is at eight today**, the eighth being Phase 6's. The plan outlives the last commit of code by however long verification takes.
-
-## Reference documents
-
-These describe the shape of the system rather than the order it gets built in, so they live in `docs/reference/`, not in the plans folder.
-
-- `docs/reference/er-diagram.md` — the data model: tables, what lives in Redis instead, which indexes carry weight, and which tables exist today.
-- `docs/reference/module-interactions.md` — which module depends on which, what crosses each line and why.
-- `docs/reference/service-interactions.md` — the runtime picture: browser, the one process, and which module talks to Postgres, Redis or the price provider.
-- `docs/reference/module-boundaries.md` — why the boundaries are where they are, and the three places one was deliberately not drawn.
-- `docs/reference/bounded-contexts.md` — what kind of relationship crosses each boundary.
-- `docs/reference/identity-contracts.md` — how sessions and tokens behave, and what about them is fixed.
-
-Where `bounded-contexts.md` and `module-boundaries.md` disagree, `module-boundaries.md` decides *where* a boundary goes and `bounded-contexts.md` decides *what kind* of relationship crosses it.
-
-Read before touching code: the overview, then the phase file you are working in. `docs/Initial.md` is the original architecture essay and is historical; where it conflicts with a plan, the plan wins.
-
-Work phase by phase. A phase is done when it runs in a browser, not when tests pass.
-
-## Operational documents
-
-Read these before touching deploys, Bicep, workflows, cost or teardown.
-
-- `docs/DEPLOYING.md` — **the runbook. Start here.** How to deploy (push to `main`, and nothing else — never run `az deployment group create` by hand), what exists, how to verify, the cost ceiling, and five failures that each cost a deploy cycle.
-- `docs/superpowers/specs/2026-08-02-azure-deployment-design.md` — the **why**: the cost model, the four decisions behind the sizing and the time-bounded ceiling, the six-step verification, and the six failed attempts. Its `minReplicas` decision records both settings — 0 through Phases 1–3, and 1 from Phase 4 because of the poller. It sits outside `docs/plan/` because `docs/plan/` is the numbered product build and this cuts across it.
-
-Four of their failure cases are copied into Traps below; the rest are only there.
-
 ## Commands
 
 ```bash
@@ -119,7 +66,7 @@ With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a
 
 Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. **All four exist.** Plus `Shared.Kernel`, `Shared.Api`, the `Host` project and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
-**Boundaries are argued from the cost of pulling a module out, not from subdomain labels.** The test for every boundary: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the number of calls bounded, can one side fail while the other keeps working, is there exactly one writer per table. Full reasoning in `docs/reference/module-boundaries.md`.
+**Boundaries are argued from the cost of pulling a module out, not from subdomain labels.** The test for every boundary: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the number of calls bounded, can one side fail while the other keeps working, is there exactly one writer per table.
 
 - **Alerts is its own module.** Sharing a word does not make two models one: `Ticker` means the same thing in Portfolio and in Alerts, and they are still two contexts. Different words are enough to prove two contexts exist, but they are not required.
 - `AlertSettings` and `FiredAlert` never share a transaction with `Holding`, no rule spans any two of the three aggregates, they are written at different times, and alerts can be down while the dashboard still renders.
@@ -223,7 +170,7 @@ The trade is worth knowing: the typed union made the compiler reject a result th
 
 **A missing body is 400, not 415.** Only a *wrong* `Content-Type` produces 415, and the two are easy to conflate when writing the `.Produces` list from memory. `POST /api/holdings` had declared 415 since Phase 2 and no test in the repo ever drove it; the alert-settings route is the first place that declaration was demonstrated against a real request. A status nothing has provoked is a guess, however confidently it is written down.
 
-**Comments: one line, and only where the code cannot say it.** No `<remarks>`, no `<param>`/`<returns>`/`<exception>` blocks, no banner rules. A doc comment is a single `/// <summary>…</summary>`. If a comment must span lines to make sense, the reasoning belongs in `docs/plan/` or a commit message, not in the file.
+**Comments: one line, and only where the code cannot say it.** No `<remarks>`, no `<param>`/`<returns>`/`<exception>` blocks, no banner rules. A doc comment is a single `/// <summary>…</summary>`. If a comment must span lines to make sense, the reasoning belongs in a commit message, not in the file.
 
 **`src/Web` carries no comments at all** — application code, tests, `vite.config.ts`, `nginx.conf`, the `Dockerfile` and `.env.example` alike. Every one was deleted deliberately: about 1,800 lines, a fifth of the folder. Of the 359 blocks under `src/`, 303 narrated the code, argued with a version that no longer existed, or restated an API contract the generated OpenAPI document already owns; 43 more repeated something this file already said. The 12 facts that were genuinely load-bearing became Traps entries below, which is why several of those entries are about the browser. **Do not reintroduce a comment there.** A fact worth writing down goes in Traps, where one place holds it and it cannot rot beside code that has moved on. This rule is the frontend only — C# keeps the one-line rule above.
 
@@ -366,8 +313,6 @@ Each of these costs a day if you meet it cold.
 - **Do not add a helper for the 403 response until a route actually returns 403.** A helper with no caller is a shape somebody will fill in wrongly.
 
 ## Deployment
-
-📄 **`docs/DEPLOYING.md` is the runbook; the design record (`docs/superpowers/specs/2026-08-02-azure-deployment-design.md`) is the why. Read the runbook before any deploy work.** This section is the summary; those files have the procedure, the cost model, the four decisions, the six-step verification and the six failed attempts.
 
 Three targets: `docker compose` (whole stack, local, the P0 gate), **GitHub Pages** (SPA, static, `VITE_API_BASE_URL` baked in at build), **Azure Container Apps** (API only).
 
