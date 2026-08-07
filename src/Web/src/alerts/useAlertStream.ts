@@ -15,13 +15,28 @@ import {
 
 export type AlertStreamStatus = 'connecting' | 'live' | 'reconnecting' | 'offline'
 
+function readBrowserOnline(): boolean {
+  return typeof navigator === 'undefined' || navigator.onLine !== false
+}
+
 let status: AlertStreamStatus = 'connecting'
+let browserOnline = readBrowserOnline()
 const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const listener of listeners) listener()
+}
 
 function setStatus(next: AlertStreamStatus): void {
   if (status === next) return
   status = next
-  for (const listener of listeners) listener()
+  notify()
+}
+
+function setBrowserOnline(next: boolean): void {
+  if (browserOnline === next) return
+  browserOnline = next
+  notify()
 }
 
 function subscribe(listener: () => void): () => void {
@@ -33,17 +48,47 @@ function subscribe(listener: () => void): () => void {
 
 const getStatus = (): AlertStreamStatus => status
 
+const getBrowserOnline = (): boolean => browserOnline
+
 export function useAlertStreamStatus(): AlertStreamStatus {
   return useSyncExternalStore(subscribe, getStatus, getStatus)
 }
 
+export function useBrowserOnline(): boolean {
+  return useSyncExternalStore(subscribe, getBrowserOnline, getBrowserOnline)
+}
+
 export function __resetAlertStream(): void {
   setStatus('connecting')
+  setBrowserOnline(readBrowserOnline())
 }
 
 const RETRY_DELAYS_MS = [0, 1_000, 2_000, 5_000, 10_000, 30_000]
 
+const OFFLINE_RECHECK_MS = 1_000
+
 const RENEW_BEFORE_MS = 30_000
+
+function delayFor(attempt: number): number {
+  return RETRY_DELAYS_MS[Math.min(attempt, RETRY_DELAYS_MS.length - 1)] ?? 30_000
+}
+
+export function createRetryPolicy(): signalR.IRetryPolicy {
+  let skipped = 0
+
+  return {
+    nextRetryDelayInMilliseconds({ previousRetryCount }: signalR.RetryContext): number {
+      if (previousRetryCount === 0) skipped = 0
+
+      if (!readBrowserOnline()) {
+        skipped += 1
+        return OFFLINE_RECHECK_MS
+      }
+
+      return delayFor(previousRetryCount - skipped)
+    },
+  }
+}
 
 async function accessTokenFactory(): Promise<string> {
   const token = getAccessToken()
@@ -75,6 +120,10 @@ export function useAlertStream(): AlertStreamStatus {
   const queryClient = useQueryClient()
 
   useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let resumeNow: (() => void) | null = null
+
     const connection = new signalR.HubConnectionBuilder()
       .withUrl(`${API_BASE_URL}${ALERT_HUB_PATH}`, {
         accessTokenFactory,
@@ -82,14 +131,14 @@ export function useAlertStream(): AlertStreamStatus {
         transport: signalR.HttpTransportType.WebSockets,
         skipNegotiation: true,
       })
-      .withAutomaticReconnect(RETRY_DELAYS_MS)
+      .withAutomaticReconnect(createRetryPolicy())
       .build()
 
     connection.on(ALERT_METHOD_NAME, (notification: AlertNotification) => {
       prepend(queryClient, toFiredAlert(notification))
     })
 
-    connection.onreconnecting(() => setStatus('reconnecting'))
+    connection.onreconnecting(() => setStatus(readBrowserOnline() ? 'reconnecting' : 'offline'))
 
     connection.onreconnected(() => {
       setStatus('live')
@@ -99,14 +148,74 @@ export function useAlertStream(): AlertStreamStatus {
 
     connection.onclose(() => setStatus('offline'))
 
-    setStatus('connecting')
+    function pause(ms: number): Promise<void> {
+      return new Promise((resolve) => {
+        resumeNow = () => {
+          if (timer !== null) clearTimeout(timer)
+          timer = null
+          resumeNow = null
+          resolve()
+        }
 
-    void connection.start().then(
-      () => setStatus('live'),
-      () => setStatus('offline'),
-    )
+        timer = setTimeout(() => resumeNow?.(), ms)
+      })
+    }
+
+    function handleOnline(): void {
+      setBrowserOnline(true)
+      resumeNow?.()
+    }
+
+    function handleOffline(): void {
+      setBrowserOnline(false)
+      if (status !== 'live') setStatus('offline')
+    }
+
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('offline', handleOffline)
+
+    setBrowserOnline(readBrowserOnline())
+    setStatus(readBrowserOnline() ? 'connecting' : 'offline')
+
+    async function connect(): Promise<void> {
+      let attempt = 0
+
+      while (!cancelled) {
+        if (!readBrowserOnline()) {
+          setStatus('offline')
+          await pause(OFFLINE_RECHECK_MS)
+          continue
+        }
+
+        try {
+          await connection.start()
+
+          if (cancelled) {
+            void connection.stop()
+            return
+          }
+
+          setStatus('live')
+          return
+        } catch {
+          if (cancelled) return
+
+          setStatus(readBrowserOnline() ? 'reconnecting' : 'offline')
+          await pause(delayFor(attempt))
+          attempt += 1
+        }
+      }
+    }
+
+    void connect()
 
     return () => {
+      cancelled = true
+      resumeNow?.()
+      if (timer !== null) clearTimeout(timer)
+      timer = null
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('offline', handleOffline)
       void connection.stop()
     }
   }, [queryClient])

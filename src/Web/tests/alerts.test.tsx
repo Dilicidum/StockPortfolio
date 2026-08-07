@@ -17,7 +17,7 @@ import type { AlertSetting, FiredAlert } from '../src/alerts/alertsApi'
 import { ALERT_METHOD_NAME } from '../src/alerts/alertsApi'
 import { FakeHubConnection } from './fakeHubConnection'
 import { alertHistoryHandler, alertSettingsHandler, firedAlert, notificationOf } from './msw/alerts'
-import { dashboardHandler, marketDataHealthHandler } from './msw/dashboard'
+import { dashboardHandler } from './msw/dashboard'
 import { emptyTickerSearchHandler } from './msw/tickerSearch'
 import { server } from './msw/server'
 
@@ -47,7 +47,6 @@ async function renderAt(path: string, heading: string, handlers: RequestHandler[
     alertHistoryHandler(),
     alertSettingsHandler(),
     dashboardHandler,
-    marketDataHealthHandler,
     emptyTickerSearchHandler,
   )
 

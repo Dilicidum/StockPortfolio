@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useRouter, type ErrorComponentProps } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { AlertPanel } from '../../alerts/AlertPanel'
@@ -6,7 +6,9 @@ import { PANEL_ROWS } from '../../alerts/alertsApi'
 import { Alert } from '../../components/Alert'
 import { ApiHealth } from '../../components/ApiHealth'
 import { AppShell } from '../../components/AppShell'
+import { Button } from '../../components/Button'
 import { Card } from '../../components/Card'
+import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { Freshness } from '../../components/Freshness'
 import { StatTile } from '../../components/StatTile'
 import { Table, type Column } from '../../components/Table'
@@ -14,7 +16,7 @@ import { TickerCell } from '../../components/TickerCell'
 import { useAuth } from '../../auth/useAuth'
 import { formatAge, formatMoney, formatPercent, isNegative, NO_VALUE, type Money } from '../../lib/format'
 import { dashboardKeys, fetchDashboard, type DashboardPosition } from '../../marketdata/dashboardApi'
-import { fallbackMessage } from '../../lib/formErrors'
+import { fallbackMessage, serverMessage } from '../../lib/formErrors'
 import {
   DEFAULT_REFRESH_SECONDS,
   REFRESH_INTERVAL_SECONDS,
@@ -26,7 +28,25 @@ import {
 
 export const Route = createFileRoute('/_authenticated/dashboard')({
   component: DashboardPage,
+  errorComponent: DashboardError,
 })
+
+function DashboardError({ error }: ErrorComponentProps) {
+  const router = useRouter()
+  const { t } = useTranslation(['dashboard', 'common'])
+
+  return (
+    <AppShell title={t('title')}>
+      <Alert tone="error" title={t('routeError.title')}>
+        {error.message || t('routeError.fallback')}
+      </Alert>
+
+      <div className="sm:max-w-[200px]">
+        <Button onClick={() => void router.invalidate()}>{t('common:actions.tryAgain')}</Button>
+      </div>
+    </AppShell>
+  )
+}
 
 const TONE_CLASS = { neutral: 'text-mu', up: 'text-up', down: 'text-dn' } as const
 
@@ -35,8 +55,7 @@ function toneOf(money: Money | null | undefined): 'neutral' | 'up' | 'down' {
   return isNegative(money) ? 'down' : 'up'
 }
 
-function isTrailing(position: DashboardPosition, newestObservedAt: number, staleAfterMs: number): boolean {
-  if (position.isLastKnown) return true
+function isLate(position: DashboardPosition, newestObservedAt: number, staleAfterMs: number): boolean {
   if (!position.observedAt) return false
 
   return newestObservedAt - Date.parse(position.observedAt) > staleAfterMs
@@ -44,7 +63,7 @@ function isTrailing(position: DashboardPosition, newestObservedAt: number, stale
 
 function DashboardPage() {
   const { user } = useAuth()
-  const { t } = useTranslation('dashboard')
+  const { t } = useTranslation(['dashboard', 'alerts', 'common'])
   const queryClient = useQueryClient()
 
   const { data: settings } = useQuery(dashboardSettingsQuery)
@@ -81,6 +100,13 @@ function DashboardPage() {
   )
 
   const unpriced = totals ? totals.positionCount - totals.pricedPositionCount : 0
+  const nothingPriced = !!totals && totals.positionCount > 0 && totals.pricedPositionCount === 0
+
+  const stalestObservedAt = data?.stalestObservedAt
+  const providerNotResponding =
+    positions.some((position) => position.isLastKnown) ||
+    nothingPriced ||
+    (!!stalestObservedAt && Date.now() - Date.parse(stalestObservedAt) > intervalMs * 2)
 
   const columns: Array<Column<DashboardPosition>> = [
     {
@@ -101,17 +127,21 @@ function DashboardPage() {
           )
         }
 
-        const trailing = isTrailing(position, newestObservedAt, intervalMs)
+        const age = position.observedAt ? formatAge(Date.now() - Date.parse(position.observedAt)) : null
+        const late = isLate(position, newestObservedAt, intervalMs)
 
         return (
           <span
             title={position.observedAt ? t('priceCell.observedAtTitle', { observedAt: position.observedAt }) : undefined}
           >
             {formatMoney(position.currentPrice)}
-            {trailing && position.observedAt ? (
-              <span className="text-warn ml-1.5 text-[11.5px]">
-                {formatAge(Date.now() - Date.parse(position.observedAt))}
+
+            {position.isLastKnown ? (
+              <span className="text-warn ml-1.5 text-[11.5px]" title={t('priceCell.lastKnownTitle')}>
+                {age ? t('priceCell.lastKnownWithAge', { age }) : t('priceCell.lastKnown')}
               </span>
+            ) : late && age ? (
+              <span className="text-warn ml-1.5 text-[11.5px]">{age}</span>
             ) : null}
           </span>
         )
@@ -145,6 +175,10 @@ function DashboardPage() {
         <Alert tone="error" title={t('error.title')}>
           {fallbackMessage(error, t('error.fallback'))}
           {data ? t('error.showingLastKnown') : ''}
+        </Alert>
+      ) : providerNotResponding ? (
+        <Alert tone="warn" title={t('stale.title')}>
+          {t('stale.reason')}
         </Alert>
       ) : null}
 
@@ -194,6 +228,14 @@ function DashboardPage() {
               </div>
             }
           >
+            {saveInterval.isError ? (
+              <div className="mb-3">
+                <Alert tone="error">
+                  {serverMessage(saveInterval.error, t('holdings.refreshSaveFailure'))}
+                </Alert>
+              </div>
+            ) : null}
+
             <Table
               caption={t('holdings.caption')}
               columns={columns}
@@ -202,7 +244,9 @@ function DashboardPage() {
               empty={isPending ? t('holdings.loading') : t('holdings.empty')}
             />
 
-            {unpriced > 0 ? (
+            {nothingPriced ? (
+              <p className="text-warn mt-3 text-[11.5px]">{t('holdings.pricesUnavailable')}</p>
+            ) : unpriced > 0 ? (
               <p className="text-mu mt-3 text-[11.5px]">
                 {t('holdings.unpricedNote', { unpriced, total: totals?.positionCount })}
               </p>
@@ -212,7 +256,23 @@ function DashboardPage() {
           <ApiHealth />
         </div>
 
-        <AlertPanel limit={PANEL_ROWS} compact />
+        <ErrorBoundary
+          fallback={({ retry }) => (
+            <Card title={t('alerts:panel.title')}>
+              <Alert tone="error" title={t('alerts:panel.crashTitle')}>
+                {t('alerts:panel.crashBody')}
+              </Alert>
+
+              <div className="mt-3 sm:max-w-[200px]">
+                <Button variant="secondary" size="sm" onClick={retry}>
+                  {t('common:actions.tryAgain')}
+                </Button>
+              </div>
+            </Card>
+          )}
+        >
+          <AlertPanel limit={PANEL_ROWS} compact />
+        </ErrorBoundary>
       </div>
     </AppShell>
   )

@@ -1,5 +1,6 @@
 using System.Net;
 
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
@@ -12,13 +13,14 @@ namespace StockPortfolio.Tests;
 
 public sealed class FinnhubQuoteProviderTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = new(2026, 8, 5, 15, 0, 0, TimeSpan.Zero);
 
-    private static FinnhubQuoteProvider Build(CountingHandler handler) =>
+    private static FinnhubQuoteProvider Build(CountingHandler handler, ProviderKeyRejection? rejection = null) =>
         new(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
             new StaticHttpClientFactory(new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") }),
             new FakeTimeProvider(Now),
+            rejection ?? new ProviderKeyRejection(),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
     [Theory]
@@ -222,7 +224,8 @@ public sealed class FinnhubQuoteProviderTests
         var byokClient = new HttpClient(byokHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
 
         var factory = new StaticHttpClientFactory(byokClient);
-        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+        var provider = new FinnhubQuoteProvider(
+            sharedClient, factory, new FakeTimeProvider(Now), new ProviderKeyRejection(), NullLogger<FinnhubQuoteProvider>.Instance);
 
         var quotes = await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
@@ -251,6 +254,7 @@ public sealed class FinnhubQuoteProviderTests
             sharedClient,
             new StaticHttpClientFactory(byokClient),
             new FakeTimeProvider(Now),
+            new ProviderKeyRejection(),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
         await provider.GetQuotesAsync(
@@ -268,7 +272,8 @@ public sealed class FinnhubQuoteProviderTests
         var sharedClient = new HttpClient(sharedHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
 
         var factory = new StaticHttpClientFactory(new HttpClient(new CountingHandler(HttpStatusCode.OK)));
-        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+        var provider = new FinnhubQuoteProvider(
+            sharedClient, factory, new FakeTimeProvider(Now), new ProviderKeyRejection(), NullLogger<FinnhubQuoteProvider>.Instance);
 
         await provider.GetQuotesAsync(
             new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
@@ -332,7 +337,8 @@ public sealed class FinnhubQuoteProviderTests
         var byokClient = new HttpClient(byokHandler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") };
 
         var factory = new StaticHttpClientFactory(byokClient);
-        var provider = new FinnhubQuoteProvider(sharedClient, factory, new FakeTimeProvider(Now), NullLogger<FinnhubQuoteProvider>.Instance);
+        var provider = new FinnhubQuoteProvider(
+            sharedClient, factory, new FakeTimeProvider(Now), new ProviderKeyRejection(), NullLogger<FinnhubQuoteProvider>.Instance);
 
         var verdict = await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken);
 
@@ -355,6 +361,7 @@ public sealed class FinnhubQuoteProviderTests
             client,
             new StaticHttpClientFactory(client),
             new FakeTimeProvider(Now),
+            new ProviderKeyRejection(),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
         await provider.VerifyKeyAsync("candidate-key", TestContext.Current.CancellationToken);
@@ -362,11 +369,120 @@ public sealed class FinnhubQuoteProviderTests
         handler.LastTokenHeader.ShouldBe("candidate-key");
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Fetch_WhenTheApplicationsOwnKeyIsRefused_RaisesTheRejectedKeyFlag(HttpStatusCode status)
+    {
+        var rejection = new ProviderKeyRejection();
+        var provider = Build(new CountingHandler(status), rejection);
+
+        await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        // Without the flag a mistyped key is indistinguishable from an outage, and the health panel says nothing.
+        rejection.IsRejected.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task Fetch_WhenAUsersOwnKeyIsRefused_LeavesTheFlagAlone(HttpStatusCode status)
+    {
+        var rejection = new ProviderKeyRejection();
+        var provider = Build(new CountingHandler(status), rejection);
+
+        await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            "a-users-own-key",
+            TestContext.Current.CancellationToken);
+
+        // One user's bad key is that user's problem; raising it here would report the whole feed broken for everybody.
+        rejection.IsRejected.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task VerifyKey_WhenACandidateKeyIsRejected_LeavesTheFlagAlone()
+    {
+        var rejection = new ProviderKeyRejection();
+        var provider = Build(new CountingHandler(HttpStatusCode.Unauthorized), rejection);
+
+        (await provider.VerifyKeyAsync("a-candidate-key", TestContext.Current.CancellationToken))
+            .ShouldBe(KeyVerdict.Rejected);
+
+        rejection.IsRejected.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Fetch_WhenEverySymbolFails_WarnsOnceWithACountRatherThanOncePerSymbol()
+    {
+        var logger = new RecordingLogger();
+
+        var provider = new FinnhubQuoteProvider(
+            new HttpClient(new AlwaysThrowingHandler()) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
+            new StaticHttpClientFactory(new HttpClient(new AlwaysThrowingHandler())),
+            new FakeTimeProvider(Now),
+            new ProviderKeyRejection(),
+            logger);
+
+        await provider.GetQuotesAsync(
+            new HashSet<Ticker>
+            {
+                Ticker.Create("AAPL").AsT0,
+                Ticker.Create("MSFT").AsT0,
+                Ticker.Create("TSLA").AsT0,
+            },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        // A 429 fails every symbol at once; twenty holdings used to write twenty identical lines.
+        var warnings = logger.Entries.Where(entry => entry.Level == LogLevel.Warning).ToList();
+
+        warnings.ShouldHaveSingleItem().Message.ShouldContain("3 of 3");
+
+        // The detail is kept, but where it cannot drown the one line that matters.
+        logger.Entries.Count(entry => entry.Level == LogLevel.Debug).ShouldBe(3);
+    }
+
+    [Fact]
+    public async Task Fetch_WhenTheBodyIsNotTheExpectedShape_LogsTheRawBodyAtDebugOnly()
+    {
+        var logger = new RecordingLogger();
+
+        var provider = new FinnhubQuoteProvider(
+            new HttpClient(new CountingHandler(HttpStatusCode.OK, "<html>Access denied by the firewall</html>", "text/html"))
+            {
+                BaseAddress = new Uri("https://api.finnhub.io/api/v1/"),
+            },
+            new StaticHttpClientFactory(new HttpClient(new CountingHandler(HttpStatusCode.OK))),
+            new FakeTimeProvider(Now),
+            new ProviderKeyRejection(),
+            logger);
+
+        await provider.GetQuotesAsync(
+            new HashSet<Ticker> { Ticker.Create("AAPL").AsT0 },
+            apiKeyOverride: null,
+            TestContext.Current.CancellationToken);
+
+        // An HTML error page from a proxy is undiagnosable unless somebody can see it.
+        logger.Entries
+            .Where(entry => entry.Level == LogLevel.Debug)
+            .ShouldContain(entry => entry.Message.Contains("Access denied by the firewall", StringComparison.Ordinal));
+
+        // A body can be large and can echo the key back inside a URL, so it must never reach information level.
+        logger.Entries
+            .Where(entry => entry.Level >= LogLevel.Information)
+            .ShouldAllBe(entry => !entry.Message.Contains("Access denied by the firewall", StringComparison.Ordinal));
+    }
+
     private static FinnhubQuoteProvider BuildWithFlaky(FlakyHandler handler) =>
         new(
             new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") },
             new StaticHttpClientFactory(new HttpClient(handler) { BaseAddress = new Uri("https://api.finnhub.io/api/v1/") }),
             new FakeTimeProvider(Now),
+            new ProviderKeyRejection(),
             NullLogger<FinnhubQuoteProvider>.Instance);
 
     private sealed class StaticHttpClientFactory(HttpClient client) : IHttpClientFactory
@@ -395,6 +511,34 @@ public sealed class FinnhubQuoteProviderTests
             {
                 Content = new StringContent("""{"count":1,"result":[{"symbol":"AAPL"}]}""", System.Text.Encoding.UTF8, "application/json"),
             });
+        }
+    }
+
+    private sealed class AlwaysThrowingHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+            throw new HttpRequestException("upstream refused");
+    }
+
+    private sealed class RecordingLogger : ILogger<FinnhubQuoteProvider>
+    {
+        public List<(LogLevel Level, string Message)> Entries { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            ArgumentNullException.ThrowIfNull(formatter);
+
+            Entries.Add((logLevel, formatter(state, exception)));
         }
     }
 

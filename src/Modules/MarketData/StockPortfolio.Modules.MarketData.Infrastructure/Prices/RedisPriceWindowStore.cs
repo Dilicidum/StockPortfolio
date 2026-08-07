@@ -40,7 +40,7 @@ internal sealed partial class RedisPriceWindowStore(
 
             await Task.WhenAll(add, trim, expire);
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogAppendFailed(logger, ex, ticker);
         }
@@ -72,7 +72,7 @@ internal sealed partial class RedisPriceWindowStore(
 
             return samples;
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogReadFailed(logger, ex, ticker);
 

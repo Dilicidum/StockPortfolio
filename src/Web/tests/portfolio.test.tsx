@@ -226,6 +226,27 @@ describe('portfolio', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not remove aapl/i)
   })
 
+  it('keeps the server own words when a delete is refused with a reason', async () => {
+    server.use(
+      http.delete('*/api/holdings/:id', () =>
+        HttpResponse.json(
+          { title: 'Service unavailable', detail: 'The database is not reachable.', status: 503 },
+          { status: 503, headers: { 'Content-Type': 'application/problem+json' } },
+        ),
+      ),
+      http.get('*/api/holdings', () => HttpResponse.json([AAPL])),
+    )
+
+    const user = userEvent.setup()
+    await renderPortfolio()
+
+    await user.click(row().getByRole('button', { name: /remove aapl/i }))
+    await user.click(screen.getByRole('button', { name: /^remove$/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/the database is not reachable/i)
+    expect(screen.getByRole('alert')).not.toHaveTextContent(/could not remove aapl/i)
+  })
+
   it('rejects a 6-character ticker before submitting', async () => {
     let posts = 0
 

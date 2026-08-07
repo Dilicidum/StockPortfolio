@@ -43,7 +43,7 @@ internal sealed partial class RedisLastKnownPriceStore(
                 }
             }
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogReadFailed(logger, ex, ordered.Length);
         }
@@ -67,7 +67,7 @@ internal sealed partial class RedisLastKnownPriceStore(
             await Task.WhenAll(quotes.Select(quote =>
                 database.StringSetAsync(KeyPrefix + quote.Ticker.Value, Encode(quote.Price, quote.ObservedAt))));
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogWriteFailed(logger, ex, quotes.Count);
         }

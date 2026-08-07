@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
-using System.Net.Http.Json;
+using System.Text.Json;
 
 using Microsoft.Extensions.Logging;
 
@@ -14,9 +14,12 @@ internal sealed partial class FinnhubQuoteProvider(
     HttpClient client,
     IHttpClientFactory httpClientFactory,
     TimeProvider clock,
+    ProviderKeyRejection rejection,
     ILogger<FinnhubQuoteProvider> logger) : IQuoteProvider
 {
     private const int MaxDegreeOfParallelism = 4;
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     internal const string ByokClientName = "FinnhubByok";
 
@@ -28,6 +31,7 @@ internal sealed partial class FinnhubQuoteProvider(
         ArgumentNullException.ThrowIfNull(tickers);
 
         var quotes = new ConcurrentBag<Quote>();
+        var failed = new ConcurrentBag<string>();
 
         // The per-item catch is load-bearing: without it one dead ticker cancels the rest and blanks the table.
         await Parallel.ForEachAsync(
@@ -44,9 +48,17 @@ internal sealed partial class FinnhubQuoteProvider(
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
+                    failed.Add(ticker.Value);
+
                     LogQuoteFailed(logger, ex, ticker.Value);
                 }
             });
+
+        // One line for the whole fetch: a 429 fails every symbol at once, and twenty identical warnings say nothing extra.
+        if (!failed.IsEmpty)
+        {
+            LogFetchIncomplete(logger, failed.Count, tickers.Count, string.Join(", ", failed.Order(StringComparer.Ordinal)));
+        }
 
         return [.. quotes];
     }
@@ -135,13 +147,13 @@ internal sealed partial class FinnhubQuoteProvider(
 
         if (IsUnauthorised(response.StatusCode))
         {
-            LogAuthRejected(logger, (int)response.StatusCode, ticker.Value);
+            NoteRejection(response.StatusCode, ticker.Value, isApplicationKey: apiKeyOverride is null);
             return null;
         }
 
         response.EnsureSuccessStatusCode();
 
-        return await response.Content.ReadFromJsonAsync<FinnhubQuoteResponse>(ct);
+        return await ReadJsonAsync<FinnhubQuoteResponse>(response, ticker.Value, ct);
     }
 
     private async Task<FinnhubSearchResponse?> SearchAsync(string query, CancellationToken ct)
@@ -152,20 +164,61 @@ internal sealed partial class FinnhubQuoteProvider(
 
         if (IsUnauthorised(response.StatusCode))
         {
-            LogAuthRejected(logger, (int)response.StatusCode, query);
+            NoteRejection(response.StatusCode, query, isApplicationKey: true);
             return null;
         }
 
         response.EnsureSuccessStatusCode();
 
-        return await response.Content.ReadFromJsonAsync<FinnhubSearchResponse>(ct);
+        return await ReadJsonAsync<FinnhubSearchResponse>(response, query, ct);
+    }
+
+    /// <summary>Only the application's own key raises the flag; a user's rejected key is that one user's problem.</summary>
+    private void NoteRejection(HttpStatusCode status, string subject, bool isApplicationKey)
+    {
+        LogAuthRejected(logger, (int)status, subject);
+
+        if (isApplicationKey)
+        {
+            rejection.Raise();
+        }
+    }
+
+    private async Task<T?> ReadJsonAsync<T>(HttpResponseMessage response, string subject, CancellationToken ct)
+    {
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        try
+        {
+            return JsonSerializer.Deserialize<T>(body, JsonOptions);
+        }
+        catch (JsonException)
+        {
+            // Debug only: a body can be large and can echo the key back inside a URL.
+            LogUnexpectedBody(logger, subject, body);
+
+            throw;
+        }
     }
 
     [LoggerMessage(
         EventId = 5100,
-        Level = LogLevel.Warning,
+        Level = LogLevel.Debug,
         Message = "Finnhub quote failed for {Ticker}; this symbol falls back to its last known price")]
     private static partial void LogQuoteFailed(ILogger logger, Exception exception, string ticker);
+
+    [LoggerMessage(
+        EventId = 5107,
+        Level = LogLevel.Warning,
+        Message = "Finnhub could not quote {FailedCount} of {RequestedCount} symbols ({Tickers}); each falls back to its last known price")]
+    private static partial void LogFetchIncomplete(
+        ILogger logger, int failedCount, int requestedCount, string tickers);
+
+    [LoggerMessage(
+        EventId = 5108,
+        Level = LogLevel.Debug,
+        Message = "Finnhub returned a body that is not the expected shape for {Subject}: {Body}")]
+    private static partial void LogUnexpectedBody(ILogger logger, string subject, string body);
 
     [LoggerMessage(
         EventId = 5102,

@@ -36,7 +36,7 @@ internal sealed partial class RedisPollLease(
             return await database.StringSetAsync(
                 InFlightKey, Held, options.Interval * 5, false, When.NotExists);
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogAcquireFailed(logger, ex);
 
@@ -50,7 +50,7 @@ internal sealed partial class RedisPollLease(
         {
             await multiplexer.GetDatabase().KeyDeleteAsync(InFlightKey);
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogReleaseFailed(logger, ex);
         }

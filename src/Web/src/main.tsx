@@ -4,6 +4,7 @@ import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { bootstrapSession } from './auth/bootstrapSession'
 import { authStore } from './auth/authStore'
+import { RouteErrorScreen } from './components/RouteErrorScreen'
 import { Spinner } from './components/Spinner'
 import './lib/i18n'
 import { queryClient } from './lib/queryClient'
@@ -15,6 +16,7 @@ const router = createRouter({
   basepath: import.meta.env.BASE_URL,
   context: { queryClient, auth: authStore },
   defaultPreload: 'intent',
+  defaultErrorComponent: RouteErrorScreen,
 })
 
 declare module '@tanstack/react-router' {

@@ -1,16 +1,19 @@
+using Microsoft.Extensions.Logging;
+
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Contracts;
 using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Application.Prices;
 
-public sealed class QuoteReader(
+public sealed partial class QuoteReader(
     IQuoteProvider provider,
     ILastKnownPriceStore store,
     IUserProviderKeyReader keyReader,
     IUserProviderKeyRepository keyRepository,
     ByokOptions byokOptions,
-    TimeProvider clock) : IQuoteReader
+    TimeProvider clock,
+    ILogger<QuoteReader> logger) : IQuoteReader
 {
     public async Task<IReadOnlyDictionary<string, QuotedPrice>> GetCurrentPricesAsync(
         Guid userId,
@@ -35,7 +38,7 @@ public sealed class QuoteReader(
             return prices;
         }
 
-        var apiKeyOverride = byokOptions.Enabled ? await keyReader.ReadPlaintextAsync(userId, ct) : null;
+        var apiKeyOverride = await ReadOwnKeyAsync(userId, ct);
 
         var fetched = await provider.GetQuotesAsync(requested, apiKeyOverride, ct);
 
@@ -73,6 +76,26 @@ public sealed class QuoteReader(
         return prices;
     }
 
+    /// <summary>A corrupt key ring or a database blip must cost this user their own key, never the whole dashboard.</summary>
+    private async Task<string?> ReadOwnKeyAsync(Guid userId, CancellationToken ct)
+    {
+        if (!byokOptions.Enabled)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await keyReader.ReadPlaintextAsync(userId, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            LogOwnKeyUnreadable(logger, ex);
+
+            return null;
+        }
+    }
+
     private async Task MarkKeyIfRejectedAsync(Guid userId, string apiKeyOverride, CancellationToken ct)
     {
         if (await provider.VerifyKeyAsync(apiKeyOverride, ct) == KeyVerdict.Rejected)
@@ -80,4 +103,10 @@ public sealed class QuoteReader(
             await keyRepository.MarkRejectedAsync(userId, ct);
         }
     }
+
+    [LoggerMessage(
+        EventId = 5150,
+        Level = LogLevel.Warning,
+        Message = "This user's own provider key could not be read; the fetch falls back to the application's key")]
+    private static partial void LogOwnKeyUnreadable(ILogger logger, Exception exception);
 }

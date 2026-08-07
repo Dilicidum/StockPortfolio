@@ -39,8 +39,6 @@ public sealed class ApiFixture : IAsyncLifetime
 
     private const string RolePassword = "role_test_only";
 
-    private const string SigningKey = "integration-test-signing-key-not-a-secret-0123";
-
     public const string FakeProviderName = "Fake";
 
     private const string CorsOrigin = "http://localhost:5173";
@@ -245,9 +243,6 @@ public sealed class ApiFixture : IAsyncLifetime
             ["ConnectionStrings:Alerts"] = connections.Alerts,
             ["ConnectionStrings:MarketData"] = connections.MarketData,
             ["ConnectionStrings:Redis"] = connections.Redis,
-            ["Jwt:SigningKey"] = SigningKey,
-            ["Jwt:Issuer"] = "StockPortfolio",
-            ["Jwt:Audience"] = "StockPortfolio",
             ["Cors:Origins:0"] = CorsOrigin,
 
             // Explicitly empty, appended last: it beats an exported Finnhub__ApiKey that would boot the suite onto the live API and still report green.

@@ -12,7 +12,6 @@
 //   $env:PORTFOLIO_PW        = '...'
 //   $env:MARKETDATA_PW       = '...'
 //   $env:ALERTS_PW           = '...'
-//   $env:JWT_SIGNING_KEY     = '...'   # at least 32 bytes
 //   $env:FINNHUB_API_KEY     = ''      # optional; empty means FakeQuoteProvider
 //
 //   az deployment group what-if -g <rg> -f infra/main.bicep -p infra/main.bicepparam
@@ -44,10 +43,6 @@ param identityPassword = readEnvironmentVariable('IDENTITY_PW')
 param portfolioPassword = readEnvironmentVariable('PORTFOLIO_PW')
 param marketDataPassword = readEnvironmentVariable('MARKETDATA_PW')
 param alertsPassword = readEnvironmentVariable('ALERTS_PW')
-
-param jwtSigningKey = readEnvironmentVariable('JWT_SIGNING_KEY')
-param jwtIssuer = 'stockportfolio'
-param jwtAudience = 'stockportfolio-spa'
 
 // Empty is a supported, tested configuration: the app falls back to FakeQuoteProvider and logs a
 // warning. Finnhub shut down its sandbox in 2022, so the demo has to work without a key.

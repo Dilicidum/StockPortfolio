@@ -6,13 +6,23 @@ Built against a take-home brief (`TZ_Stock_Portfolio_App.docx`, Ukrainian). **P0
 
 ## Current state
 
-**Phases 1–5 are functionally complete.** `dotnet build` is clean at 0 warnings and `docker compose up`
+**All six phases are functionally complete.** `dotnet build` is clean at 0 warnings and `docker compose up`
 brings the whole stack up from a clean volume. Phase 5 shipped the settings surface: a theme applied before
 the first paint, English and Ukrainian, a saved dashboard refresh interval, a visibility toggle per position,
-and a per-user market-data API key encrypted at rest.
+and a per-user market-data API key encrypted at rest. **Phase 6 is built and not yet verified in a browser
+or deployed**, which is what a phase being *done* requires — so its implementation plan stays.
 
 **Phase 5 closed a P0 gap, not just extras.** The brief lists the minimum routes as login, dashboard,
 portfolio and **settings**, and the settings route did not exist until this phase.
+
+**Phase 6 is graceful failure, and three of its answers are counter-intuitive.** Stopping Redis changes
+nothing on the dashboard — the provider is asked directly, so the cache was never on that read path — and it
+suppresses alerts, because a stale price is a degraded read while a made-up price history is a wrong alert. A
+rejected provider key is reported as unhealthy with its reason and the app keeps serving last-known prices;
+it does **not** fall back to the fake provider, which would serve invented numbers for real tickers. And a
+last-known price is shown only while the market has been open an hour or less since it was recorded, counting
+open minutes rather than wall-clock ones, so Friday's close stands all weekend and overnight and a dash means
+a real trading hour has passed with nothing to show. Holidays are not handled.
 
 Two things were deleted rather than built. The **client-side token bucket** was sized to one provider's free
 tier, and the brief says free-tier limits are not a problem, so it went — what holds the rate now is retry
@@ -29,9 +39,9 @@ ASP.NET Core — the Data Protection packages both trip that rule transitively.
 Still open:
 
 - `TokenPolicy` values (token lifetimes, rotation, grace window) are provisional and unsigned-off.
-- The readiness probe checks one database login of four.
 - Server-generated text (API validation messages, a fired alert's reason) stays English; the backend does no
   language negotiation.
+- Nothing since Phase 4 has been deployed, so Phases 5 and 6 are unproven against the public URL.
 
 [docs/deferred-work.md](docs/deferred-work.md) is the register for anything deferred, unbuilt or rejected. Something described in a plan and missing from the code belongs there too, not only defects found in code that exists. Read it before assuming an unimplemented feature is simply "not that phase yet".
 
@@ -178,6 +188,8 @@ The constructor must contain no validation checks. EF matches constructor parame
 
 **No unit of work, and no `ConfigureAwait(false)`.** `DbContext` already *is* a unit of work, so a second one over it only adds a name; a repository write method saves before it returns, and because every repository in a module shares one scoped `DbContext`, one save carries whatever else the handler changed. Where two writes must land together, order them so the last repository call is the one that saves. `ConfigureAwait(false)` is for general-purpose libraries — ASP.NET Core has no `SynchronizationContext`, so it is noise here.
 
+**Every context retries a failed connection three times, two seconds apart, and that constrains any transaction added later.** `EnableRetryOnFailure` is on all four. Two consequences, and the second is a standing rule rather than a note. It makes EF buffer every result set, which is a real cost paid on every query. And **an explicit transaction must be opened inside the execution strategy, and the work inside it must be safe to run twice** — EF refuses a user-initiated transaction otherwise, at run time, with a message telling you to use `CreateExecutionStrategy`. There is no explicit transaction in the codebase today; the first one has to obey this. The numbers are deliberate rather than the defaults: six attempts backing off to thirty seconds would leave a request against a stopped Postgres hanging for about a minute, with the browser on a spinner and the readiness probe timing out long before the answer arrived.
+
 **No defensive null checks where the compiler already answered.** `ArgumentNullException.ThrowIfNull(app)` in an endpoint-mapping extension, or `ThrowIfNull(command)` in a handler whose command the API just built, protects against a caller that cannot exist. Keep those checks on public entry points that take input from a user.
 
 **An abstraction returns a named type and takes the module's own value objects.** `IPriceWindowStore.ReadAsync` is the one exception — it returns `IReadOnlyList<(DateTimeOffset At, decimal Price)>` and takes a `string` ticker, and it is the only tuple-returning abstraction in the codebase. It was built that way deliberately and is recorded here rather than left to look like an oversight somebody should tidy. A second one is a convention change, not a precedent already set.
@@ -220,19 +232,19 @@ The rule is narrower than "every percentage is a string", and the alert threshol
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** **723 passing, nothing skipped, of 723 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** Nothing is skipped and nothing ever should be, so passing and discovered stay equal. **785 passing, nothing skipped, of 785 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
 | Assembly | Passed |
 |---|---|
 | `Shared.Kernel.UnitTests` | 21 |
 | `Modules.Identity.UnitTests` | 15 |
 | `Modules.Portfolio.UnitTests` | 115 |
-| `Modules.MarketData.UnitTests` | 182 |
+| `Modules.MarketData.UnitTests` | 239 |
 | `Modules.Alerts.UnitTests` | 108 |
 | `Architecture.Tests` | 60 |
-| `Api.IntegrationTests` | 222 |
+| `Api.IntegrationTests` | 227 |
 
-The browser tests are counted separately by `npm --prefix src/Web test` — **64 passing across 13 files**. These are the only test counts in the repository; do not copy them into another document.
+The browser tests are counted separately by `npm --prefix src/Web test` — **79 passing across 15 files**, measured on 2026-08-07. These are the only test counts in the repository; do not copy them into another document.
 
 **Nothing skips, and `Identity.Contracts` is why that took work.** It is empty on purpose — nothing depends on Identity at runtime, so its `.Contracts` has nothing to hold. An empty assembly has its project references trimmed out of the metadata by the compiler, so a rule walking them finds an empty list and reports green. That used to be handled by skipping the two rules over it. It is now handled by **not generating a case at all**: `ScannedAssemblies` and `AssembliesFor` filter on `SolutionAssemblies.HasCode`, computed at run time. Add a type to `Identity.Contracts` and both rules switch themselves back on with no edit — verified by doing it, which took the architecture suite from 60 tests to 62.
 
@@ -286,6 +298,11 @@ Each of these costs a day if you meet it cold.
 - **`Clients.User(...)` matches a claim these tokens do not carry.** The built-in provider reads `nameidentifier`; this app issues `sub`. Without `SubjectClaimUserIdProvider` every alert is delivered to nobody, with no exception and no log line — `AlertStreamTests` pins both the registration and the claim name.
 - **A browser cannot set a header on the hub connection**, so SignalR's client sends the token as `?access_token=`. `BearerTokenEvents.OnMessageReceived` reads it, and the `StartsWithSegments` path check is what stops every other route in the app accepting a credential in its URL.
 - **ACA liveness must not check Postgres or Redis.** A brief dependency failure then becomes a container restart loop, turning a degraded app into a down one.
+- **Three probes, three questions, and every check must be tagged or it silently joins readiness.** Liveness runs zero checks; readiness runs the tag `"ready"` — the four database logins and the cache; startup runs the tag `"startup"` — pending migrations only, which is a database round trip and is exactly why it cannot be liveness. `MapHealthChecks` with no predicate runs **everything**, so an untagged check added later joins readiness by accident and a probe quietly changes meaning. There is a fourth map, `GET /api/health/detail`, authenticated, tag `"detail"`, and it is a `MapHealthChecks` rather than a hand-written route on purpose — a hand-written one makes the host the place every new component has to touch.
+- **Readiness must never read a cache outage as an inability to serve traffic.** Every check registers with a default failure status of Unhealthy, so Redis down would answer 503 on `/health/ready`, Container Apps would withdraw the replica, and at `maxReplicas: 2` the whole API goes unreachable — from a *cache* being down, when the dashboard does not even read the cache on the happy path. Register it with `failureStatus: HealthStatus.Degraded`; the framework already maps Degraded to 200. The only test that catches this boots a host with Redis down and asserts `/health/ready` is **200**.
+- **A health route must never answer 503 because the database is down.** Every database-touching route gained a 503; the health routes are carved out by hand. `/api/health/detail` maps all three states to 200. An endpoint whose job is to report that Postgres is unhealthy has to say so in a body — otherwise the browser's health card goes blank at the exact moment it becomes useful, and the alerts-suppressed banner, which reads the cache entry out of that same body, stops working whenever Redis and Postgres are down together.
+- **Container Apps caps `failureThreshold` at 10 and `initialDelaySeconds` at 60**, and the obvious startup-probe numbers are refused at deployment validation, not at run time. Ten failures on thirty-second periods is five minutes and is inside both limits. `successThreshold` must stay 1 for a startup probe.
+- **`InvariantGlobalization` is on, so a time-zone id resolves on one operating system and not the other.** `Directory.Build.props` sets it, which removes ICU. Measured, not assumed: the Linux container then resolves `America/New_York` and throws on `Eastern Standard Time`, and a Windows machine does the exact opposite. So look up the first, catch `TimeZoneNotFoundException`, look up the second. **`TryConvertWindowsIdToIanaId` is not a way out** — it is one of the calls invariant mode disables. Do not hand-roll daylight-saving arithmetic instead; `TimeZoneInfo` carries the real rules and any future change to them.
 - **TanStack Query v5.89.0 renamed the mutation callbacks' `TContext` generic to `TOnMutateResult` and *added* a new `context` (`{ client, meta, mutationKey }`) as the last parameter of each**; `mutationFn` gained a second argument. **Argument positions did not move** — the `onMutate` snapshot is still argument 3 in `onError`/`onSuccess` and 4 in `onSettled` — so rollback code written before 5.89 still compiles and still restores the correct value. Pinned version is 5.101.4.
 - **Tailwind v4 has no config file.** `darkMode: 'class'` does not exist; dark mode is `@custom-variant` in CSS. The failure is silent — `dark:` classes just never apply.
 - **Tailwind v4's `@theme` snapshots a variable's value unless you write `@theme inline`.** Without `inline` a colour freezes at whichever scheme was active when it was read, and light/dark stops following `data-theme`. Nothing errors.
@@ -307,7 +324,7 @@ Each of these costs a day if you meet it cold.
 - **`CREATE SCHEMA … AUTHORIZATION migrator` needs `GRANT migrator TO CURRENT_USER` first.** Compose runs as superuser so it passes locally; the Azure Flexible Server admin is not a superuser and the migration job fails on first deploy.
 - **`beforeLoad` is synchronous; React effects run after the first render.** Load the session *before* mounting `RouterProvider`, or a hard refresh of a protected route always bounces to `/login` — which is the session-persistence requirement failing while every test passes.
 - **Vite `base` must come from the environment**, not be hardcoded to `/<repo>/`. nginx serves the compose SPA at `/`, so a baked-in base makes it request `/<repo>/assets/*.js` and render blank.
-- **ACA adds default TCP probes when ingress is on.** Declare `httpGet` liveness and readiness probes in Bicep, or `/health/live` and `/health/ready` are never called and the split does nothing.
+- **ACA adds default TCP probes when ingress is on.** Declare all three `httpGet` probes in Bicep — liveness, readiness and startup — or `/health/live`, `/health/ready` and `/health/startup` are never called and the split does nothing.
 - **`OneOf.Types.NotFound` collides with `Microsoft.AspNetCore.Http.HttpResults.NotFound`.** Only affects a file that imports `HttpResults`, which endpoints no longer need now that they return `Task<IResult>`. If one ever does, alias it — `using NotFound = OneOf.Types.NotFound;` — rather than writing the full name at each use.
 - **`[GenerateOneOf]` crashes on types in the global namespace.** It builds the generated filename from the namespace and emits `<global namespace>_Foo.g.cs`; `<` is illegal, so the generator throws `CS8785` and every implicit conversion then fails with unrelated-looking errors. Nothing uses the attribute now — handlers return `OneOf<…>` directly — but if one is ever reintroduced, declare it inside a namespace.
 - **Revoking and rotating a refresh token are not the same ending.** Both stamp `SupersededAt`; only rotation sets `SupersededBy`. A grace-period check written against `SupersededAt` alone therefore keeps accepting the token the user just logged out with, for the whole window — logout silently does nothing for 30 seconds while every test stays green. `Refresh_AfterLogout_IsRejectedInsideTheGraceWindow` pins it.
@@ -365,5 +382,7 @@ These were considered and cut. Don't reintroduce them without asking.
 - **Watchlist** — «перелік акцій» in req 8 sits inside *dashboard settings*, so it means which of your holdings show on the dashboard. That is `is_visible` on `holdings`.
 - **A cached ticker table in MarketData** — the poll list is read live each cycle, from Alerts. Removing it also removed two event handlers, a reconciliation pass and a way for the two lists to disagree.
 - **Raw SQL** — see Conventions.
-- **Trading-hours gating** — dropped entirely. It existed to stop pointless polling outside market hours; the poller now only runs for tickers with an active alert, and the dashboard fetches on demand, so there is nothing to gate.
+- **Trading-hours gating** — dropped entirely. It existed to stop pointless polling outside market hours; the poller now only runs for tickers with an active alert, and the dashboard fetches on demand, so there is nothing to gate. Note that market hours came back for a *different* job in Phase 6 — counting how long a stored price has been allowed to age — and that is a read-side rule, not a gate on polling.
+- **A market-holiday calendar** — a week of work for a demo. On Thanksgiving afternoon the price column dashes an hour into a market that was never open; the failure is cosmetic and corrects itself the next trading day.
+- **Falling back to the fake provider when a key is rejected** — it would serve invented prices for real tickers on the deployed site, which is the one thing the fake must never do. The app starts, reports the rejection through the health detail, and keeps serving last-known prices instead.
 - **A hand-written alert stream** — server-sent events, a single-use connection ticket and a hand-rolled reconnect were all built and then deleted in favour of SignalR over WebSockets, which is what the brief lists. Roughly 450 lines of our code became about 60. Do not reintroduce any of it: the ticket, the heartbeat and the backoff table are all things the library does. The README carries the comparison; the UI badge says "Live (WebSocket)".

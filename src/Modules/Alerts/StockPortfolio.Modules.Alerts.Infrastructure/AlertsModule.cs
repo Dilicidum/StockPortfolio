@@ -39,11 +39,18 @@ public static class AlertsModule
 
         services.AddDbContext<AlertsDbContext>(options => options.UseNpgsql(
             connectionString,
-            npg => npg.MigrationsHistoryTable(
-                AlertsDbContext.MigrationsHistoryTableName,
-                AlertsDbContext.SchemaName)));
+            npg =>
+            {
+                npg.MigrationsHistoryTable(
+                    AlertsDbContext.MigrationsHistoryTableName,
+                    AlertsDbContext.SchemaName);
 
-        services.AddHealthChecks().AddDbContextCheck<AlertsDbContext>("postgres-alerts");
+                // Three attempts two seconds apart, not the six-attempt default: a stopped database must answer before the readiness probe times out. The cost is that EF now buffers every result set.
+                npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(2), errorCodesToAdd: null);
+            }));
+
+        // Tagged, not bare: an untagged check joins no probe at all now that every MapHealthChecks filters on a tag.
+        services.AddHealthChecks().AddDbContextCheck<AlertsDbContext>("postgres-alerts", tags: ["ready", "detail"]);
 
         services.AddScoped<IAlertSettingRepository, AlertSettingRepository>();
         services.AddScoped<IFiredAlertRepository, FiredAlertRepository>();

@@ -6,9 +6,8 @@ internal static class RedisExtensions
 {
     public const string RedisConnectionStringName = "Redis";
 
-    public static IServiceCollection AddStockPortfolioRedis(
-        this IServiceCollection services,
-        IConfiguration configuration)
+    /// <summary>Parsed here and nowhere else, so the SignalR backplane's own connection inherits these settings.</summary>
+    public static ConfigurationOptions ReadConnectionOptions(IConfiguration configuration)
     {
         var redisConnectionString = configuration.GetConnectionString(RedisConnectionStringName);
 
@@ -26,6 +25,13 @@ internal static class RedisExtensions
         // A Redis blip must not kill startup.
         redisOptions.AbortOnConnectFail = false;
 
+        return redisOptions;
+    }
+
+    public static IServiceCollection AddStockPortfolioRedis(
+        this IServiceCollection services,
+        ConfigurationOptions redisOptions)
+    {
         services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
 
         return services;

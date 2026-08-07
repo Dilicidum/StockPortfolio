@@ -30,11 +30,18 @@ public static class IdentityModule
         // AddDbContext, never AddDbContextFactory: the Migrator finds contexts by their own service type.
         services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(
             connectionString,
-            npg => npg.MigrationsHistoryTable(
-                IdentityDbContext.MigrationsHistoryTableName,
-                IdentityDbContext.SchemaName)));
+            npg =>
+            {
+                npg.MigrationsHistoryTable(
+                    IdentityDbContext.MigrationsHistoryTableName,
+                    IdentityDbContext.SchemaName);
 
-        services.AddHealthChecks().AddDbContextCheck<IdentityDbContext>("postgres-identity");
+                // Three attempts two seconds apart, not the six-attempt default: a stopped database must answer before the readiness probe times out. The cost is that EF now buffers every result set.
+                npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(2), errorCodesToAdd: null);
+            }));
+
+        // Tagged, not bare: an untagged check joins no probe at all now that every MapHealthChecks filters on a tag.
+        services.AddHealthChecks().AddDbContextCheck<IdentityDbContext>("postgres-identity", tags: ["ready", "detail"]);
 
         return services;
     }

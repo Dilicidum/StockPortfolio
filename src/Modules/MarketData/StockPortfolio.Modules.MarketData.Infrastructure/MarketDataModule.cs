@@ -9,6 +9,7 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 using StockPortfolio.Modules.MarketData.Application.Names;
 using StockPortfolio.Modules.MarketData.Application.Prices;
 using StockPortfolio.Modules.MarketData.Contracts;
+using StockPortfolio.Modules.MarketData.Infrastructure.Health;
 using StockPortfolio.Modules.MarketData.Infrastructure.Names;
 using StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 using StockPortfolio.Modules.MarketData.Infrastructure.Polling;
@@ -22,6 +23,8 @@ public static class MarketDataModule
     private const string UserAgent = "StockPortfolio/1.0";
 
     public const string ConnectionStringName = "MarketData";
+
+    public const string FeedCheckName = "marketdata-feed";
 
     private const string ByokEnabledKey = "MarketData:Byok:Enabled";
 
@@ -42,11 +45,18 @@ public static class MarketDataModule
 
         services.AddDbContext<MarketDataDbContext>(options => options.UseNpgsql(
             connectionString,
-            npg => npg.MigrationsHistoryTable(
-                MarketDataDbContext.MigrationsHistoryTableName,
-                MarketDataDbContext.SchemaName)));
+            npg =>
+            {
+                npg.MigrationsHistoryTable(
+                    MarketDataDbContext.MigrationsHistoryTableName,
+                    MarketDataDbContext.SchemaName);
 
-        services.AddHealthChecks().AddDbContextCheck<MarketDataDbContext>("postgres-marketdata");
+                // Three attempts two seconds apart, not the six-attempt default: a stopped database must answer before the readiness probe times out. The cost is that EF now buffers every result set.
+                npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(2), errorCodesToAdd: null);
+            }));
+
+        // Tagged, not bare: an untagged check joins no probe at all now that every MapHealthChecks filters on a tag.
+        services.AddHealthChecks().AddDbContextCheck<MarketDataDbContext>("postgres-marketdata", tags: ["ready", "detail"]);
 
         services.AddSingleton<IKeyRingStore, KeyRingStore>();
 
@@ -63,6 +73,9 @@ public static class MarketDataModule
         var options = FinnhubOptions.FromConfiguration(config);
 
         services.AddSingleton(options);
+
+        // Registered on both branches: the health report asks about it whichever provider is in play.
+        services.AddSingleton<ProviderKeyRejection>();
 
         if (options.HasApiKey)
         {
@@ -97,6 +110,10 @@ public static class MarketDataModule
         services.AddScoped<IPriceWindowReader, PriceWindowReader>();
         services.AddScoped<ISymbolValidator, SymbolValidator>();
         services.AddScoped<ICompanyNameReader, CompanyNameReader>();
+        services.AddScoped<IFeedHealth, FeedHealthReader>();
+
+        // "detail" and not "ready": a rejected key reports Unhealthy, and readiness answering 503 for that would withdraw every replica.
+        services.AddHealthChecks().AddCheck<FeedHealthCheck>(FeedCheckName, tags: ["detail"]);
 
         services.AddMarketDataHandlers();
 
@@ -122,6 +139,7 @@ public static class MarketDataModule
     {
         services.AddSingleton(PollingOptions.FromConfiguration(config));
         services.AddSingleton<IPollLease, RedisPollLease>();
+        services.AddSingleton<IPollHeartbeatStore, RedisPollHeartbeatStore>();
 
         // TryAdd, so a host adapter registered before this call survives; one registered after wins on last-registration-wins.
         services.TryAddSingleton<IPriceSampleObserver, NoOpPriceSampleObserver>();

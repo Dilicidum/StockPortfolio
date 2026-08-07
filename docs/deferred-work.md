@@ -88,25 +88,18 @@ seven now. Not done. The clock half is now decided in practice rather than in pr
 is driven by `FakeTimeProvider` throughout, including its `CreateTimer`, exactly as this item predicted —
 and `TestClock` is still sitting in the integration project doing the same job worse.
 
-### C2 — JWT configuration is read and validated twice
+### C2 — JWT configuration is read and validated twice — **DONE (Phase 6)**
 
-`src/Host/Extensions/AuthenticationExtensions.cs:16-54` and
-`Identity.Infrastructure/Security/JwtOptions.cs:14-64` each read the `Jwt` section, each enforce the 32-byte
-minimum, and each declare their own `DefaultIssuer` and `DefaultAudience`. The comment at
-`AuthenticationExtensions.cs:19` acknowledges the risk rather than removing it. Change one default and the
-process issues tokens it then refuses — a 401 with no clue attached.
+Two places used to read the `Jwt` section, each enforcing its own 32-byte minimum and its own issuer and
+audience defaults, so changing one default made the process issue tokens it then refused.
 
-**Fix:** a `JwtSettings` record in `Identity.Application`, which **both** `.Infrastructure` and `.Api`
-already reference, so the layering objection does not apply. One definition of "a valid signing key".
-
-Covered today by `AuthenticationTests` registering and then calling `/me`, which proves the issuer and the
-validator agree on the configured path. Only the *defaults* and the key-length check are uncovered.
-
-**Trigger:** the first time either default is changed, or auth registration moves into `Identity.Api`.
-
-**Status: still not triggered.** Phase 4 split `AddIdentityPersistence` out of `AddIdentityModule` (C8),
-which moved the eager signing-key check off the migrator's path but left both readers of the `Jwt` section
-exactly where they were. Neither default changed.
+Both readers had already gone by Phase 6: sessions are ASP.NET Core Identity bearer tokens, which are
+data-protected rather than signed, so there was no signing key left to read. What remained was the
+configuration itself — the `Jwt` block in both host settings files, three Bicep parameters, the container
+app's secret and three environment entries, a GitHub secret in two workflows, two compose entries, an
+`.env.example` section and the value `ApiFixture` supplied — all of it feeding nothing. Dead configuration
+that looks alive is worse than none, so Phase 6 deleted every side of it in one change rather than unifying
+two readers that no longer exist.
 
 ### C3 — two Dockerfiles duplicate 22 identical `COPY` lines
 
@@ -177,11 +170,13 @@ rather than on a request, so an unreachable `alerts_svc` produced no failing HTT
 four distinct names, and `HealthCheckTests` pins the names **and their count** — a module that stops
 contributing one is a failing test rather than a quiet gap.
 
-**One thing this did not settle, and Phase 6 owns it.** Readiness runs *every* registered check, and Redis is
-registered alongside the four. Every check defaults to reporting unhealthy on failure, so Redis being down
-takes the API out of the load balancer entirely — which is worse than the gap this item closed, and is the
-direct opposite of Phase 6's "Redis stopped, the dashboard still renders prices". Fixing it needs the cache to
-report *degraded* and the check sets to be tagged, so readiness answers only the question it is named after.
+**Closing this one opened a worse one, and Phase 6 closed that too.** Readiness ran *every* registered check,
+Redis among them, and every check defaults to reporting unhealthy on failure — so a cache outage took the API
+out of the load balancer entirely, which is the direct opposite of "Redis stopped, the dashboard still renders
+prices". The cache is now registered with a *degraded* failure status, which the framework maps to 200, and
+every check carries a tag its probe selects on, so readiness answers only the question it is named after and a
+check added later cannot silently join it. An integration test boots a host with Redis unreachable and asserts
+readiness is **200** with the cache reported degraded.
 
 ### C8 — the Migrator invents a JWT signing key — **DONE (Phase 4)**
 
@@ -263,31 +258,37 @@ packages pull it in transitively. The keys live in `marketdata.data_protection_k
 The skip reason is therefore false in every clause, which is the failure mode this register exists to
 prevent: an item parked with a good reason, and nobody re-reading the reason when the ground moved.
 
-### D10 — compose startup ordering gaps
+### D10 — compose startup ordering gaps — **DONE (Phase 6)**
 
-`redis` defines a `redis-cli ping` healthcheck that nothing waits on — `api` uses
-`condition: service_started`. `api` has no healthcheck, and `web` waits on it with `service_started`, so
-nginx can serve the SPA before the API is listening and the first API call returns 502.
+Three gaps, all in `docker-compose.yml`. `redis` defined a `redis-cli ping` healthcheck that nothing waited
+on, because `api` used `condition: service_started`. `api` had no healthcheck at all. And `web` waited on
+`api` with `service_started`, so nginx could serve the SPA before the API was listening and the first call
+from the browser came back 502. Only the database half was ordered correctly — `api` already waited on
+`postgres: service_healthy` and `migrations: service_completed_successfully`.
 
-**Fix:** `redis: condition: service_healthy`, and a healthcheck on `api` against `/health/ready`. Note that
-the `aspnet:10.0` image ships neither curl nor wget, so this needs a `HEALTHCHECK` in the Dockerfile or a
-shell-based probe.
+**What kept it open for four phases was one measured fact: the runtime image ships neither curl nor wget.**
+Every obvious healthcheck needs one of them, and adding a package to the runtime image for a local convenience
+is a poor trade. The answer was to check what the image *does* have. `mcr.microsoft.com/dotnet/aspnet:10.0` is
+Ubuntu 24.04 with bash 5.2, grep and head, and **bash's `/dev/tcp` opens a TCP socket with no external
+program at all**. So `api`'s healthcheck opens the socket itself, writes a `GET /health/ready HTTP/1.1` with
+`Connection: close`, and greps the status line for 200. A real HTTP check, no new package, no image growth.
+The one thing to get right is the escaping: `\r\n` has to survive YAML as a backslash and an `r`, so that
+`printf` inside bash is what turns it into CR LF.
 
-**Trigger:** before the first deploy, or any demo where someone else runs `docker compose up`.
+All three are fixed. `api` waits on `redis: service_healthy`, `api` has that healthcheck, and `web` waits on
+`api: service_healthy`. `api` keeps `restart: unless-stopped` — deliberately, because the Postgres-down
+condition is that the API does *not* restart-loop, and that setting is what the check is against.
 
-**Status: the trigger has happened and passed.** The first deploy was 2026-08-02 and Phase 3 deployed on
-2026-08-05; this was not done before either. Every clause above is still true of `docker-compose.yml`:
-`redis` has its `redis-cli ping` healthcheck (`:73`) and `api` still waits on it with
-`condition: service_started` (`:120`); `api` still has no `healthcheck` block; `web` still waits on `api`
-with `service_started` (`:162`). The database half *is* ordered correctly — `api` waits on
-`postgres: service_healthy` and `migrations: service_completed_successfully` — so only the Redis and SPA
-halves are not. `web` has its own healthcheck (`:165`), which makes the missing one on `api` easy to misread
-as present.
+**Proven by running it, not by reading it.** From `docker compose down -v`, a `docker compose up -d --wait`
+reached every service healthy in **20 seconds**, with the API answering its first probe about five seconds
+after its container started. Two negative controls show the check can fail on the thing it is named after: the
+same command against a closed port and against a 404 path both exit non-zero, so it is testing the readiness
+route rather than merely proving bash runs.
 
-Re-read at the end of Phase 4: the Redis half is now the more interesting one. The poller starts with the
-host and reaches for Redis on its first cycle, so `api` starting before Redis is ready is no longer only a
-first-request problem. The per-cycle `try/catch` absorbs it and the next cycle succeeds, which is why this is
-still deferred rather than promoted.
+The Redis half was the one that mattered most by the end of Phase 4. The quote poller starts with the host and
+reaches for Redis on its first cycle, so `api` starting before Redis is ready stopped being only a
+first-request problem — the per-cycle `try/catch` absorbed it and the next cycle recovered, which is exactly
+the kind of silent, self-healing wrongness this register exists to catch before someone relies on it.
 
 ### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables have no module behind them — **DONE (Phase 4)**
 
@@ -350,6 +351,47 @@ accepted, so the two rules cannot drift apart.
    provider outage degrades to the Phase 2 behaviour rather than blocking the form. ✅
 4. The Phase 2 plan marks the feature delivered. ✅
 
+### E3 — the deploy smoke step proves nothing about the alert stream
+
+Phase 6 asked the deploy's smoke step for two assertions. **The first ships.** `/health/ready` now writes a
+JSON body, so the step reads it and fails the deploy unless `postgres-identity`, `postgres-portfolio`,
+`postgres-marketdata` and `postgres-alerts` each report `Healthy` **by name**, instead of the deploy passing on
+one word from a status line. `redis` is printed and deliberately not required to be Healthy: it is registered
+with a Degraded failure status so that a cache outage keeps the replica in rotation, and demanding Healthy in
+the smoke step would re-impose the exact failure that registration removed. The overall `status` is not
+asserted for the same reason — it legitimately reads `Degraded` while all four databases are fine.
+
+**The second is not built.** Proving the alert stream produces a heartbeat within thirty seconds needs a
+signed-in WebSocket, which needs an account created by hand, its two credentials held as repository secrets,
+and a small Node step using the `@microsoft/signalr` package the web workspace already installs. It is item 1
+on Phase 6's own cut list — the most expensive item in the phase for the least visible benefit — and the
+account and the secrets do not exist.
+
+**So what a green deploy proves is narrower than it looks: the API is reachable and its four database logins
+are healthy.** It proves nothing end to end about the stream — not that the hub accepts a WebSocket upgrade
+through the platform's ingress, not that the Redis backplane is wired, not that a browser would receive a
+single message. A deploy that broke any of those would still go green.
+
+**Fix:** a smoke account created once by hand, its email and password as two repository secrets, and a step
+after the readiness assertion that signs in over HTTP, opens the hub at `/api/alerts/stream` with the access
+token in the query string, and fails if nothing arrives within thirty seconds.
+
+**Trigger, either of two, both checkable against the code:**
+
+- **The repository gains credentials for a non-interactive account for any other reason** — a second smoke
+  check, a browser run in CI, a seeded demo login. Read the secret names out of `.github/workflows/`. Almost
+  the whole cost of this item is the hand-made account and its two secrets; once something else has paid it,
+  what is left is one step.
+- **Any change to the three settings that only the deployed environment can exercise** — the browser pinning
+  the hub to WebSockets with the negotiate step skipped, or the host's SignalR Redis backplane wiring. That
+  trio is the documented exemption from sticky sessions, nothing local can disprove it, and nothing else in
+  the pipeline would notice it breaking.
+
+**Status: neither trigger has happened.** Cut on purpose in Phase 6, not overlooked. Do not close this with a
+step that registers its own account on each run — that leaves rubbish in the production database, which is
+already a known cost there (`docs/DEPLOYING.md` records the `smoke-*@example.com` user that exists for that
+reason), and it would not be closing this item so much as widening that one.
+
 ---
 
 ## Skipped
@@ -360,7 +402,6 @@ Not deferred — these have no driver, and acting on them would be speculative.
 |---|---|---|
 | A6 | `/logout` accepts an unbounded refresh token while `/refresh` caps at 256 | The 30 MB request body limit already caps it and the route requires authorization. Adding a validator would make the body required and break the documented "omit the body and still get 204". A length check inside `LogoutAsync` is the cheap fix if it ever matters. |
 | A7 | No `UseForwardedHeaders`, though nginx and ACA both send `X-Forwarded-*` | Nothing reads the client IP or scheme. `TypedResults.Created` uses a relative path, so no wrong absolute URL is generated. Becomes real the moment rate limiting is split by IP, or anything logs a client address for audit. |
-| A8 | `ApiExceptionHandler` emits a different `type` URI namespace than `ProblemDetailsDefaults` | Two problem-details contracts for the same status, but no client reads `type` — the SPA reads `status` and `errors`. Fix by deleting the `Title` and `Type` assignments and letting the defaults fill them. |
 | B9 | The reflection rules see *usage*, not *declaration* — an unused `ProjectReference` is invisible | Roslyn omits an assembly reference when no type from it is used, so a forbidden `ProjectReference` that is not yet used passes rules 1, 5 and 6. A test that parses the csproj files would close it. Nobody has hit this, and `.Infrastructure` being `internal` limits the damage. |
 | D8 | Naming and formatting debris | `LoggingDecorator.cs` contains no type of that name; `ProblemDetailsExtensions` holds two factories that are not extensions; stray double blank lines. Cosmetic only. |
 

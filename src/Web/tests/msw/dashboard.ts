@@ -19,8 +19,4 @@ export const emptyDashboard: GetDashboardResult = {
 
 export const dashboardHandler = http.get('*/api/dashboard', () => HttpResponse.json(emptyDashboard))
 
-export const marketDataHealthHandler = http.get('*/api/marketdata/health', () =>
-  HttpResponse.json({ provider: 'FakeQuoteProvider' }),
-)
-
-export const dashboardHandlers = [dashboardHandler, marketDataHealthHandler]
+export const dashboardHandlers = [dashboardHandler]

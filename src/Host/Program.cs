@@ -21,10 +21,13 @@ builder.Services.AddExceptionHandler<ApiExceptionHandler>();
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton(TimeProvider.System);
 
-// Before the modules: MarketData injects IConnectionMultiplexer and nothing in it says so.
-builder.Services.AddStockPortfolioRedis(builder.Configuration);
+// Parsed once and handed to both connections; the backplane silently kept its own defaults when it took the raw string.
+var redisOptions = RedisExtensions.ReadConnectionOptions(builder.Configuration);
 
-builder.Services.AddStockPortfolioSignalR(builder.Configuration);
+// Before the modules: MarketData injects IConnectionMultiplexer and nothing in it says so.
+builder.Services.AddStockPortfolioRedis(redisOptions);
+
+builder.Services.AddStockPortfolioSignalR(redisOptions);
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {

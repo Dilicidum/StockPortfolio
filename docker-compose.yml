@@ -116,8 +116,10 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      # service_healthy, not service_started: the quote poller reaches for Redis on its
+      # first cycle, so a container that is merely running is not enough.
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
       # ASP.NET Core has listened on 8080, not 80, since .NET 8.
@@ -127,10 +129,6 @@ services:
       ConnectionStrings__MarketData: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=marketdata_svc;Password=${MARKETDATA_PW:-marketdata_dev_only};Maximum Pool Size=2"
       ConnectionStrings__Alerts: "Host=postgres;Port=5432;Database=${POSTGRES_DB:-stockportfolio};Username=alerts_svc;Password=${ALERTS_PW:-alerts_dev_only};Maximum Pool Size=2"
       ConnectionStrings__Redis: "redis:6379"
-      Jwt__Issuer: ${JWT_ISSUER:-https://stockportfolio.local}
-      Jwt__Audience: ${JWT_AUDIENCE:-https://stockportfolio.local}
-      # Must be at least 32 bytes or token issuing fails fast at startup.
-      Jwt__SigningKey: ${JWT_SIGNING_KEY:-dev-only-signing-key-change-me-0123456789abcdef}
       # Same origin through the nginx proxy, so this is only for hitting the API
       # directly on :8080 from a dev SPA on :5173.
       Cors__Origins__0: ${CORS_ORIGIN_0:-http://localhost:5173}
@@ -153,6 +151,19 @@ services:
       Alerts__HistoryLimit: ${ALERTS_HISTORY_LIMIT:-50}
     ports:
       - "${API_PORT:-8080}:8080"
+    healthcheck:
+      # The aspnet:10.0 runtime image is Ubuntu 24.04 and ships neither curl nor
+      # wget, which is why this healthcheck was missing for four phases. It has
+      # bash, and bash's /dev/tcp opens the socket - so this is a real HTTP GET
+      # with no extra package and no image growth. `\r\n` must survive YAML as
+      # backslash-r backslash-n and be turned into CR LF by printf, not by YAML.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080; printf 'GET /health/ready HTTP/1.1\\r\\nHost: x\\r\\nConnection: close\\r\\n\\r\\n' >&3; head -1 <&3 | grep -q ' 200 '"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      # Generous: the API is behind the migration job and still pays JIT warm-up on
+      # its first request. A cold start must not be mistaken for a failure.
+      start_period: 60s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -171,8 +182,10 @@ services:
         VITE_API_BASE_URL: ""
     image: stockportfolio-web:local
     depends_on:
+      # service_healthy, not service_started: nginx serving the SPA before the API
+      # answers means the first call from the browser comes back 502.
       api:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-5173}:80"
     healthcheck:

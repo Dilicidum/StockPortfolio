@@ -47,11 +47,15 @@ Nothing goes live until migrations succeed.
 
 ```bash
 gh run list --repo Dilicidum/StockPortfolio --workflow deploy.yml --limit 5
-curl -s -o /dev/null -w '%{http_code}\n' <API_URL>/health/ready     # expect 200
+curl -s <API_URL>/health/ready | jq .                 # expect status Healthy, and read the components
+curl -s -o /dev/null -w '%{http_code}\n' <API_URL>/health/startup   # expect 200 — migrations applied
 ```
 
-A green run is not proof. `/health/ready` returning 200 is, because it touches Postgres and Redis.
-For a real check, `POST /api/auth/register` then `GET /api/auth/me` with the bearer.
+A green run is not proof. **Read the readiness body, not just its status code.** It lists every
+component by name — the four database logins and the cache — and the cache is registered as
+*degraded*, so a 200 no longer means Redis is up. A cache outage is meant to keep the replica
+serving; it just has to be visible. For a real check, `POST /api/auth/register` then
+`GET /api/auth/me` with the bearer.
 
 ## Cost ceiling — do not remove
 
@@ -68,16 +72,18 @@ provisions from empty.
 
 ## Secrets
 
-Ten GitHub repo secrets; seven are real credentials (six Postgres passwords + JWT signing key), the
-other three are Azure identifiers. Auth to Azure is an **OIDC federated credential — there is no
-client secret**.
+Nine GitHub repo secrets; six are real credentials (the six Postgres passwords), the other three
+are Azure identifiers. Auth to Azure is an **OIDC federated credential — there is no client
+secret**. `JWT_SIGNING_KEY` was the tenth until Phase 6 and is gone: nothing ever read the `Jwt`
+section, because sessions are ASP.NET Core Identity bearer tokens, which are data-protected rather
+than signed. Delete it from the repository secrets when convenient — it is now inert either way.
 
 Secrets reach `az` through an ARM parameter file, never as command-line arguments. If you add a
 parameter, add it to the `jq` block in *Write deployment parameters*, not to the `az` argument list
 — an argument is readable from `/proc/<pid>/cmdline`, and a step-level `env:` block does **not**
 fix that, because the shell expands before `exec`.
 
-### `FINNHUB_API_KEY` — the optional eleventh
+### `FINNHUB_API_KEY` — the optional tenth
 
 **Set**, so the deployed dashboard serves genuine prices and `GET /api/marketdata/health` returns
 `{"provider":"Finnhub"}`. Empty is a *supported* path, not a broken one — it is what makes

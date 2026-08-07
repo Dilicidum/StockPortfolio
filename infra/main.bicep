@@ -77,17 +77,6 @@ param marketDataPassword string
 @secure()
 param alertsPassword string
 
-@description('JWT signing key. Must be at least 32 bytes; the host fails fast at startup otherwise.')
-@secure()
-@minLength(32)
-param jwtSigningKey string
-
-@description('JWT issuer.')
-param jwtIssuer string = 'stockportfolio'
-
-@description('JWT audience.')
-param jwtAudience string = 'stockportfolio-spa'
-
 @description('Finnhub API key. Leave empty and the app runs on FakeQuoteProvider — deliberate, Finnhub killed its sandbox in 2022 so the demo must work without a key.')
 @secure()
 param finnhubApiKey string = ''
@@ -241,9 +230,6 @@ module api 'modules/containerapp-api.bicep' = {
     marketDataConnectionString: marketDataConnectionString
     alertsConnectionString: alertsConnectionString
     redisConnectionString: redisConnectionString
-    jwtSigningKey: jwtSigningKey
-    jwtIssuer: jwtIssuer
-    jwtAudience: jwtAudience
     finnhubApiKey: finnhubApiKey
     byokEnabled: byokEnabled
     // Back to 1 with Phase 4, and the expiry date on the old cost decision has passed.

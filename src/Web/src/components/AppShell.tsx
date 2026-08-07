@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { LiveBadge } from '../alerts/LiveBadge'
+import { ReconnectingBar } from '../alerts/ReconnectingBar'
 import { useAuth } from '../auth/useAuth'
 import { Button } from './Button'
 import { Logo } from './Logo'
@@ -82,6 +83,8 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
       </aside>
 
       <main className="flex min-w-0 flex-col">
+        <ReconnectingBar />
+
         <header className="flex flex-wrap items-center justify-between gap-4 border-b border-bd bg-panel px-5 py-4 lg:px-7">
           <div className="flex flex-col gap-0.5">
             <h1 className="text-lg font-semibold tracking-[-0.015em]">{title}</h1>

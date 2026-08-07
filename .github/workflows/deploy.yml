@@ -20,7 +20,6 @@ name: Deploy
 # Required repository secrets:
 #   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
 #   PG_ADMIN_PASSWORD, MIGRATOR_PW, IDENTITY_PW, PORTFOLIO_PW, MARKETDATA_PW, ALERTS_PW
-#   JWT_SIGNING_KEY            (at least 32 bytes)
 #   FINNHUB_API_KEY            (optional — empty means the app runs on FakeQuoteProvider)
 #
 # Required repository variables:
@@ -200,7 +199,6 @@ jobs:
           PORTFOLIO_PW: ${{ secrets.PORTFOLIO_PW }}
           MARKETDATA_PW: ${{ secrets.MARKETDATA_PW }}
           ALERTS_PW: ${{ secrets.ALERTS_PW }}
-          JWT_SIGNING_KEY: ${{ secrets.JWT_SIGNING_KEY }}
           FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
         run: |
           set -euo pipefail
@@ -220,7 +218,6 @@ jobs:
               portfolioPassword:     { value: env.PORTFOLIO_PW },
               marketDataPassword:    { value: env.MARKETDATA_PW },
               alertsPassword:        { value: env.ALERTS_PW },
-              jwtSigningKey:         { value: env.JWT_SIGNING_KEY },
               finnhubApiKey:         { value: (env.FINNHUB_API_KEY // "") },
               byokEnabled:           { value: true }
             }
@@ -382,18 +379,66 @@ jobs:
             --image '${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
             --output none
 
+      # -----------------------------------------------------------------------------------------
+      # 5b. Smoke test — the API answers, and each of the four databases is Healthy BY NAME
+      #
+      # A 200 on its own is not enough. Readiness maps Degraded to 200, so the endpoint can answer
+      # 200 while a component underneath it is not healthy. Since Phase 6 the route carries a JSON
+      # body -- the same shape /api/health/detail writes -- so the four database checks can be
+      # asserted by name here, anonymously, with no credential involved.
+      #
+      # `redis` is deliberately NOT required to be Healthy. It is registered with a Degraded
+      # failure status precisely so a cache outage keeps the replica in rotation instead of
+      # withdrawing it; demanding Healthy here would re-impose the exact failure that registration
+      # removed. For the same reason the overall `status` is not asserted either -- it legitimately
+      # reads Degraded while all four databases are fine.
+      #
+      # What this does NOT prove: anything about the alert stream end to end. See E3 in
+      # docs/deferred-work.md.
+      # -----------------------------------------------------------------------------------------
       - name: Smoke test readiness
         run: |
           set -euo pipefail
           URL='${{ steps.deploy.outputs.apiUrl }}/health/ready'
+          BODY="$RUNNER_TEMP/health-ready.json"
+
+          READY=0
           for _ in $(seq 1 30); do
-            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$URL" || echo 000)
+            CODE=$(curl -s -o "$BODY" -w '%{http_code}' "$URL" || echo 000)
             echo "  $URL -> $CODE"
-            if [ "$CODE" = "200" ]; then exit 0; fi
+            if [ "$CODE" = "200" ]; then READY=1; break; fi
             sleep 10
           done
-          echo "::error::$URL never returned 200"
-          exit 1
+
+          if [ "$READY" -ne 1 ]; then
+            echo "::error::$URL never returned 200"
+            exit 1
+          fi
+
+          # An HTML error page from a proxy also arrives as a 200, so parse before asserting.
+          if ! jq -e . "$BODY" > /dev/null 2>&1; then
+            echo "::error::$URL answered 200 with a body that is not JSON: $(head -c 500 "$BODY" | tr -d '\r\n')"
+            exit 1
+          fi
+
+          echo "readiness body: $(jq -c . "$BODY")"
+
+          FAILED=0
+          for COMPONENT in postgres-identity postgres-portfolio postgres-marketdata postgres-alerts; do
+            # `[...][0] // "missing"` is what makes a component absent from the body a failure
+            # rather than an empty string quietly compared against "Healthy".
+            STATUS=$(jq -r --arg name "$COMPONENT" \
+              '[.components[]? | select(.name == $name) | .status][0] // "missing"' "$BODY")
+            echo "  $COMPONENT -> $STATUS"
+            if [ "$STATUS" != "Healthy" ]; then FAILED=1; fi
+          done
+
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::$URL returned 200 but a database component is not Healthy: $(jq -c . "$BODY")"
+            exit 1
+          fi
+
+          echo "All four database components are Healthy."
 
   # -------------------------------------------------------------------------------------------
   # 6. Build and publish the SPA to GitHub Pages

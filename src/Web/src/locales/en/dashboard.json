@@ -6,6 +6,14 @@
     "fallback": "The server did not answer.",
     "showingLastKnown": " Showing the last figures that arrived."
   },
+  "routeError": {
+    "title": "Could not show the dashboard",
+    "fallback": "The server did not answer."
+  },
+  "stale": {
+    "title": "Prices are not up to date",
+    "reason": "The quote provider is not responding. The figures below are the last prices that arrived, and they will catch up on their own once it answers again."
+  },
   "stats": {
     "totalValue": "Total value",
     "invested": "Invested",
@@ -19,7 +27,9 @@
     "caption": "Your positions, priced",
     "loading": "Fetching prices…",
     "empty": "No positions yet. Add one on the Portfolio page.",
-    "unpricedNote": "{{unpriced}} of {{total}} positions have no price yet and are excluded from the totals above."
+    "unpricedNote": "{{unpriced}} of {{total}} positions have no price yet and are excluded from the totals above.",
+    "pricesUnavailable": "Prices are unavailable right now, so the price, value and P/L columns show a dash rather than a made-up figure. What you hold and what it cost are unchanged.",
+    "refreshSaveFailure": "Could not save the refresh interval. The dashboard is still refreshing at the setting shown."
   },
   "columns": {
     "asset": "Asset",
@@ -33,7 +43,10 @@
   },
   "priceCell": {
     "awaitingPrice": "Awaiting a price for this position",
-    "observedAtTitle": "Observed at {{observedAt}}"
+    "observedAtTitle": "Observed at {{observedAt}}",
+    "lastKnown": "last known",
+    "lastKnownWithAge": "last known · {{age}}",
+    "lastKnownTitle": "The provider did not answer, so this is the last price that was stored for this ticker."
   },
   "refresh": {
     "15": "every 15s",
@@ -50,10 +63,16 @@
   },
   "apiHealth": {
     "title": "API health",
+    "database": "Database",
+    "cache": "Cache",
+    "feed": "Price feed",
     "quoteProvider": "Quote provider",
-    "latency": "Latency",
-    "quotaUsed": "Quota used",
-    "futurePhaseNote": "Phase 6",
-    "unreachable": "Unreachable"
+    "keyRejected": "The provider rejected the API key, so no fresh price can be fetched. Set a working key in Settings.",
+    "unreachable": "Unreachable",
+    "state": {
+      "Healthy": "Healthy",
+      "Degraded": "Degraded",
+      "Unhealthy": "Down"
+    }
   }
 }

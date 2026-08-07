@@ -34,7 +34,7 @@ internal sealed partial class RedisAlertCooldownStore(
             return await multiplexer.GetDatabase()
                 .StringSetAsync(key, Held, cooldown, keepTtl: false, When.NotExists);
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Suppressed rather than resent: with no way to tell whether this alert already went out, retrying turns a Redis outage into duplicates.
             LogCooldownUnavailable(logger, ex, ticker);

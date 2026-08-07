@@ -17,7 +17,7 @@ import { TextField } from '../../components/TextField'
 import { TickerCell } from '../../components/TickerCell'
 import { TickerCombobox } from '../../marketdata/TickerCombobox'
 import { formatMoney } from '../../lib/format'
-import { applyServerErrors, translateFieldError } from '../../lib/formErrors'
+import { applyServerErrors, serverMessage, translateFieldError } from '../../lib/formErrors'
 import i18n from '../../lib/i18n'
 import { EditHoldingForm, type EditHoldingValues } from '../../portfolio/EditHoldingForm'
 import { holdingsQuery, type Holding } from '../../portfolio/holdingsApi'
@@ -329,8 +329,8 @@ export function PortfolioPage() {
 
           setFormError('')
 
-          void remove.mutateAsync(target.id).catch(() => {
-            setFormError(t('removeDialog.failure', { ticker: target.ticker }))
+          void remove.mutateAsync(target.id).catch((reason: unknown) => {
+            setFormError(serverMessage(reason, t('removeDialog.failure', { ticker: target.ticker })))
           })
         }}
       />

@@ -135,7 +135,6 @@ jobs:
           PORTFOLIO_PW: ci-placeholder-not-a-real-password
           MARKETDATA_PW: ci-placeholder-not-a-real-password
           ALERTS_PW: ci-placeholder-not-a-real-password
-          JWT_SIGNING_KEY: ci-placeholder-signing-key-at-least-32-bytes-long
           FINNHUB_API_KEY: ''
         run: az bicep build-params --file infra/main.bicepparam --stdout > /dev/null
 

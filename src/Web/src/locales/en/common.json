@@ -30,6 +30,9 @@
     "matchesCount_other": "{{count}} matches",
     "suggestionsFor": "{{label}} suggestions"
   },
+  "routeError": {
+    "title": "Something went wrong"
+  },
   "loading": "Loading",
   "splashLabel": "Restoring session",
   "fallbackError": "Something went wrong. Please try again.",

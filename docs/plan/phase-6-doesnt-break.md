@@ -121,6 +121,11 @@ number covering every ticker at once.
 reads an empty list and does nothing. A signal built around "did we store any prices" calls a brand-new
 deployment broken for ever, and nothing would contradict it.
 
+**But a cycle that asked for prices and stored none is degraded, however punctual it is.** Judging the feed on
+timing alone is the same mistake from the other side: with the provider down the poller keeps finishing cycles
+exactly on schedule, fetching nothing, and a clock-only rule shows a green light on a dead feed. The two
+clauses are opposites and both are needed — no targets is healthy, targets with nothing stored is not.
+
 ---
 
 ## What the browser does

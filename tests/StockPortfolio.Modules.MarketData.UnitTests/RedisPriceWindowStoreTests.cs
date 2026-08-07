@@ -10,7 +10,7 @@ namespace StockPortfolio.Tests;
 
 public sealed class RedisPriceWindowStoreTests
 {
-    private static readonly DateTimeOffset Observed = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Observed = new(2026, 8, 5, 15, 0, 0, TimeSpan.Zero);
 
     [Fact]
     public void Encode_TwoSamplesAtOnePrice_AreTwoMembersNotOne()

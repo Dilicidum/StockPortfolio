@@ -9,7 +9,7 @@ namespace StockPortfolio.Tests;
 
 public sealed class RedisLastKnownPriceStoreTests
 {
-    private static readonly DateTimeOffset Observed = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Observed = new(2026, 8, 5, 15, 0, 0, TimeSpan.Zero);
 
     [Fact]
     public void Encode_RoundTripsScale()

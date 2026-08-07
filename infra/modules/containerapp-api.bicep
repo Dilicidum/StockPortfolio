@@ -43,16 +43,6 @@ param alertsConnectionString string
 @secure()
 param redisConnectionString string
 
-@description('JWT signing key. Must be at least 32 bytes.')
-@secure()
-param jwtSigningKey string
-
-@description('JWT issuer.')
-param jwtIssuer string
-
-@description('JWT audience.')
-param jwtAudience string
-
 @description('Finnhub API key. Leave empty to run on FakeQuoteProvider.')
 @secure()
 param finnhubApiKey string = ''
@@ -89,10 +79,6 @@ var baseSecrets = [
   {
     name: 'redis-connection'
     value: redisConnectionString
-  }
-  {
-    name: 'jwt-signing-key'
-    value: jwtSigningKey
   }
 ]
 
@@ -132,18 +118,6 @@ var baseEnv = [
   {
     name: 'ConnectionStrings__Redis'
     secretRef: 'redis-connection'
-  }
-  {
-    name: 'Jwt__SigningKey'
-    secretRef: 'jwt-signing-key'
-  }
-  {
-    name: 'Jwt__Issuer'
-    value: jwtIssuer
-  }
-  {
-    name: 'Jwt__Audience'
-    value: jwtAudience
   }
   // CORS runs in ASP.NET Core (AddCors/UseCors reading Cors:Origins), NOT at the ingress.
   // See the ingress block below for why there is exactly one layer.
@@ -295,6 +269,23 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
               periodSeconds: 10
               timeoutSeconds: 5
               failureThreshold: 3
+            }
+            {
+              // /health/startup asks every DbContext for pending migrations, so it answers only once the
+              // migration job has finished. Five minutes of budget, spent as 10 x 30s rather than 30 x 10s:
+              // Container Apps caps failureThreshold at 10 and initialDelaySeconds at 60, and rejects
+              // anything above at deployment validation. successThreshold must be 1 for a startup probe.
+              type: 'Startup'
+              httpGet: {
+                path: '/health/startup'
+                port: 8080
+                scheme: 'HTTP'
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 30
+              timeoutSeconds: 5
+              failureThreshold: 10
+              successThreshold: 1
             }
           ]
           // /health/live checks NOTHING and must stay that way. Container Apps restarts a

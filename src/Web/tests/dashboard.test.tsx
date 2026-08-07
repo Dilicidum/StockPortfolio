@@ -14,7 +14,6 @@ import { queryClient } from '../src/lib/queryClient'
 import { __resetRefreshInFlight } from '../src/lib/apiClient'
 import { dashboardKeys, type GetDashboardResult } from '../src/marketdata/dashboardApi'
 import { alertsHandlers } from './msw/alerts'
-import { marketDataHealthHandler } from './msw/dashboard'
 import { dashboardSettingsHandler, saveDashboardSettingsHandler } from './msw/settings'
 import { server } from './msw/server'
 
@@ -88,7 +87,6 @@ const dashboardJson = (data: GetDashboardResult) =>
 async function renderDashboard(handlers: RequestHandler[] = [dashboardJson(freshCopy())]) {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   server.use(
-    marketDataHealthHandler,
     dashboardSettingsHandler(),
     saveDashboardSettingsHandler,
     ...alertsHandlers,

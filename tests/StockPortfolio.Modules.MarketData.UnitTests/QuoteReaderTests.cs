@@ -14,7 +14,7 @@ namespace StockPortfolio.Tests;
 
 public sealed class QuoteReaderTests
 {
-    private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset Now = new(2026, 8, 5, 15, 0, 0, TimeSpan.Zero);
 
     private static readonly Guid AUser = Guid.CreateVersion7();
 
@@ -32,7 +32,8 @@ public sealed class QuoteReaderTests
             keyReader ?? new StubKeyReader(_ => null),
             keyRepository ?? new FakeUserProviderKeyRepository(),
             byokOptions ?? new ByokOptions(true),
-            new FakeTimeProvider(Now));
+            new FakeTimeProvider(Now),
+            NullLogger<QuoteReader>.Instance);
 
     [Fact]
     public async Task Fetch_WritesLastKnownPrice()
@@ -182,6 +183,20 @@ public sealed class QuoteReaderTests
         await reader.GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
         repository.Saved.ShouldHaveSingleItem().LastRejectedAt.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task GetCurrentPrices_WhenTheStoredKeyCannotBeRead_FallsBackToTheApplicationKey()
+    {
+        var provider = new StubProvider(new Quote(T("AAPL"), 187.42m, Now));
+        var keyReader = new StubKeyReader(_ => throw new InvalidOperationException("the key ring is unreadable"));
+
+        var prices = await Build(provider, new RecordingStore(), keyReader)
+            .GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
+
+        // A corrupt key ring or a database blip must cost this user their own key, never the whole dashboard.
+        provider.LastApiKeyOverride.ShouldBeNull();
+        prices["AAPL"].Price.ShouldBe(187.42m);
     }
 
     [Theory]

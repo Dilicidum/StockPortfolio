@@ -4,6 +4,7 @@ import { cleanup } from '@testing-library/react'
 import { FakeHubConnection } from './fakeHubConnection'
 import { __resetAlertStream } from '../src/alerts/useAlertStream'
 import { defaultAppearanceHandler } from './msw/appearance'
+import { healthDetailHandler } from './msw/health'
 import { server } from './msw/server'
 
 window.scrollTo = (() => {}) as typeof window.scrollTo
@@ -21,7 +22,7 @@ vi.mock('@microsoft/signalr', async () => (await import('./fakeHubConnection')).
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }))
 
-beforeEach(() => server.use(defaultAppearanceHandler))
+beforeEach(() => server.use(defaultAppearanceHandler, healthDetailHandler()))
 
 afterEach(() => {
   cleanup()

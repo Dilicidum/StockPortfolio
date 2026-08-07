@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 using StockPortfolio.Api.IntegrationTests.Infrastructure;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
@@ -388,9 +389,24 @@ public sealed class DashboardTests(ApiFixture fixture)
         using var ready = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
 
         ready.StatusCode.ShouldBe(
-            HttpStatusCode.ServiceUnavailable,
-            "readiness reported healthy with Redis unreachable, so the 200 above says nothing about "
-            + $"degradation — it would look identical to a healthy instance: {await Wire.Describe(ready)}");
+            HttpStatusCode.OK,
+            "a cache outage is not an inability to serve traffic; a 503 here withdraws every replica and "
+            + $"turns suppressed alerts into an unreachable API: {await Wire.Describe(ready)}");
+
+        var body = await ready.Content.ReadAsStringAsync(TestContext.Current.CancellationToken);
+
+        using var report = JsonDocument.Parse(body);
+
+        report.RootElement
+            .GetProperty("components")
+            .EnumerateArray()
+            .Single(component => component.GetProperty("name").GetString() == "redis")
+            .GetProperty("status")
+            .GetString()
+            .ShouldBe(
+                nameof(HealthStatus.Degraded),
+                "readiness called the cache healthy while Redis was unreachable, so the 200 above says "
+                + $"nothing about degradation — it would look identical to a healthy instance: {body}");
     }
 
     [Fact]
