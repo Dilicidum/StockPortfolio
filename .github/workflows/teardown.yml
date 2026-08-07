@@ -1,25 +1,10 @@
 name: Teardown
 
-# Deletes the Azure resource group once its `deleteAfter` tag has passed.
-#
-# WHY THIS EXISTS. The subscription is pay-as-you-go. Azure offers no spending limit on that offer
-# type, and an Azure budget cannot stop spending -- it only sends email. So the cost ceiling is not
-# enforced by watching money, it is enforced by bounding time: deploy.yml stamps `deleteAfter` on
-# the resource group, and this workflow is what makes that stamp mean something.
-#
-# THIS WORKFLOW IS THE ONLY THING STANDING BETWEEN A FORGOTTEN DEPLOY AND AN OPEN-ENDED BILL.
-# If it silently stops working, nothing else notices. That is why the decide step below refuses to
-# run rather than guessing, and why the spec requires proving it against a throwaway group before
-# trusting it.
-#
-# Known limitation: GitHub disables scheduled workflows in repositories with 60 days of no
-# activity. Irrelevant at a 14-day window, but it is the reason a budget alert still exists as an
-# independent backstop.
+# Deletes the resource group once its `deleteAfter` tag has passed — see Cost ceiling in docs/DEPLOYING.md.
+# GitHub disables scheduled workflows after 60 days of repository inactivity, which is why a budget alert still exists as a backstop.
 
 on:
   schedule:
-    # 03:00 UTC daily. Cost accrues hourly, so the exact time does not matter; a daily granularity
-    # costs at most one extra day (~$1.26) versus checking continuously.
     - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
@@ -56,11 +41,7 @@ jobs:
           set -euo pipefail
           RG='${{ vars.AZURE_RESOURCE_GROUP }}'
 
-          # "Absent" and "cannot see it" are NOT the same answer, and conflating them is how this
-          # workflow reports success at exactly the moment it has stopped working. An expired
-          # credential or a revoked role assignment would look identical to a tidy, already-deleted
-          # resource group -- green run, no resources torn down, bill still accruing. So the error
-          # is inspected rather than swallowed, and anything that is not a clean not-found fails.
+          # "Absent" and "cannot see it" are not the same answer: an expired credential must fail, not report nothing to do.
           set +e
           ERR=$(az group show --name "$RG" --output none 2>&1)
           RC=$?
@@ -78,9 +59,6 @@ jobs:
           fi
           echo "exists=true" >> "$GITHUB_OUTPUT"
 
-          # Empty string if the tag is absent. Deliberately not defaulted to anything here -- what
-          # to do about a missing deadline is the decision below, not a default hidden in a shell
-          # parameter expansion.
           DELETE_AFTER=$(az group show --name "$RG" --query "tags.deleteAfter" -o tsv 2>/dev/null || true)
           [ "$DELETE_AFTER" = "None" ] && DELETE_AFTER=""
 
@@ -90,19 +68,7 @@ jobs:
           echo "deleteAfter    : ${DELETE_AFTER:-<absent>}"
           echo "today (UTC)    : $(date -u +%Y-%m-%d)"
 
-      # -------------------------------------------------------------------------------------------
-      # An unreadable deadline DELETES. That is a deliberate choice, not an oversight.
-      #
-      # The alternative -- skip when the tag is missing -- never destroys anything unexpectedly,
-      # but it fails in the quiet direction: one typo in the tag name and the only cost guarantee
-      # on this subscription is silently doing nothing, discovered when the bill arrives. Deleting
-      # fails in the loud direction. The data here is disposable and a redeploy is one workflow
-      # run; an unbounded bill on a personal pay-as-you-go card is not recoverable in one run.
-      #
-      # Dates are ISO-8601, so lexical comparison is chronological and no date parsing is needed.
-      # The comparison is >=, not >, so the group dies ON the stamped date -- exactly the
-      # TEARDOWN_DAYS window advertised in deploy.yml rather than one day more.
-      # -------------------------------------------------------------------------------------------
+      # Dates are ISO-8601, so lexical `>=` is chronological, and the group dies ON the stamped date rather than a day later.
       - name: Decide
         id: decide
         if: steps.read.outputs.exists == 'true'
@@ -137,8 +103,7 @@ jobs:
           set -euo pipefail
           RG='${{ vars.AZURE_RESOURCE_GROUP }}'
           echo "Deleting resource group $RG"
-          # Not --no-wait: the run should stay red if the delete fails, rather than reporting
-          # success for an operation that was merely accepted.
+          # Not --no-wait: the run must stay red if the delete fails, not report success for an accepted operation.
           az group delete --name "$RG" --yes --output none
           echo "Deleted. Re-deploy with the Deploy workflow when needed."
 

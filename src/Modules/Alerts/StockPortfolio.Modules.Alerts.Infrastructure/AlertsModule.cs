@@ -39,11 +39,16 @@ public static class AlertsModule
 
         services.AddDbContext<AlertsDbContext>(options => options.UseNpgsql(
             connectionString,
-            npg => npg.MigrationsHistoryTable(
-                AlertsDbContext.MigrationsHistoryTableName,
-                AlertsDbContext.SchemaName)));
+            npg =>
+            {
+                npg.MigrationsHistoryTable(
+                    AlertsDbContext.MigrationsHistoryTableName,
+                    AlertsDbContext.SchemaName);
 
-        services.AddHealthChecks().AddDbContextCheck<AlertsDbContext>("postgres-alerts");
+                npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(2), errorCodesToAdd: null);
+            }));
+
+        services.AddHealthChecks().AddDbContextCheck<AlertsDbContext>("postgres-alerts", tags: ["ready", "detail"]);
 
         services.AddScoped<IAlertSettingRepository, AlertSettingRepository>();
         services.AddScoped<IFiredAlertRepository, FiredAlertRepository>();

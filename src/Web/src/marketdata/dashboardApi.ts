@@ -33,22 +33,10 @@ export interface GetDashboardResult {
   stalestObservedAt: string | null
 }
 
-export interface MarketDataHealth {
-  provider: string
-}
-
 export const dashboardKeys = {
   all: ['dashboard'] as const,
   view: () => [...dashboardKeys.all, 'view'] as const,
 }
 
-export const marketDataKeys = {
-  all: ['marketdata'] as const,
-  health: () => [...marketDataKeys.all, 'health'] as const,
-}
-
 export const fetchDashboard = (signal: AbortSignal): Promise<GetDashboardResult> =>
   apiFetch<GetDashboardResult>('/api/dashboard', { signal })
-
-export const fetchMarketDataHealth = (signal: AbortSignal): Promise<MarketDataHealth> =>
-  apiFetch<MarketDataHealth>('/api/marketdata/health', { signal, authenticated: false })

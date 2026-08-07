@@ -7,6 +7,12 @@ export function fallbackMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
+export function serverMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof ApiError)) return fallback
+
+  return error.problem?.detail || error.problem?.title || fallback
+}
+
 export function applyServerErrors<T extends FieldValues>(
   error: unknown,
   setError: UseFormSetError<T>,

@@ -9,7 +9,7 @@ flowchart TB
     UI["Browser<br/>React single-page app"]
 
     subgraph HOST["The API — one process"]
-        GATE["Token check<br/>verifies the token Identity signed;<br/>skipped for register, sign in and refresh"]
+        GATE["Token check<br/>unlocks the token Identity issued;<br/>skipped for register, sign in and refresh"]
         ID[Identity]
         PF[Portfolio]
         MD[MarketData]
@@ -62,26 +62,30 @@ addresses. Everything between them is plain HTTP with the sign-in token attached
 Identity **issues** the token; the host **verifies** it. Splitting those two is deliberate, and it is the
 thing that would make Identity cheap to pull out into its own service.
 
-Verifying a token needs three things — the key, the issuer name and the audience name. All three are
-settings. It needs no code from Identity and no call to it, which is the whole point of a self-contained
-token. If verification lived inside Identity instead, then pulling Portfolio out into its own service
-would leave it two bad options: carry a copy of Identity's code, or ask Identity over the network on every
-single request. The second turns Identity into the thing that takes the whole system down when it stops
-answering. Real systems avoid both by doing exactly what is here — the issuer signs, and every consumer
-verifies locally.
+**These are not signed tokens.** A session is an ASP.NET Core Identity bearer token: an opaque string the
+framework encrypts and seals with the application's data-protection key ring, and unseals again on the way
+in. There is no signing key setting, no issuer name and no audience name — all three were deleted, along
+with the configuration and the deployment secret that carried them, because nothing read them. The one
+thing a token check needs is the key ring, and the host already has it.
 
-**One thing does have to change on extraction.** The key today is a single shared secret, so anything that
-can verify a token can also mint one. Splitting into separate services means moving to a key *pair*:
-Identity keeps the half that signs, everyone else gets the half that only verifies. That is a settings and
-algorithm change, not a move of code.
+Checking a token still needs no code from Identity and no call to it, which is the point. If the check lived
+inside Identity instead, then pulling Portfolio out into its own service would leave it two bad options:
+carry a copy of Identity's code, or ask Identity over the network on every single request. The second turns
+Identity into the thing that takes the whole system down when it stops answering.
+
+**Extraction is harder than it was, and worth knowing before it is attempted.** A sealed token is symmetric:
+whatever can open one can also make one. The key ring is a single shared secret today, and it lives in the
+`marketdata` schema, so a separated Identity service would have to either share that store or move to a
+scheme with two halves — one that mints and one that only checks. That is a real change of mechanism, not a
+settings edit.
 
 ## What each module stores, and where
 
 | Module | PostgreSQL | Redis | Outside |
 |---|---|---|---|
-| **Identity** | its own schema — users, sign-in sessions | — | — |
+| **Identity** | its own schema — user accounts and each user's appearance preferences. **No session rows**: a refresh token is sealed and self-contained, so there is nothing to store, and signing out works by rolling the user's security stamp | — | — |
 | **Portfolio** | its own schema — positions | — | — |
-| **MarketData** | its own schema — each user's own provider key, and the key ring that encrypts them | the last price seen for each ticker, each ticker's company name, a trimmed recent series for each watched ticker, and the two poll locks | the price provider, over HTTP |
+| **MarketData** | its own schema — each user's own provider key, and the key ring that encrypts them *and* seals every session token | the last price seen for each ticker, each ticker's company name, a trimmed recent series for each watched ticker, the two poll locks, and the poll heartbeat the feed health check reads | the price provider, over HTTP |
 | **Alerts** | its own schema — thresholds and fired alerts | cooldowns, and the channel that carries a pushed alert to whichever copy holds the browser's connection | — |
 
 **MarketData was the one module with no database, and Phase 5 ended that.** Everything it kept was one value
@@ -108,6 +112,9 @@ Three things about it are load-bearing at runtime and easy to lose:
 - **Two locks, not one.** One picks which copy of the app polls a given cycle; the other stops a cycle
   that overran from being joined by the next one on a different copy. Both expire, as a backstop for a
   copy that dies mid-cycle.
+- **Every finished cycle leaves a heartbeat in Redis** — when it ran, how many tickers it aimed at and
+  how many it stored. That single value is the whole of what the feed health check reads, which is why a
+  cache outage takes the feed's health report down with it: no lease, no cycle, no heartbeat.
 - **The alert is written down before it is pushed.** Whether anyone is connected only decides whether it
   also arrives now. A failed push costs nothing, because the next history load finds the row.
 - **The live connection is authenticated from the URL, not a header**, and every copy of the app is joined

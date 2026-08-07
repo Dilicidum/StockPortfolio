@@ -50,8 +50,13 @@ So Identity cannot teach you: transaction scope under an event dispatcher, degra
 authentication without a header, or an adapter over another module's contracts. Those rules are in the root
 CLAUDE.md anyway, sourced from the phase plans rather than from this code.
 
-## Known provisional
+## Session lifetimes
 
-`Application/TokenPolicy.cs` — the four values (15 min / 14 days / rotate on / 30 s grace) are the repo
-owner's call and still marked provisional. `RotateOnUse` was deleted as a dead branch; if a second value is
-ever genuinely needed, reintroduce it with both paths tested.
+There is no policy type to read. Sessions are ASP.NET Core Identity bearer tokens, so the framework owns the
+values: the host sets the access token to 15 minutes in `AuthenticationExtensions`, and the refresh token
+keeps the framework's 14-day default, which nothing here changes. There is no rotation setting and no grace
+window — a refresh token is sealed and self-contained, and signing out rolls the user's security stamp,
+which is the only revocation available.
+
+> ⚠️ **The rest of this file predates the move to ASP.NET Core Identity and most of it is wrong.** Eight of
+> the thirteen files named above no longer exist. Treat every row as unverified until this file is rewritten.

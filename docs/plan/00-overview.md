@@ -32,7 +32,7 @@ days. Phases 1 to 3 cover every gate item, so the gate is passed a little over h
 | 3 | Live prices & P&L | Dashboard with real prices, totals, profit and loss | Built and deployed |
 | 4 | Alerts | Threshold alerts pushed live, and the price poller behind them | Built and deployed |
 | 5 | Make it mine | Theme, language, refresh interval, thresholds, row visibility, bring-your-own API key | Built |
-| 6 | Doesn't break | Visible, honest degradation when a dependency fails | Not started |
+| 6 | Doesn't break | Visible, honest degradation when a dependency fails | Built |
 
 One plan file per phase: [phase 1](phase-1-sign-in.md), [phase 2](phase-2-my-portfolio.md),
 [phase 3](phase-3-live-prices.md), [phase 4](phase-4-alerts.md), [phase 5](phase-5-make-it-mine.md),
@@ -70,8 +70,10 @@ Related, and settled: there is **no domain-event machinery**. The one event ever
 clear a cooldown across the Portfolio/Alerts line, and a cooldown expires by itself. Deleting the event was
 the fix; deleting the boundary was not.
 
-Each module that stores anything gets its own database schema and its own database login. MarketData stores
-nothing in the database today — everything it keeps is one value per ticker in Redis.
+Each module that stores anything gets its own database schema and its own database login, and all four now
+do. MarketData was the exception for three phases, because everything it kept was one value per ticker in
+Redis; per-user provider keys ended that, and its schema holds those keys and the key ring that encrypts
+them. Its prices are still Redis only.
 
 ## Prices: two questions, two paths
 
@@ -205,13 +207,18 @@ Cut on purpose. Don't reintroduce without asking.
   written by hand first. The readme carries the comparison.
 - **Any third-party UI component library.** The brief bans UI kits. Everything is hand-built on Tailwind with
   native form controls.
+- **Swapping to the generated-price provider when the real one rejects the key.** It would put invented
+  numbers under real ticker symbols on the public site. The app starts anyway, says the key was rejected,
+  and serves the last price it stored.
+- **A market-holiday calendar.** A week of work for a demo, against a cosmetic failure that clears itself.
 
 ## Known gaps
 
-- **Readiness checks one database login of four.** The probe opens Identity's connection and answers for
-  the database as a whole, so the portfolio or alerts login could be unreachable while the app reports
-  itself healthy. It matters more now that alerts run on a timer rather than on a request, because nothing
-  outside the process would notice. Tracked in [deferred-work.md](../deferred-work.md).
+- **Nothing since phase 4 has been deployed**, so phases 5 and 6 are proven locally and in CI and unproven
+  against the public URL. A phase is done when it works in a browser *and* is deployed.
+- **Market holidays are not handled.** A stored price ages by open-market minutes against a fixed weekday
+  session, so on a public holiday the price column goes blank an hour into a market that never opened. The
+  failure is cosmetic and corrects itself the next trading day.
 - **The provider's rate limit is quoted from a search snippet, not from the provider's own documentation.**
   The readme says so where it quotes it.
 - **Token lifetimes are provisional** and want a deliberate decision.

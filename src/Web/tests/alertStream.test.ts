@@ -1,6 +1,6 @@
 import { createElement, StrictMode } from 'react'
-import { beforeEach, describe, expect, it } from 'vitest'
-import { act, render, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { authStore } from '../src/auth/authStore'
@@ -18,16 +18,30 @@ import { FakeHubConnection } from './fakeHubConnection'
 import { alertHistoryHandler, firedAlert, notificationOf } from './msw/alerts'
 import { server } from './msw/server'
 
+const STATUS_TEST_ID = 'alert-stream-status'
+
+function setBrowserOnline(value: boolean): void {
+  Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => value })
+}
+
 beforeEach(() => {
   authStore.signOut()
   queryClient.clear()
   __resetRefreshInFlight()
 })
 
+afterEach(() => {
+  setBrowserOnline(true)
+})
+
 function Probe({ withHistory = false }: { withHistory?: boolean }) {
-  useAlertStream()
+  const status = useAlertStream()
   if (withHistory) useQuery(alertHistoryQuery)
-  return null
+  return createElement('output', { 'data-testid': STATUS_TEST_ID }, status)
+}
+
+function statusText(): string {
+  return screen.getByTestId(STATUS_TEST_ID).textContent ?? ''
 }
 
 function mount(withHistory = false) {
@@ -130,5 +144,45 @@ describe('alert stream', () => {
 
     expect(await factory!()).toBe('renewed')
     expect(refreshes).toBe(1)
+  })
+
+  it('still offers a delay on the seventh consecutive failure', async () => {
+    mount()
+
+    await waitFor(() => expect(FakeHubConnection.latest()).not.toBeNull())
+
+    const delays = latest().askForRetryDelays(7)
+
+    expect(delays).toEqual([0, 1_000, 2_000, 5_000, 10_000, 30_000, 30_000])
+  })
+
+  it('retries a refused first connection instead of settling on offline', async () => {
+    FakeHubConnection.rejectFirstStarts = 1
+
+    mount()
+
+    await waitFor(() => expect(FakeHubConnection.latest()).not.toBeNull())
+    await waitFor(() => expect(latest().startAttempts).toBeGreaterThan(1))
+    await waitFor(() => expect(statusText()).toBe('live'))
+  })
+
+  it('spends no attempt while the browser is offline and connects the moment it is back', async () => {
+    setBrowserOnline(false)
+
+    mount()
+
+    await waitFor(() => expect(FakeHubConnection.latest()).not.toBeNull())
+    await waitFor(() => expect(statusText()).toBe('offline'))
+
+    expect(latest().startAttempts).toBe(0)
+
+    setBrowserOnline(true)
+    await act(async () => {
+      window.dispatchEvent(new Event('online'))
+      await Promise.resolve()
+    })
+
+    expect(latest().startAttempts).toBe(1)
+    expect(statusText()).toBe('live')
   })
 })

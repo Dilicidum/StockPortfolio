@@ -123,6 +123,7 @@ sequenceDiagram
     else provider unreachable
         MD->>R: read the last price per ticker
         R-->>MD: price, and when it was seen
+        Note over MD: keep it only if the market has been open<br/>an hour or less since it was seen
     end
 
     MD-->>PF: prices, each with the time it was observed
@@ -140,6 +141,13 @@ seventeen prices that were already paid for, and — because those prices had ju
 would come back looking identical. The only visible difference is the flag saying a price is stale, which is
 why it is part of the response and part of what is asserted.
 
+**A stored price is only served while the market has been open for an hour or less since it was recorded**,
+and closed minutes are not counted. On a Sunday afternoon Friday's close has aged zero open minutes and is
+shown; at 11:00 on a Tuesday with the provider dead since the open it has aged ninety and is not. That keeps
+the fallback silent on a healthy weekend and honest during a real outage: past the hour the price is absent
+from the reader's answer, the calculator emits an all-null row, and the browser shows a dash and says prices
+are unavailable. It never shows a zero, because a zero is a claim.
+
 Money is sent as strings. JSON numbers become floating point in the browser and the server's precision is
 destroyed at the boundary. Weight and percentages are computed on the server for the same reason.
 
@@ -148,7 +156,7 @@ destroyed at the boundary. Weight and percentages are computed on the server for
 ## 3. Runtime — the poll cycle and an alert
 
 **This is the only thing in the system that runs without a request**, which is why the deployed API can no
-longer scale to zero copies (§4).
+longer scale to zero copies (§5).
 
 ```mermaid
 sequenceDiagram
@@ -181,7 +189,16 @@ sequenceDiagram
     R-->>S: whichever copy holds this user's stream
     S->>B: alert event
     B->>B: panel updates
+
+    P->>R: record that a cycle finished, and how many tickers it covered
 ```
+
+The last line is the only thing that reads back as *health*. Nothing in evaluation needs it — the evaluator
+already refuses to fire across a gap, per ticker, which beats one global number — but without it there is no
+way to tell a poller that is keeping up from one that stopped hours ago. Three states come out of it, from
+multiples of the configured interval: keeping up, behind, or silent. **A cycle that found no tickers to poll
+is healthy**, because with nobody's alert set anywhere, no work is the right amount of work; reading "we
+stored no prices" as a fault would call a brand-new deployment broken for ever.
 
 The alert is recorded before it is published, so a failed publish leaves a record rather than nothing. There
 is **no replay** — an alert that fires while nobody is connected is simply not pushed. It appears next time
@@ -198,7 +215,49 @@ and firing on the extreme alone would report that as a rise on every cycle, fore
 
 ---
 
-## 4. Deployment
+## 4. What still works when a dependency fails
+
+Every dependency can be stopped on its own, and each one degrades differently on purpose. Nothing here is a
+plan; all of it runs.
+
+| Stopped | The dashboard | Alerts | The platform's view |
+|---|---|---|---|
+| **Price provider** | last stored price per ticker, marked and aged, amber banner naming the provider; a dash once the market has been open an hour with nothing new | keep firing from the sampled history that already exists, until the window straddles the silence and the guard suppresses them | healthy overall; **the feed component reports degraded** — a cycle that asked for prices and stored none is a dead feed however punctual it is, so timing alone is not enough to judge it |
+| **Redis** | **unchanged, and the prices are fresh** — the provider is asked directly, so the cache is not on the read path at all | suppressed, and the panel says so | **still ready** — the cache is registered as *degraded*, so a copy stays in rotation. The feed component follows it down, because the poll lease lives in Redis too: no lease, no cycle, no heartbeat |
+| **Postgres** | 503 with a `Retry-After` and a retry screen, in seconds rather than a minute | nothing to read and nothing to record | still *alive*, so the platform does not restart it; not *ready*, so it leaves rotation |
+| **A rejected provider key** | last stored prices, exactly as for any other outage | as for the provider being down | healthy overall; the feed component reports unhealthy and names the reason |
+
+**Redis is the counter-intuitive one, and the asymmetry is the point.** The dashboard asks *what is this
+worth now* and answers it from the provider, so losing the cache costs it nothing. Alert evaluation asks
+*how has this moved over N minutes*, and that question has no answer without the sampled window. **A stale
+price is a degraded read; a made-up price history is a wrong alert.** So history is never invented to keep
+the evaluator busy — evaluation stops and says it has stopped.
+
+**A cache outage must not withdraw the copy.** Readiness runs every check it is told to, and the natural
+registration marks a failure as unhealthy, which would answer 503 and pull the replica out of rotation. With
+at most two copies, a Redis blip would then take the whole API off the air — the exact inverse of what
+degrading gracefully means. So the cache is registered as *degraded* and readiness stays at 200.
+
+**A database blip is retried before anything is answered.** Each context retries up to three times, and two
+seconds is the longest it will wait between attempts — the delay grows and is randomised, so it is a ceiling
+rather than a fixed interval, and all three retries finish inside six seconds. Past that the request answers
+503 rather than 500, and the difference between the two is a real
+question rather than a formality: a connection failure is transient and worth retrying, while a unique-index
+violation — the create-or-merge race — is the database correctly refusing a write, and must stay a 500.
+
+**Liveness never touches any of them.** It is the one probe that answers on the process alone, because a
+probe that fails on a dependency turns a brief outage into a restart loop, which converts a degraded app
+into a down one. Readiness carries the databases and the cache; a third probe carries pending migrations and
+runs only at start-up, since it is a database round trip.
+
+**How the browser learns any of this**: one authenticated report, `GET /api/health/detail`, listing every
+registered component with its state. It always answers 200 — a route whose job is to report that Postgres is
+down cannot use that failure as its own reply, or the panel goes blank exactly when it becomes useful. The
+health card, the alerts-suppressed banner and the rejected-key message all read that one response.
+
+---
+
+## 5. Deployment
 
 ```mermaid
 flowchart TB
@@ -254,4 +313,4 @@ statically.
 
 ---
 
-**Everything on this page is built.** [Phase 4](../plan/phase-4-alerts.md) built the edges terminating in Alerts, the background poller and the live stream, and is where a change to any of them belongs — change it there first, then bring this file into line.
+**Everything on this page is built.** [Phase 4](../plan/phase-4-alerts.md) built the edges terminating in Alerts, the background poller and the live stream, and is where a change to any of them belongs. [Phase 6](../plan/phase-6-doesnt-break.md) owns §4 — the dash rule, the three probes, the 503, and which failure withdraws a copy. Change it in the phase file first, then bring this one into line.

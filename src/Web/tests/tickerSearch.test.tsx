@@ -16,7 +16,6 @@ import { holdingKeys, type Holding } from '../src/portfolio/holdingsApi'
 import type { GetDashboardResult } from '../src/marketdata/dashboardApi'
 import type { TickerSuggestion } from '../src/marketdata/tickerSearchApi'
 import { alertsHandlers } from './msw/alerts'
-import { marketDataHealthHandler } from './msw/dashboard'
 import { emptyTickerSearchHandler, tickerSearchHandler } from './msw/tickerSearch'
 import { server } from './msw/server'
 
@@ -72,7 +71,6 @@ async function renderPortfolio(seed: Holding[] = [AAPL]) {
 async function renderDashboard(data: GetDashboardResult) {
   authStore.setUser({ id: 'u-1', email: 'holder@example.com' })
   server.use(
-    marketDataHealthHandler,
     ...alertsHandlers,
     http.get('*/api/dashboard', () => HttpResponse.json(data)),
   )

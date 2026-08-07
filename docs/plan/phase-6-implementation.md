@@ -156,6 +156,7 @@ it already refuses to fire on a window that straddles a silence, per ticker, whi
 | Condition | State |
 |---|---|
 | The last cycle had no targets | **Healthy** — nobody has an alert set, so no work is the right amount of work |
+| It had targets and stored nothing | **Degraded** — a punctual cycle that fetched no prices is a dead feed, and timing alone would show a green light on it |
 | Last cycle within 3 × interval | Healthy |
 | Last cycle within 10 × interval | **Degraded** |
 | Older, or never | **Unhealthy** |
@@ -391,9 +392,9 @@ Each task ends with a green build and a green suite. Run the suite in a Linux SD
 
 ### Task 1 — green the four failing integration tests — **DONE**
 
-Measured, not assumed: **723 passed, 2 skipped, 0 failed of 725**, from one run in the Linux SDK container
-with Docker up, and **65 passing across 13 files** in the browser. The integration assembly went from 218 to
-222, which is exactly the four that were failing.
+Measured, not assumed, in the Linux SDK container with Docker up: **both suites green, nothing failing and
+nothing skipped**. The four that were failing were expectations rather than defects, and the integration
+assembly grew by exactly those four. Counts live in `CLAUDE.md` and nowhere else — do not restate them here.
 
 The bar for every later task is that this stays true.
 

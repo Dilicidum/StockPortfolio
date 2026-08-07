@@ -1,6 +1,10 @@
 {
   "title": "Settings",
   "subtitle": "Appearance, quotes, your own API key and which positions show on the dashboard",
+  "error": {
+    "title": "Could not load your settings",
+    "fallback": "The server did not answer."
+  },
   "appearance": {
     "title": "Appearance",
     "themeLabel": "Theme",

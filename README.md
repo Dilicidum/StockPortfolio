@@ -3,12 +3,14 @@
 Stock-portfolio tracker: live quotes, profit/loss, and threshold alerts pushed in real time.
 .NET 10 modular monolith + React 19 SPA, Postgres and Redis, all of it up with one command.
 
-> **Status: Phase 5 of 6.** Authentication, routing and session persistence (Phase 1); portfolio CRUD
-> with create-or-merge (Phase 2); the live dashboard — real prices, totals, profit and loss, weights
-> and honest freshness stamps (Phase 3); threshold alerts pushed over SignalR with the price poller behind
-> them (Phase 4); and the settings surface — theme, English and Ukrainian, refresh interval, per-position
-> visibility and a per-user market-data key encrypted at rest (Phase 5) are done and green. Phase 6 is
-> graceful failure, and is not built. See [docs/plan/00-overview.md](docs/plan/00-overview.md).
+> **Status: all six phases are built.** Authentication, routing and session persistence (Phase 1);
+> portfolio CRUD with create-or-merge (Phase 2); the live dashboard — real prices, totals, profit and
+> loss, weights and honest freshness stamps (Phase 3); threshold alerts pushed over SignalR with the
+> price poller behind them (Phase 4); the settings surface — theme, English and Ukrainian, refresh
+> interval, per-position visibility and a per-user market-data key encrypted at rest (Phase 5); and
+> graceful failure — every dependency can be stopped and the app stays usable (Phase 6). Phase 6 is
+> green in both test suites and has not yet been walked through by hand or deployed.
+> See [docs/plan/00-overview.md](docs/plan/00-overview.md).
 
 ---
 
@@ -27,7 +29,9 @@ register for a key would be blocked before seeing anything.
 | URL | What |
 |---|---|
 | <http://localhost:5173> | the app |
-| <http://localhost:8080/health/ready> | Postgres + Redis readiness |
+| <http://localhost:8080/health/live> | is the process up — touches no dependency |
+| <http://localhost:8080/health/ready> | the four database logins and the cache, named one by one |
+| <http://localhost:8080/health/startup> | are all migrations applied |
 | <http://localhost:8080/openapi/v1.json> | OpenAPI document (Development only) |
 
 `.env` is optional — every compose variable has a working default. Copy `.env.example` to `.env` to
@@ -59,16 +63,49 @@ own, because there is no demo key to hand anybody.
 7. Switch to Ukrainian and to dark mode. Both survive a reload.
 8. Hide a position. Its row goes; it is still watched and still alerts.
 9. Set the refresh interval to 15 seconds. The dashboard visibly updates faster.
-10. Stop the price provider. Prices go amber with their age, health goes amber, nothing crashes — and the
-    ticker field still accepts a typed symbol, it just stops suggesting.
+10. Block the price provider. Prices go amber, each labelled *last known* with its age, and the banner
+    says the quote provider is not responding. Nothing crashes, and the ticker field still accepts a
+    typed symbol — it just stops suggesting. The health card's **feed row goes amber**: the poller is
+    still finishing its cycles on time, but it is storing nothing, and a punctual cycle that fetched no
+    prices is a dead feed rather than a healthy one.
 11. Narrow the window to 375px. The table becomes cards.
 12. `docker compose down && docker compose up`. The data is still there.
 
+Then stop the dependencies one at a time and watch the app stay usable. This is the part worth doing
+slowly, because each one degrades differently on purpose.
+
+```bash
+docker compose stop redis      # dashboard still renders FRESH prices; the alerts panel says alerts are suppressed
+docker compose start redis     # recovers on its own within one poll cycle, and the banner clears
+docker compose stop postgres   # 503 with a readable message and a retry button — and check `docker compose ps`
+```
+
+13. **Redis stopped.** The dashboard is unchanged and the prices are live, not stale. The alerts panel
+    grows a banner saying alerts are suppressed, and the health card shows the cache as degraded. The
+    API stays in rotation — `curl localhost:8080/health/ready` still answers **200**.
+14. **Redis started again.** The banner clears by itself within a poll cycle. Nothing to click.
+15. **Postgres stopped.** Reads and writes answer **503** with a `Retry-After` header and the retry
+    screen, in a couple of seconds rather than a minute. Watch `docker compose ps`, not the browser:
+    the API must **not** be restart-looping, and a restart loop looks fine for the first few seconds.
+    `/health/live` still answers 200 while `/health/ready` answers 503, which is the whole point of
+    splitting them.
+16. **Kill the API itself** (`docker compose stop api`). A thin reconnecting bar appears above the
+    page, the alert badge stops claiming a connection, and the browser keeps retrying for as long as
+    it takes — leave it five minutes and it still recovers when the API comes back. Reload the page
+    while the API is down and it still recovers, which is a separate path from reconnecting.
+17. **A deliberately bad key.** Put nonsense in `FINNHUB_API_KEY` in `.env`, `docker compose up -d api`,
+    and the app *starts*. It does not silently swap to the fake provider — that would serve invented
+    prices for real tickers on a screen claiming to show real ones. The health card says the provider
+    rejected the key and names that as the reason, and the dashboard falls back to last-known prices.
+
 Then repeat steps 1 to 6 against the deployed site, watching that the alert connection survives past
 four minutes — the hosting platform closes idle connections at four minutes and will not go higher,
-which is the whole reason the connection sends something every twenty seconds.
+which is the whole reason the library sends a keepalive about every fifteen seconds.
 
-All twelve steps run today. Phase 6 adds the stop-a-dependency cases to this list.
+**Two dash-rule cases cannot be provoked by hand in one sitting**, and are proven by unit test
+instead of being left on this list looking checked: "blocked into a second trading hour, so the column
+dashes" needs an hour of open US market with the provider blocked, and "blocked over a weekend, so
+Friday's numbers stay" needs a weekend.
 
 ---
 
@@ -143,12 +180,40 @@ plain text you can read in a terminal. What the choice still forces — where th
 and which claim decides who a message is for — is under [Alerts](#alerts).
 
 **No raw SQL.** The brief permits raw SQL or a query builder and asks only for parameterisation.
-EF Core makes parameterisation structural rather than a discipline — and the claim is *proved*, not
-asserted: a `DbCommandInterceptor` in the test fixture registers a user whose email contains
-`' OR 1=1 --` and asserts no user-supplied value ever reaches `CommandText`.
+EF Core makes parameterisation structural rather than a discipline. Here it is happening — the sign-in
+lookup, copied out of the running API's own logs after signing in as a user whose address is an
+injection attempt. Only the line wrapping is ours:
 
-**One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from
-`identity.users` fails with SQLSTATE `42501`. There is a test for exactly that, because a module
+```sql
+SELECT a."Id", a."AccessFailedCount", a."ConcurrencyStamp", a."Email", a."EmailConfirmed",
+       a."LockoutEnabled", a."LockoutEnd", a."NormalizedEmail", a."NormalizedUserName",
+       a."PasswordHash", a."PhoneNumber", a."PhoneNumberConfirmed", a."SecurityStamp",
+       a."TwoFactorEnabled", a."UserName"
+FROM identity."AspNetUsers" AS a
+WHERE a."NormalizedUserName" = @normalizedUserName
+LIMIT 1
+```
+
+| Placeholder | Value carried |
+|---|---|
+| `@normalizedUserName` | `SQLIDEMO'-OR-1=1--@EXAMPLE.TEST` |
+
+The quote, the `OR 1=1` and the comment marker are all *inside the parameter*. The statement text does
+not change shape, so there is nothing for them to change: the lookup matches that one literal address
+and signs that one user in. The address is stored and returned verbatim, character for character.
+
+**And the whole suite is watched, not just that one statement.** `RecordingDbCommandInterceptor` is an
+EF `DbCommandInterceptor` wrapped around every module's `DbContext` in the integration fixture. It
+records the text and the parameters of every command any test causes — reads, writes and scalars, sync
+and async. `ParameterisationTests` then registers and signs in as `sqli<random>'-or-1=1--@example.test`
+and asserts four things: that commands were actually recorded (so the interceptor cannot pass by being
+unwired), that the random marker appears in **no** `CommandText`, that it *does* appear in a parameter
+value (so the hostile string reached the database rather than being filtered out upstream, which would
+prove nothing), and that every parameter on those commands is referenced by name from the statement.
+
+**One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from anything in
+the `identity` schema fails with SQLSTATE `42501`, and a second test reads `has_schema_privilege` directly
+so the denial is shown to be the missing `USAGE` grant rather than a missing table. There is a test for exactly that, because a module
 boundary you cannot demonstrate is a diagram, not a boundary. All four roles are in use — `identity_svc`,
 `portfolio_svc`, `alerts_svc` and, since Phase 5, `marketdata_svc`, which sat created and inert until the
 per-user provider keys needed it.
@@ -168,7 +233,9 @@ its list ends with "тощо" (etc.). Every control is hand-built with Tailwind.
 
 `sessionStorage` is weaker than an httpOnly cookie and it is the honest consequence of hosting the
 SPA statically on a different origin from its API: the cookie would be third-party, and Safari
-blocks those outright. It argues for a short refresh-token lifetime — see `TokenPolicy`.
+blocks those outright. It argues for a short refresh-token lifetime, and the lifetimes are ASP.NET Core
+Identity's: the host sets the access token to 15 minutes, and the refresh token keeps the framework's
+14-day default.
 
 Being tab-scoped, `sessionStorage` also meant a second tab started with no credential and bounced to
 `/login` while the first was still signed in. Rather than move the token somewhere shared — which on
@@ -317,16 +384,37 @@ distinction matters exactly when the interesting failure happens: three of twent
 seventeen good prices must not be thrown away and replaced with twenty stale ones. Every row of the failure
 matrix returns **200**; the table degrades, the request does not fail.
 
-**The staleness call: always show it, with its age.** A cap by wall clock hides Friday's close at 03:00 on
-Sunday, which is the *correct* price. A cap by market session needs the trading calendar this design
-deliberately dropped. And either cap recreates the blank table the fallback exists to prevent — the one thing
-a reviewer killing the provider will see.
+**The staleness call: count open-market minutes, not wall-clock minutes.** A last-known price is shown
+while the market has been open for **an hour or less** since that price was recorded. Past that the price
+column shows a dash instead, and the table says prices are unavailable.
 
-So age never disqualifies a price, and `LastKnownPrice.IsWorthShowing` is not an age rule at all. What it
-actually checks is whether the **stored reading is sound**: a price of zero or less is rejected (a corrupt
-write, and exactly the shape a bad upstream response would leave behind), and a timestamp more than five
-minutes in the future is rejected (a replica with a wrong clock). "Always true" would have been a test that
-cannot fail; these three cases can each go red.
+A wall-clock cap is the obvious rule and it is wrong twice over. At 03:00 on a Sunday the last price is
+Friday's close, which is the *correct* price — hiding it blanks the table of a perfectly healthy app. And
+the same hole reopens every weeknight: at 03:00 on a Tuesday the last price is Monday's close, eleven hours
+old, with the market shut the entire time. Counting only the minutes the market was actually open closes
+both, because both are zero open minutes.
+
+| When | Open minutes since that price | Result |
+|---|---|---|
+| Sunday 14:00, price from Friday's close | 0 | shown |
+| Tuesday 03:00, price from Monday's close | 0 | shown |
+| Tuesday 10:15, provider down since 09:30 | 45 | shown, amber |
+| Tuesday 11:00, provider down since 09:30 | 90 | dashed |
+
+**The counter-argument is a good one and survives.** A dash *does* recreate the blank table the fallback
+exists to prevent, and that is the one thing a reviewer killing the provider will see. The answer is not
+that it never happens — it is that it can now only happen after a full hour of **open market** with nothing
+to show. That is a genuinely broken feed, which is a thing the screen should say out loud, rather than a
+healthy Sunday afternoon. A dash on Sunday would be a lie; a dash at 11:00 on a Tuesday is the truth.
+
+`TradingClock` gets the New York session from `TimeZoneInfo`, so real daylight-saving rules apply and
+09:30–16:00 New York is 14:30–21:00 UTC in winter and 13:30–20:00 UTC in summer. **Holidays are not
+handled** — see [Known gaps](#known-gaps).
+
+Two other checks sit beside the age rule in `LastKnownPrice.IsWorthShowing`, and they are about whether the
+**stored reading is sound** rather than about age: a price of zero or less is rejected (a corrupt write, and
+exactly the shape a bad upstream response would leave behind), and a timestamp more than five minutes in the
+future is rejected (a replica with a wrong clock).
 
 Amber on a row means `isLastKnown`, never age. A fresh provider answer for a thinly traded symbol also carries
 an old timestamp, and colouring on the timestamp would light the whole table up on a healthy Sunday — the
@@ -335,6 +423,29 @@ degradation signal firing on the happy path.
 A ticker that has *never* been fetched has nothing to fall back to. That position still lists, with price and
 profit/loss `null` rather than `$0.00`, and is excluded from the totals with a footnote. Zero is a claim; the
 truth is "unknown".
+
+**Every one of those states says which it is.** The amber banner names the reason — the quote provider is
+not responding — rather than leaving the user to guess between a slow network and a dead feed. A row served
+from the store is labelled *last known* with its age, so a stale price and a merely-late price no longer look
+identical. And when nothing can be priced at all, the table keeps its columns, shows a dash in each of them,
+totals the cost only, and prints a line saying prices are unavailable. **Never `$0.00`** — a test pins that,
+because a made-up zero is the one failure mode that looks like data.
+
+### Redis down changes nothing on the dashboard, and stops alerts dead
+
+That asymmetry surprises people, so it is worth stating plainly. The dashboard asks the provider
+directly on every load, so a cache outage costs it nothing at all — the prices are *fresher* than
+usual, if anything, because the fallback is simply unreachable. What breaks is alerting: the sampled
+price window lives in Redis, and without it there is no history to compare anything against.
+
+So the panel says alerts are suppressed and no threshold is evaluated. **A stale price is a degraded
+read; a made-up price history is a wrong alert.** Inventing history to keep the evaluator busy would
+push notifications about moves that never happened, and a false alert about your money is worse than
+no alert. The suppression clears by itself once the cache is back and one poll cycle has run.
+
+A cache outage is registered as **degraded**, not unhealthy, so `/health/ready` still answers 200 and
+the platform keeps the replica serving. The alternative was worse than the outage: readiness answering
+503 would withdraw every replica and turn "alerts are paused" into "the API is unreachable".
 
 ### `dp` is not the number a threshold wants
 
@@ -420,9 +531,12 @@ every company in the world, which is a worse answer than showing what the provid
 
 With no `Finnhub__ApiKey` configured the app registers `FakeQuoteProvider`, logs a single warning naming the
 active provider, and serves a deterministic seeded random walk — stable per `(ticker, minute)`, continuous
-within a UTC day, priced $20–$500 per symbol and identical across replicas and restarts. `GET
-/api/marketdata/health` returns the active provider's name, and the SPA's health panel renders the same
-string, so the log and the page cannot disagree.
+within a UTC day, priced $20–$500 per symbol and identical across replicas and restarts. The provider's name
+reaches a reader two ways, and both come from the same string the startup log prints, so the log and the page
+cannot disagree: the anonymous `GET /api/marketdata/health` returns `{"provider":"…"}` and is what a deploy
+or a curl checks without a credential, while **the SPA's health panel reads `provider` out of the
+authenticated `GET /api/health/detail`** — one request that carries the databases, the cache and the feed as
+well, instead of a second round trip for one word.
 
 This is the clean-clone path and the test path, and it is why `docker compose up` needs no credentials. It is
 **not** for the deployed app: leaving the fake on in Azure serves invented prices for real tickers, which
@@ -608,19 +722,22 @@ language negotiation.
 | Suite | Covers |
 |---|---|
 | `Shared.Kernel.UnitTests` | `Money` arithmetic and its currency checks |
-| `Modules.Identity.UnitTests` | entities, Argon2id, PHC encoding, validators |
+| `Modules.Identity.UnitTests` | the `UserPreferences` entity, the appearance-settings request validator, and EF's constructor binding over that entity — password hashing is the framework's now, so nothing here tests it |
 | `Modules.Portfolio.UnitTests` | the merge/correct rules, rounding, and the dashboard P&L calculator |
-| `Modules.MarketData.UnitTests` | Finnhub response mapping, the fake's determinism, the Redis stores' encode/decode, the poller and its leases |
+| `Modules.MarketData.UnitTests` | Finnhub response mapping, the fake's determinism, the Redis stores' encode/decode, the poller and its leases, the trading clock and the three-state feed verdict |
 | `Modules.Alerts.UnitTests` | the sign-agreement rule, the three guards, the cooldown, and the entities behind them |
 | `Architecture.Tests` | the six boundary rules, plus a test that the rules can fail |
 | `Api.IntegrationTests` | Testcontainers Postgres + Redis, real HTTP, real migrations |
 
 `dotnet test` runs all seven suites with Docker up; `npm --prefix src/Web test` runs the browser tests
-separately. The exact pass and skip counts are kept in one place only, [CLAUDE.md](CLAUDE.md).
+separately. The exact counts are kept in one place only, [CLAUDE.md](CLAUDE.md).
 
-Two architecture rules skip, both on `Identity.Contracts`, which is empty on purpose because nothing
-reaches into Identity. A rule that skips enforces nothing, so the exact list of empty assemblies is
-fixed by a test rather than left to change unnoticed.
+**Nothing is skipped, and that took work.** `Identity.Contracts` is empty on purpose, because nothing
+reaches into Identity. Two architecture rules used to *skip* over it — and a rule that skips enforces
+nothing while still reporting green. They now generate no case at all for an assembly with no code in
+it, so the count never includes a rule that is quietly asleep. Put a single type in that project and
+both rules switch themselves back on with no edit anywhere. The exact list of assemblies no rule runs
+over is fixed by its own test, so the filter can never become a hiding place.
 
 Integration tests run the **same** `db/init/01-roles.sql` that ships, so the isolation under test is
 the isolation that deploys.
@@ -628,6 +745,16 @@ the isolation that deploys.
 The dashboard's degradation is tested rather than described: the provider wholly down, three of
 twenty symbols failing, Redis down with the provider up, and a ticker that was never fetched. Every
 one asserts **200**.
+
+Graceful failure is tested the same way, and each of these can go red on the exact mistake it is named
+after. A host is booted with Redis unreachable and `/health/ready` must answer **200** — 503 is what it
+used to do, and it is what would withdraw every replica. A poll cycle with **zero** targets must report
+*healthy*, because the naive version calls a brand-new deployment broken for ever. A unique-index
+violation must stay **500** while a connection failure becomes **503**, so the merge race and a dead
+database do not collapse into one answer. The alert stream must still be retrying after a seventh
+failure, since the library's default gives up silently at the fourth. And a throw inside the alerts
+panel must leave the dashboard standing, which a route-level boundary would not achieve — it would
+replace the route.
 
 The alert rule is tested the same way — by the thing it exists to prevent rather than by the thing it
 does. A single "an alert fired at −6%" case passes under all three candidate rules and proves nothing.
@@ -642,11 +769,14 @@ Three targets: `docker compose` (the P0 gate), **GitHub Pages** for the SPA, and
 Apps** for the API. Postgres Flexible B1ms and Azure Managed Redis Balanced B0 — *not* Azure Cache
 for Redis, which is retiring.
 
-**Two of the three are live.** Phase 3 is deployed and verified on the public URL as of 2026-08-05:
+**Two of the three are live.** Phase 4 is deployed and verified on the public URL as of 2026-08-06:
 the SPA at `dilicidum.github.io/StockPortfolio` renders live market prices against the ACA API, and
 `/api/marketdata/health` returns `{"provider":"Finnhub"}` — a real key, not the fake. The API runs at
 `stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` in resource group
-`stockportfolio-rg`, at roughly $1.26/day.
+`stockportfolio-rg`. The measured burn was roughly $1.26/day while the API still scaled to zero; it is
+higher now that a replica runs around the clock, and nobody has measured how much higher.
+[docs/DEPLOYING.md](docs/DEPLOYING.md) says how to read the real rate and the live `deleteAfter` date —
+both come from Azure, not from a document.
 
 **Deploying is `git push origin main` and nothing else.** The full runbook is
 [docs/DEPLOYING.md](docs/DEPLOYING.md) and the reasoning behind the cost model is in
@@ -669,6 +799,15 @@ rather than 100 for a related reason: a held-open stream can count as one in-fli
 entire life, so at 100 a few dozen connected browsers would scale on user count rather than on load.
 `maxReplicas` stays at 2, which is what the connection budget allows.
 
+**Three probes, three different questions.** Liveness (`/health/live`) touches nothing at all — if it
+checked Postgres or Redis, a brief dependency failure would become a container restart loop and turn a
+degraded app into a down one. Readiness (`/health/ready`) runs the four database logins and the cache,
+and answers a JSON body naming each component, so the deploy's smoke step can assert them one by one
+instead of reading a single word. Startup (`/health/startup`) asks each context for pending migrations
+and nothing else; that is a database round trip, which is exactly why it must never be the liveness
+probe. There is also an authenticated `GET /api/health/detail`, which reports the same shape and always
+answers **200** — a route whose job is to say Postgres is down cannot use that failure as its own reply.
+
 Every connection string carries `Maximum Pool Size=2`: B1ms allows 35 user connections, and a
 different username is a different Npgsql pool. What matters is **what opens a pool, not what is
 defined**. The database creates five roles and four schemas, and the API registers exactly four
@@ -677,20 +816,71 @@ replica**: 2 replicas × 4 pools × 2 = **16**, leaving 19 spare. `migrator` run
 alongside the API. The Npgsql default of 100 would ask for 800. Count `AddDbContext` calls rather than
 roles — this arithmetic has been published wrong before.
 
+### Tearing it down
+
+The resource group deletes itself. `deploy.yml` stamps `deleteAfter = today + 14` on
+`stockportfolio-rg`, and `teardown.yml` runs daily at 03:00 UTC and deletes the whole group once that
+date has passed. An unreadable or missing tag also deletes — deliberately, because a group with no
+readable deadline is a group nothing is bounding.
+
+To delete it **now**, run the Teardown workflow by hand with its `force` input set:
+
+```bash
+gh workflow run teardown.yml --repo Dilicidum/StockPortfolio -f force=true
+```
+
+Nothing else needs doing and nothing is kept, because there is no state outside the group. To bring it
+back, push to `main` — the deploy provisions from empty.
+
+---
+
+## What we rejected, and why
+
+The larger design arguments are above, each next to the thing it decided. This is the smaller list —
+changes that were investigated properly and turned down, written here so nobody proposes them a second
+time. The full register, including what is merely deferred, is
+[docs/deferred-work.md](docs/deferred-work.md).
+
+| Proposal | Why not |
+|---|---|
+| One shared generic value converter for the id types, instead of one per id | It has to build the id from a `Guid` *inside an expression tree*, and the interface member that would do it cannot be called there. The workaround is hand-built expression trees keyed on a property name as a string — trading fourteen duplicated lines for reflection that breaks on a rename, at startup. Worth revisiting at roughly eight more id types, and then with a source generator. |
+| A `WithStandardProblems()` helper to stop every endpoint listing its statuses | The statuses genuinely differ per route: `/me` is a `GET` and rightly omits 415, `/register` omits 401 and is the only 409. Any blanket helper is wrong for at least one route, and it works against the rule that an endpoint declares exactly what it can emit. |
+| Replacing the migrator's walk over registered services | The walk is correct and fails loudly at zero contexts. Every alternative is worse: a public migrate method per module means four coordinated edits every phase, and making the contexts public breaks the layering. |
+| `EFCore.NamingConventions`, to delete eleven `HasColumnName` calls | Taking on a dependency to remove eleven explicit, self-explaining column names is a bad trade. |
+| A market-holiday calendar for the dash rule | A week of work for a demo. The failure is cosmetic and self-correcting — see [Known gaps](#known-gaps). |
+| A cached ticker table inside MarketData | The poll list is read live from Alerts each cycle. Removing the table also removed two event handlers, a reconciliation pass, and a way for two lists to disagree. |
+| Alert replay — a cursor, message ids, a 24-hour backfill | The alert is written to the database before it is pushed, and the panel reloads its history from an ordinary `GET` on reconnect. A replay protocol would be a second delivery mechanism for data the first one already has. |
+
 ---
 
 ## Known gaps
 
 Stated plainly rather than left for you to find.
 
-- **Phase 5 is not deployed.** It is green locally and in CI. What can only be checked against the
-  public URL is unproven there — an alert arriving from the deployed API, a stream still alive after
-  four minutes, and a saved provider key still readable after a redeploy.
+- **Phases 5 and 6 are not deployed.** Both are green locally and in CI. What can only be checked
+  against the public URL is unproven there — an alert arriving from the deployed API, a stream still
+  alive after four minutes, a saved provider key still readable after a redeploy, and the startup
+  probe passing on a real Container Apps revision.
 - **`what-if` has never been read by a human.** `az` is not installed on the development machine.
   `ci.yml`'s **Bicep build** job compiles the templates and `deploy.yml` runs `what-if` in the runner
   immediately before deploying, so both run — nobody has compared the output by eye. Phase 6 adds a
-  third probe and removes dead parameters, so it is a phase where reading that output would actually
-  tell you something.
+  third probe and removes dead parameters, so this is the deploy where reading that output would
+  actually tell you something.
+- **Market holidays are not handled.** The dash rule counts open-market minutes from a fixed
+  09:30–16:00 New York session, Monday to Friday, with real daylight-saving rules and no holiday
+  calendar. So on Thanksgiving afternoon the price column dashes an hour into a market that was never
+  open. A holiday calendar is a week of work for a demo, the failure is cosmetic, and it corrects
+  itself the next trading day.
+- **Nothing caps how many positions you can hold, and the provider has no batch endpoint.** One
+  visible position is one HTTP call per dashboard refresh, fanned out four at a time, so both the
+  latency and the call count grow linearly with the portfolio. Twenty positions at a fifteen-second
+  refresh is already past sixty calls a minute for a single viewer. Nothing breaks — a refused symbol
+  falls back to its last known price like any other failure — but a hundred-position portfolio would be
+  slow and would spend the free tier in seconds.
+- **One browser tab holds one of its six connections per origin, permanently.** The alert stream is a
+  held-open WebSocket, opened once in the authenticated layout and never per component. Six tabs of
+  this app on one origin is the practical ceiling before other requests start queueing behind it. The
+  cleanup that closes the connection is also what keeps React's development mode from opening two.
 - **The free tier is a ceiling, and nothing in the app models it any more.** The client-side token
   bucket that used to pace calls at sixty a minute was removed in Phase 5: it was sized to one
   provider's free plan and the brief says free-tier limits are not a problem here. What survives is
@@ -698,13 +888,17 @@ Stated plainly rather than left for you to find.
   and a fall back to the last known price with its age. Over budget, tickers degrade rather than fail.
   A user who supplies their own key gets a separate outbound client, so a revoked key of theirs cannot
   open the breaker for everybody.
-- **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
-  `TODO`. They work and are exercised by tests; they have not been signed off.
-- **Readiness treats a cache outage as an inability to serve traffic.** All four database logins are
-  probed now, each under its own name, which is what closed **C7**. Redis is probed beside them and
-  reports the same way, so Redis being down answers 503 on `/health/ready` and the platform withdraws
-  every replica — turning "alerts are suppressed" into "the API is unreachable". The cache should
-  report *degraded*, which keeps a container serving. Phase 6 owns it.
+- **Signing out leaves a window of up to 15 minutes.** A session is an ASP.NET Core Identity bearer
+  token — sealed and self-contained, with no row behind it — so there is nothing to delete and no way
+  to retire one early. Logging out rolls the user's security stamp, which kills the *refresh* token
+  immediately, but an access token already in a browser stays valid until it expires. Fifteen minutes
+  is the host's setting and is the whole of that residual window; the refresh token's 14 days is the
+  framework's default and nothing in the repo changes it.
+- **A cache outage is degraded, not unready.** All four database logins are probed under their own
+  names, which is what closed **C7**. Redis is probed beside them but registered as *degraded*, so
+  `/health/ready` still answers 200 and the platform keeps the replica serving; only a database that
+  is genuinely down gives the 503 that withdraws it. The alerts panel says alerts are suppressed
+  instead of the API going unreachable.
 - **The portfolio table has no price or profit/loss columns.** Those live on the dashboard, which is
   the screen that fetches prices. This is a decision, not an omission: adding them to the holdings
   table would make a CRUD screen pay the provider fan-out on every render.

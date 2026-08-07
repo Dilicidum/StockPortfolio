@@ -1,7 +1,4 @@
-// One user-assigned managed identity for everything: the API container app, the
-// migration job, and the ACR pull. A system-assigned identity cannot be referenced
-// from another resource in the same single-pass deployment, which is why this is
-// user-assigned and created first.
+// User-assigned, because a system-assigned identity cannot be referenced from another resource in the same deployment.
 
 @description('Name of the user-assigned managed identity.')
 param name string

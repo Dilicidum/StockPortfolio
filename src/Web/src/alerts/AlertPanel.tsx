@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
+import { alertsSuppressed, healthDetailQuery } from '../health/healthApi'
 import { formatAge, formatMoney, formatPercent } from '../lib/format'
 import { alertHistoryQuery, alertKeys, simulateAlert, type FiredAlert } from './alertsApi'
 
@@ -74,6 +75,9 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
   const queryClient = useQueryClient()
 
   const { data, isPending, isError } = useQuery(alertHistoryQuery)
+  const { data: health } = useQuery(healthDetailQuery)
+
+  const suppressed = alertsSuppressed(health)
 
   const simulate = useMutation({
     mutationFn: () => simulateAlert(),
@@ -99,6 +103,14 @@ export function AlertPanel({ limit, compact = false }: AlertPanelProps) {
         ) : null
       }
     >
+      {suppressed ? (
+        <div className="mb-3">
+          <Alert tone="warn" title={t('panel.suppressedTitle')}>
+            {t('panel.suppressedBody')}
+          </Alert>
+        </div>
+      ) : null}
+
       {simulate.isError ? (
         <div className="mb-3">
           <Alert tone="warn">{t('panel.simulateFailure')}</Alert>

@@ -13,8 +13,16 @@
     "rise": "Rise"
   },
   "simulatedBadge": "Simulated",
+  "error": {
+    "title": "Could not load your notifications",
+    "fallback": "The server did not answer."
+  },
   "panel": {
     "title": "Recent activity",
+    "crashTitle": "The activity panel stopped working",
+    "crashBody": "The rest of the dashboard is unaffected.",
+    "suppressedTitle": "Alerts are suppressed",
+    "suppressedBody": "The price cache is not answering, so no threshold is being evaluated and nothing new will fire. Dashboard prices are unaffected — they come straight from the provider. Alerting starts again on its own once the cache is back.",
     "listLabel": "Recent alerts",
     "simulate": "Simulate",
     "simulateFailure": "Set a threshold on one of your positions first.",
@@ -32,6 +40,10 @@
     "offline": "Offline",
     "liveTitle": "Alerts are streaming from the server",
     "offlineTitle": "Alerts will be listed as soon as the connection is back"
+  },
+  "reconnectBar": {
+    "reconnecting": "Reconnecting to the alert stream. Nothing is lost — anything that fires while you wait will appear here.",
+    "offline": "You are offline. Alerts will start again on their own once your connection is back."
   },
   "notificationsPage": {
     "title": "Notifications",

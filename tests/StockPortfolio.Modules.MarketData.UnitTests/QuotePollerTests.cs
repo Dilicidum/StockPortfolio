@@ -35,6 +35,11 @@ public sealed class QuotePollerTests
 
         // Still released: an early return holding the in-flight flag stops polling for several intervals, silently.
         harness.Lease.Releases.ShouldBe(1);
+
+        var heartbeat = harness.Heartbeats.Written.ShouldHaveSingleItem();
+        heartbeat.At.ShouldBe(Now);
+        heartbeat.TickersTargeted.ShouldBe(0);
+        heartbeat.TickersStored.ShouldBe(0);
     }
 
     [Fact]
@@ -51,6 +56,8 @@ public sealed class QuotePollerTests
 
         // Releasing after a refused claim deletes the winner's in-flight key — the overlap the second lock prevents.
         harness.Lease.Releases.ShouldBe(0);
+
+        harness.Heartbeats.Written.ShouldBeEmpty();
     }
 
     [Fact]
@@ -69,6 +76,22 @@ public sealed class QuotePollerTests
         harness.LastKnown.Written.Select(quote => quote.Ticker.Value).ShouldBe(["AAPL", "MSFT"], ignoreOrder: true);
         harness.Observer.Notified.ShouldBe(["AAPL", "MSFT"], ignoreOrder: true);
         harness.Lease.Releases.ShouldBe(1);
+
+        var heartbeat = harness.Heartbeats.Written.ShouldHaveSingleItem();
+        heartbeat.TickersTargeted.ShouldBe(2);
+        heartbeat.TickersStored.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Cycle_ProviderAnswersNothing_RecordsTheTargetsItStillFailedToStore()
+    {
+        using var harness = new Harness(new StubSource("AAPL", "MSFT"));
+
+        await harness.Poller.RunCycleAsync(Ct);
+
+        var heartbeat = harness.Heartbeats.Written.ShouldHaveSingleItem();
+        heartbeat.TickersTargeted.ShouldBe(2);
+        heartbeat.TickersStored.ShouldBe(0);
     }
 
     [Fact]
@@ -105,6 +128,8 @@ public sealed class QuotePollerTests
 
         // The release is in a finally: without it a crashed cycle blocks polling until the key expires.
         harness.Lease.Releases.ShouldBe(1);
+
+        harness.Heartbeats.Written.ShouldBeEmpty();
     }
 
     [Fact]
@@ -179,6 +204,7 @@ public sealed class QuotePollerTests
                 Lease,
                 Window,
                 LastKnown,
+                Heartbeats,
                 PollingOptions.FromConfiguration(new ConfigurationBuilder().Build()),
                 clock,
                 NullLogger<QuotePoller>.Instance);
@@ -193,6 +219,8 @@ public sealed class QuotePollerTests
         public RecordingWindowStore Window { get; } = new();
 
         public RecordingLastKnownStore LastKnown { get; } = new();
+
+        public RecordingHeartbeatStore Heartbeats { get; } = new();
 
         public RecordingObserver Observer { get; } = new();
 
@@ -323,6 +351,21 @@ public sealed class QuotePollerTests
 
             return Task.CompletedTask;
         }
+    }
+
+    private sealed class RecordingHeartbeatStore : IPollHeartbeatStore
+    {
+        public List<PollHeartbeat> Written { get; } = [];
+
+        public Task WriteAsync(PollHeartbeat heartbeat, CancellationToken ct)
+        {
+            Written.Add(heartbeat);
+
+            return Task.CompletedTask;
+        }
+
+        public Task<PollHeartbeat?> ReadAsync(CancellationToken ct) =>
+            Task.FromResult(Written.Count == 0 ? null : (PollHeartbeat?)Written[^1]);
     }
 
     private sealed class RecordingObserver : IPriceSampleObserver

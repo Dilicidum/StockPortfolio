@@ -33,9 +33,10 @@ neither holds a model.
 
 ## The Identity edges have three actors, not two
 
-Identity *signs* the token at sign-in. The **host** verifies it — signature, issuer, audience, expiry — and
-hands each request an already-unpacked identity. Portfolio then reads one field out of that; it never opens
-or verifies anything.
+Identity *issues* the token at sign-in. The **host** opens it — the token is sealed by the application's
+data-protection key ring rather than signed, so there is no signature, issuer or audience to check, only the
+seal and the expiry — and hands each request an already-unpacked identity. Portfolio then reads one field
+out of that; it never opens or checks anything.
 
 So Identity and Portfolio never speak to each other. They only agree on what the token contains, and the
 host is the machinery in between. That agreement is the published language, and it is why Identity publishes

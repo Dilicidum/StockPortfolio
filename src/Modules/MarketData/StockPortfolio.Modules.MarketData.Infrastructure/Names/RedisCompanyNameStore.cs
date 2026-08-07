@@ -45,7 +45,7 @@ internal sealed partial class RedisCompanyNameStore(
                 }
             }
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogReadFailed(logger, ex, ordered.Length);
         }
@@ -77,7 +77,7 @@ internal sealed partial class RedisCompanyNameStore(
 
             await Task.WhenAll(writes);
         }
-        catch (RedisException ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             LogWriteFailed(logger, ex, matches.Count);
         }

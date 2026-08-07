@@ -91,6 +91,27 @@ public sealed class MarketDataModuleTests
     }
 
     [Fact]
+    public void Module_FeedHealth_IsRegisteredOnBothProviderBranches()
+    {
+        foreach (var config in new[] { Config(), Config(("Finnhub:ApiKey", "a-real-looking-key")) })
+        {
+            var services = new ServiceCollection();
+
+            services.AddLogging();
+            services.AddSingleton(TimeProvider.System);
+            services.AddMarketDataModule(config);
+
+            Lifetime<IFeedHealth>(services).ShouldBe(ServiceLifetime.Scoped);
+            Lifetime<IPollHeartbeatStore>(services).ShouldBe(ServiceLifetime.Singleton);
+
+            services.Any(descriptor =>
+                    string.Equals(descriptor.ServiceType.Name, "ProviderKeyRejection", StringComparison.Ordinal)
+                    && descriptor.Lifetime == ServiceLifetime.Singleton)
+                .ShouldBeTrue();
+        }
+    }
+
+    [Fact]
     public void Module_HostRegistersAnObserverAfterwards_TheHostsWins()
     {
         var services = new ServiceCollection();

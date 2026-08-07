@@ -20,7 +20,7 @@ re-read the existing triggers.
 
 ### A5 — `ValidationFilter<T>` lets a request through when it finds no body to validate
 
-`src/Shared.Api/ValidationFilter.cs:15-18` — when no argument of type `TRequest` is present it calls
+`src/Shared.Api/ValidationFilter.cs:13-16` — when no argument of type `TRequest` is present it calls
 `next(context)`, so validation is silently off for that route. It cannot happen today: every filtered route
 declares a matching non-nullable body parameter. It would happen after a wiring mistake — a mismatched
 generic argument, or a parameter renamed on one side of a refactor.
@@ -31,82 +31,115 @@ silent bypass.
 
 **Trigger:** Phase 2, when the route count roughly triples and the filters stop being individually obvious.
 
-**Status: the trigger has happened, and the item stays deferred by choice.** There are eight filtered routes:
-`IdentityEndpoints.cs:53,64,75` (`RegisterUserRequest`, `LoginUserRequest`, `RefreshSessionRequest`),
-`PortfolioEndpoints.cs:61,71` (`AddHoldingRequest`, `UpdateHoldingRequest`), `MarketDataEndpoints.cs:95`
-(`NudgeRequest`) and `AlertsEndpoints.cs:72,101` (`SimulateAlertRequest`, `SaveAlertSettingRequest`). Eight is
-not "roughly triples", and the filters are still individually obvious. Alerts added the two routes without
-adding a new *shape* of mistake: both declare a matching non-nullable body parameter like every other.
+**Status: the trigger has happened, and the item stays deferred by choice.** There are **eleven** filtered
+routes, counted by grepping for `AddEndpointFilter<ValidationFilter<`:
 
-### B4 / B6 — no handler unit tests exist
+| File | Line | Request type |
+|---|---|---|
+| `IdentityEndpoints.cs` | 46 | `RegisterUserRequest` |
+| `IdentityEndpoints.cs` | 57 | `LoginUserRequest` |
+| `IdentityEndpoints.cs` | 68 | `RefreshSessionRequest` |
+| `IdentityEndpoints.cs` | 107 | `SaveAppearanceRequest` |
+| `PortfolioEndpoints.cs` | 55 | `AddHoldingRequest` |
+| `PortfolioEndpoints.cs` | 65 | `UpdateHoldingRequest` |
+| `PortfolioEndpoints.cs` | 109 | `SaveDashboardSettingsRequest` |
+| `MarketDataEndpoints.cs` | 91 | `NudgeRequest` — mapped in Development only |
+| `MarketDataEndpoints.cs` | 114 | `SaveApiKeyRequest` |
+| `AlertsEndpoints.cs` | 69 | `SimulateAlertRequest` |
+| `AlertsEndpoints.cs` | 79 | `SaveAlertSettingRequest` |
 
-There are no fakes for `IUserRepository`, `IRefreshTokenRepository`, `IPasswordHasher` or `ITokenIssuer`,
-so every handler assertion has to go end to end through Docker. Consequences today:
+Eleven is not "roughly triples" either, and the filters are still individually obvious. Every route added
+since — the two from Alerts, and Phase 5's three settings routes — declares a matching non-nullable body
+parameter like all the others, so the count grew without a new *shape* of mistake appearing. Re-grep rather
+than trusting these line numbers; they move with every edit above them.
 
-- `RegisterUserCommandHandler`'s check-before-hash **ordering** is untested — move the `Hash` call above the
-  `FindByEmailAsync` and the whole suite stays green, while every rejected registration pays about 40 ms of
-  Argon2id.
-- Untested branches: `IsAcceptable`'s `now < session.ExpiresAt`; `GetCurrentUserQueryHandler`'s `NotFound`;
-  logout's `IsNullOrWhiteSpace` half; and the reachable `InvalidInput` arm — `ada@localhost` passes
-  FluentValidation's lax `.EmailAddress()` and is then rejected by `User.IsWellFormedEmail`.
+### A8 — `ApiExceptionHandler` used a different problem-details namespace from the framework — **DONE (Phase 6)**
 
-**Fix:** `tests/StockPortfolio.Modules.Identity.UnitTests/Fakes/` with in-memory repositories, a
-`CountingPasswordHasher` and a deterministic token issuer. Then
-`TakenEmail_ReturnsEmailAlreadyUsed_WithoutHashingThePassword` asserting `HashCallCount == 0`.
+This sat in the Skipped table. The handler set its own `Title` and `Type` on the problem document, so the
+same status code could describe itself two different ways depending on which code path produced it. It was
+skipped because no client reads `type` — the SPA reads `status` and `errors` — and the stated fix was to
+delete both assignments and let `ProblemDetailsDefaults` fill them.
 
-**Trigger:** the first Portfolio handler. Building the fakes for one module is hard to justify; building them
-for two is not.
+**Done, exactly that way.** `ApiExceptionHandler` now sets `Status` and nothing else, with a comment saying
+why the two omissions are deliberate rather than forgotten. `Detail` is still deliberately unset, so no
+exception text can reach a caller. It is recorded here rather than left as a silent deletion from the
+Skipped table, because a reader who noticed the row was gone could not otherwise tell a fix from a typo.
 
-**Status: the trigger happened in Phase 2, this is still the most overdue item in the file, and Phase 4 made
-it markedly cheaper rather than staler.** The gap in Identity is unchanged — every consequence listed above
-is still live, and moving `Hash` above `FindByEmailAsync` in `RegisterUserCommandHandler` still leaves the
-whole suite green. What changed is the cost of closing it. `tests/StockPortfolio.Modules.Alerts.UnitTests/`
-now has the repository's first and only `Fakes/` directory: in-memory repositories, a cooldown store, a
-publisher and a window reader, all driven by `FakeTimeProvider`, unit-testing an entire handler and its five
-abstractions with no Docker. That is the shape this item asks for, built and working, so Identity's version
-is now a copy rather than a design. Nothing about Identity was touched, deliberately — Phase 4 was not the
-phase to do it in, but the "hard to justify" argument no longer has anything left in it.
+### B4 / B6 — Portfolio's handlers have no unit tests and no fakes
+
+Where a module has no in-memory stand-ins for the ports its handlers depend on, every handler assertion has
+to go end to end through Docker — so a branch that is awkward to provoke over HTTP goes untested, and so
+does the *order* in which a handler does things, which no HTTP response reveals.
+
+**Portfolio is the last module in that state.** Its eight handlers — add, update, remove and hide a holding,
+read the holdings list, read and save the dashboard settings, and build the dashboard — depend on three
+ports (`IHoldingRepository`, `IDashboardSettingsRepository`, `IDashboardHoldingReader`) and none of them has
+a fake. `Modules.Portfolio.UnitTests` covers entities, value objects, the dashboard calculator and the
+request validators, and stops at the handler boundary.
+
+**Fix:** a `Fakes/` directory in `tests/StockPortfolio.Modules.Portfolio.UnitTests/`, copied in shape from
+the two that already exist, and handler tests over it. The merge path is the one worth writing first: adding
+a ticker the user already holds must read, merge and save rather than insert, and the integration test that
+covers it cannot distinguish those from the outside.
+
+**Trigger:** any change to a Portfolio handler that is not itself covered by an integration test.
+
+**Status: this item was written about Identity and Identity is no longer the subject.** Everything the
+original named — the user repository, the refresh-token repository, the password hasher, the token issuer,
+the register and current-user handlers, the email well-formedness rule — was deleted when Identity moved to
+ASP.NET Core Identity. Hashing, token issuing and session validation are the framework's now and are not
+this repository's to unit-test. What is left of Identity's own application layer is two preference handlers
+over one port, which is a much smaller version of the same gap. **The worked example the item used to carry
+cannot be performed and has not been replaced by an equivalent** — nothing in Identity has an ordering
+subtlety of that kind any more.
+
+The "hard to justify for one module" argument is gone regardless. Two `Fakes/` directories exist. Alerts'
+holds five — two repositories, a cooldown store, a publisher and a price-window reader — driven by
+`FakeTimeProvider` and unit-testing whole handlers with no Docker. MarketData's holds two, a repository and
+a secret protector. That is the shape this item asks for, built twice, so Portfolio's version is a copy
+rather than a design.
 
 ### B10 — fragile assertions and duplicated test code
 
-Fragile: `RegisterUserRequestValidatorTests` asserts on the wording of messages (`ShouldContain("Email")`,
-the literal `"12"`) — reword a message and it fails although nothing behaved differently; assert `ErrorCode`
-instead. `MigrationTests` pins a migration *filename*; comparing against `context.Database.GetMigrations()`
-survives a rename and also catches a *missing* migration.
-
-Duplication: `_fixture ?? throw` in six classes and `TestContext.Current.CancellationToken` about 20 times
-(an `ApiTest` base class); `ReadProblemAsync` private to one file (belongs on `Wire`); raw Npgsql plumbing in
-three hand-rolled shapes (a `Sql` helper); four near-identical `GlobalUsings.cs` (one `Using` item group in
-`tests/Directory.Build.props`); and **two fake clocks doing one job** — `TestClock` in the integration
-project versus `FakeTimeProvider` in the unit projects. Delete `TestClock`; `FakeTimeProvider` behaves
-identically and also drives `CreateTimer`, which the Phase 4 poll loop needs.
+Duplication, all of it in `tests/`: `fixture ?? throw` opening **20** integration classes and
+`TestContext.Current.CancellationToken` written out **184** times (an `ApiTest` base class would hold both);
+`ReadProblemAsync` private to `AuthenticationTests` (belongs on `Wire`); raw Npgsql plumbing in three
+hand-rolled shapes (a `Sql` helper); **seven** near-identical `GlobalUsings.cs` (one `Using` item group in
+`tests/Directory.Build.props`); and **two fake clocks for one job** — `TestClock` in the integration project
+versus `FakeTimeProvider` in the unit projects. Delete `TestClock`; `FakeTimeProvider` behaves identically
+and also drives `CreateTimer`, which the poll loop needs.
 
 **Trigger:** Phase 2's test suite — the point where the duplication stops being two copies and becomes four.
 
-**Status: the trigger has happened.** Phase 2, Phase 3 and Phase 4 each added a test assembly; there are
-seven now. Not done. The clock half is now decided in practice rather than in principle: Phase 4's poll loop
-is driven by `FakeTimeProvider` throughout, including its `CreateTimer`, exactly as this item predicted —
-and `TestClock` is still sitting in the integration project doing the same job worse.
+**Status: the trigger has happened, and the duplication has roughly tripled since this was written.** Phases
+2, 3 and 4 each added a test assembly; there are seven. Not done, and the numbers above are the current
+count, not the original one.
 
-### C2 — JWT configuration is read and validated twice
+**The fragile-assertion half is closed, by replacement rather than by repair.** Both examples it named have
+gone: the register-request validator tests went with the hand-written Identity module, and the validator
+tests that replaced them assert `ErrorCode` — `"theme.unknown"`, `"language.required"` — which is what this
+item asked for. `MigrationTests` no longer pins a migration filename either; it reads the schemas and table
+names out of the live database and asserts on those. Neither was done *because* of this item, so treat it as
+overtaken on that half rather than as a fix to copy.
 
-`src/Host/Extensions/AuthenticationExtensions.cs:16-54` and
-`Identity.Infrastructure/Security/JwtOptions.cs:14-64` each read the `Jwt` section, each enforce the 32-byte
-minimum, and each declare their own `DefaultIssuer` and `DefaultAudience`. The comment at
-`AuthenticationExtensions.cs:19` acknowledges the risk rather than removing it. Change one default and the
-process issues tokens it then refuses — a 401 with no clue attached.
+**The clock half is unchanged and is now the whole of what is left.** `TestClock` is still in
+`tests/StockPortfolio.Api.IntegrationTests/Infrastructure/TestClock.cs`, and it is now **dead code** — no
+test refers to it. `ApiFixture.CreateHostWithClock(TimeProvider)` is still there too and is genuinely used,
+by `DataProtectionPersistenceTests`, which passes it `TimeProvider.System`. So the seam is real and the fake
+behind it is not: deleting the file is a one-line change with nothing to migrate.
 
-**Fix:** a `JwtSettings` record in `Identity.Application`, which **both** `.Infrastructure` and `.Api`
-already reference, so the layering objection does not apply. One definition of "a valid signing key".
+### C2 — JWT configuration is read and validated twice — **DONE (Phase 6)**
 
-Covered today by `AuthenticationTests` registering and then calling `/me`, which proves the issuer and the
-validator agree on the configured path. Only the *defaults* and the key-length check are uncovered.
+Two places used to read the `Jwt` section, each enforcing its own 32-byte minimum and its own issuer and
+audience defaults, so changing one default made the process issue tokens it then refused.
 
-**Trigger:** the first time either default is changed, or auth registration moves into `Identity.Api`.
-
-**Status: still not triggered.** Phase 4 split `AddIdentityPersistence` out of `AddIdentityModule` (C8),
-which moved the eager signing-key check off the migrator's path but left both readers of the `Jwt` section
-exactly where they were. Neither default changed.
+Both readers had already gone by Phase 6: sessions are ASP.NET Core Identity bearer tokens, which are
+data-protected rather than signed, so there was no signing key left to read. What remained was the
+configuration itself — the `Jwt` block in both host settings files, three Bicep parameters, the container
+app's secret and three environment entries, a GitHub secret in two workflows, two compose entries, an
+`.env.example` section and the value `ApiFixture` supplied — all of it feeding nothing. Dead configuration
+that looks alive is worse than none, so Phase 6 deleted every side of it in one change rather than unifying
+two readers that no longer exist.
 
 ### C3 — two Dockerfiles duplicate 22 identical `COPY` lines
 
@@ -154,16 +187,22 @@ else references the existing public constant.
 **Trigger:** Phase 2. With three modules this becomes twelve places, and the value is almost entirely in not
 stamping the pattern out three times.
 
-**Status: the trigger has happened, the pattern was stamped out anyway, and Phase 4 made it worse exactly as
-forecast.** `ConnectionStringName` now exists independently in `IdentityModule.cs:15`,
-`PortfolioModule.cs:15`, `AlertsModule.cs:21`, `PostgresHealthCheck.cs:11` and `RedisExtensions.cs:9` — five
-declarations of the same idea, up from four.
+**Status: the trigger has happened, the pattern was stamped out anyway, and every phase since has made it
+worse exactly as forecast.** `ConnectionStringName` exists independently in `IdentityModule.cs`,
+`PortfolioModule.cs`, `AlertsModule.cs`, `MarketDataModule.cs` and — as `RedisConnectionStringName` —
+`RedisExtensions.cs`: five declarations of the same idea. The composition changed rather than the count.
+`PostgresHealthCheck.cs` was deleted when C7 closed, because every module now contributes its own database
+check from its `Add<M>Module`, and MarketData's arrived in its place when Phase 5 gave it a context. There is
+a sixth spelling of each name that is not a declaration and is easy to miss: `Migrator/Program.cs` writes all
+four as string keys into its in-memory configuration, so a renamed constant leaves the migrator silently
+configuring nothing.
 
 The second half is the one that matters more. The `UseNpgsql` + `MigrationsHistoryTable` block now exists
-**six** times: three modules × (module registration, design-time factory). Alerts was written by copying
-Portfolio's, which is precisely the mechanism this item warns about — the copy was correct, and a copy that
-had dropped the history-table call would have put four contexts into one bookkeeping table with no error
-anywhere. Getting it right by copying carefully is not the same as it being enforced.
+**eight** times: four modules × (module registration, design-time factory). Alerts was written by copying
+Portfolio's and MarketData's by copying one of those, which is precisely the mechanism this item warns
+about — each copy was correct, and a copy that had dropped the history-table call would have put four
+contexts into one bookkeeping table with no error anywhere. Getting it right by copying carefully is not the
+same as it being enforced.
 
 ### C7 — the `postgres` readiness check probed one of the module roles — **DONE**
 
@@ -177,11 +216,13 @@ rather than on a request, so an unreachable `alerts_svc` produced no failing HTT
 four distinct names, and `HealthCheckTests` pins the names **and their count** — a module that stops
 contributing one is a failing test rather than a quiet gap.
 
-**One thing this did not settle, and Phase 6 owns it.** Readiness runs *every* registered check, and Redis is
-registered alongside the four. Every check defaults to reporting unhealthy on failure, so Redis being down
-takes the API out of the load balancer entirely — which is worse than the gap this item closed, and is the
-direct opposite of Phase 6's "Redis stopped, the dashboard still renders prices". Fixing it needs the cache to
-report *degraded* and the check sets to be tagged, so readiness answers only the question it is named after.
+**Closing this one opened a worse one, and Phase 6 closed that too.** Readiness ran *every* registered check,
+Redis among them, and every check defaults to reporting unhealthy on failure — so a cache outage took the API
+out of the load balancer entirely, which is the direct opposite of "Redis stopped, the dashboard still renders
+prices". The cache is now registered with a *degraded* failure status, which the framework maps to 200, and
+every check carries a tag its probe selects on, so readiness answers only the question it is named after and a
+check added later cannot silently join it. An integration test boots a host with Redis unreachable and asserts
+readiness is **200** with the cache reported degraded.
 
 ### C8 — the Migrator invents a JWT signing key — **DONE (Phase 4)**
 
@@ -263,31 +304,37 @@ packages pull it in transitively. The keys live in `marketdata.data_protection_k
 The skip reason is therefore false in every clause, which is the failure mode this register exists to
 prevent: an item parked with a good reason, and nobody re-reading the reason when the ground moved.
 
-### D10 — compose startup ordering gaps
+### D10 — compose startup ordering gaps — **DONE (Phase 6)**
 
-`redis` defines a `redis-cli ping` healthcheck that nothing waits on — `api` uses
-`condition: service_started`. `api` has no healthcheck, and `web` waits on it with `service_started`, so
-nginx can serve the SPA before the API is listening and the first API call returns 502.
+Three gaps, all in `docker-compose.yml`. `redis` defined a `redis-cli ping` healthcheck that nothing waited
+on, because `api` used `condition: service_started`. `api` had no healthcheck at all. And `web` waited on
+`api` with `service_started`, so nginx could serve the SPA before the API was listening and the first call
+from the browser came back 502. Only the database half was ordered correctly — `api` already waited on
+`postgres: service_healthy` and `migrations: service_completed_successfully`.
 
-**Fix:** `redis: condition: service_healthy`, and a healthcheck on `api` against `/health/ready`. Note that
-the `aspnet:10.0` image ships neither curl nor wget, so this needs a `HEALTHCHECK` in the Dockerfile or a
-shell-based probe.
+**What kept it open for four phases was one measured fact: the runtime image ships neither curl nor wget.**
+Every obvious healthcheck needs one of them, and adding a package to the runtime image for a local convenience
+is a poor trade. The answer was to check what the image *does* have. `mcr.microsoft.com/dotnet/aspnet:10.0` is
+Ubuntu 24.04 with bash 5.2, grep and head, and **bash's `/dev/tcp` opens a TCP socket with no external
+program at all**. So `api`'s healthcheck opens the socket itself, writes a `GET /health/ready HTTP/1.1` with
+`Connection: close`, and greps the status line for 200. A real HTTP check, no new package, no image growth.
+The one thing to get right is the escaping: `\r\n` has to survive YAML as a backslash and an `r`, so that
+`printf` inside bash is what turns it into CR LF.
 
-**Trigger:** before the first deploy, or any demo where someone else runs `docker compose up`.
+All three are fixed. `api` waits on `redis: service_healthy`, `api` has that healthcheck, and `web` waits on
+`api: service_healthy`. `api` keeps `restart: unless-stopped` — deliberately, because the Postgres-down
+condition is that the API does *not* restart-loop, and that setting is what the check is against.
 
-**Status: the trigger has happened and passed.** The first deploy was 2026-08-02 and Phase 3 deployed on
-2026-08-05; this was not done before either. Every clause above is still true of `docker-compose.yml`:
-`redis` has its `redis-cli ping` healthcheck (`:73`) and `api` still waits on it with
-`condition: service_started` (`:120`); `api` still has no `healthcheck` block; `web` still waits on `api`
-with `service_started` (`:162`). The database half *is* ordered correctly — `api` waits on
-`postgres: service_healthy` and `migrations: service_completed_successfully` — so only the Redis and SPA
-halves are not. `web` has its own healthcheck (`:165`), which makes the missing one on `api` easy to misread
-as present.
+**Proven by running it, not by reading it.** From `docker compose down -v`, a `docker compose up -d --wait`
+reached every service healthy in **20 seconds**, with the API answering its first probe about five seconds
+after its container started. Two negative controls show the check can fail on the thing it is named after: the
+same command against a closed port and against a 404 path both exit non-zero, so it is testing the readiness
+route rather than merely proving bash runs.
 
-Re-read at the end of Phase 4: the Redis half is now the more interesting one. The poller starts with the
-host and reaches for Redis on its first cycle, so `api` starting before Redis is ready is no longer only a
-first-request problem. The per-cycle `try/catch` absorbs it and the next cycle succeeds, which is why this is
-still deferred rather than promoted.
+The Redis half was the one that mattered most by the end of Phase 4. The quote poller starts with the host and
+reaches for Redis on its first cycle, so `api` starting before Redis is ready stopped being only a
+first-request problem — the per-cycle `try/catch` absorbed it and the next cycle recovered, which is exactly
+the kind of silent, self-healing wrongness this register exists to catch before someone relies on it.
 
 ### E1 — the `alerts` schema, the `alerts_svc` role and the Alerts deployment variables have no module behind them — **DONE (Phase 4)**
 
@@ -350,6 +397,47 @@ accepted, so the two rules cannot drift apart.
    provider outage degrades to the Phase 2 behaviour rather than blocking the form. ✅
 4. The Phase 2 plan marks the feature delivered. ✅
 
+### E3 — the deploy smoke step proves nothing about the alert stream
+
+Phase 6 asked the deploy's smoke step for two assertions. **The first ships.** `/health/ready` now writes a
+JSON body, so the step reads it and fails the deploy unless `postgres-identity`, `postgres-portfolio`,
+`postgres-marketdata` and `postgres-alerts` each report `Healthy` **by name**, instead of the deploy passing on
+one word from a status line. `redis` is printed and deliberately not required to be Healthy: it is registered
+with a Degraded failure status so that a cache outage keeps the replica in rotation, and demanding Healthy in
+the smoke step would re-impose the exact failure that registration removed. The overall `status` is not
+asserted for the same reason — it legitimately reads `Degraded` while all four databases are fine.
+
+**The second is not built.** Proving the alert stream produces a heartbeat within thirty seconds needs a
+signed-in WebSocket, which needs an account created by hand, its two credentials held as repository secrets,
+and a small Node step using the `@microsoft/signalr` package the web workspace already installs. It is item 1
+on Phase 6's own cut list — the most expensive item in the phase for the least visible benefit — and the
+account and the secrets do not exist.
+
+**So what a green deploy proves is narrower than it looks: the API is reachable and its four database logins
+are healthy.** It proves nothing end to end about the stream — not that the hub accepts a WebSocket upgrade
+through the platform's ingress, not that the Redis backplane is wired, not that a browser would receive a
+single message. A deploy that broke any of those would still go green.
+
+**Fix:** a smoke account created once by hand, its email and password as two repository secrets, and a step
+after the readiness assertion that signs in over HTTP, opens the hub at `/api/alerts/stream` with the access
+token in the query string, and fails if nothing arrives within thirty seconds.
+
+**Trigger, either of two, both checkable against the code:**
+
+- **The repository gains credentials for a non-interactive account for any other reason** — a second smoke
+  check, a browser run in CI, a seeded demo login. Read the secret names out of `.github/workflows/`. Almost
+  the whole cost of this item is the hand-made account and its two secrets; once something else has paid it,
+  what is left is one step.
+- **Any change to the three settings that only the deployed environment can exercise** — the browser pinning
+  the hub to WebSockets with the negotiate step skipped, or the host's SignalR Redis backplane wiring. That
+  trio is the documented exemption from sticky sessions, nothing local can disprove it, and nothing else in
+  the pipeline would notice it breaking.
+
+**Status: neither trigger has happened.** Cut on purpose in Phase 6, not overlooked. Do not close this with a
+step that registers its own account on each run — that leaves rubbish in the production database, which is
+already a known cost there (`docs/DEPLOYING.md` records the `smoke-*@example.com` user that exists for that
+reason), and it would not be closing this item so much as widening that one.
+
 ---
 
 ## Skipped
@@ -360,7 +448,6 @@ Not deferred — these have no driver, and acting on them would be speculative.
 |---|---|---|
 | A6 | `/logout` accepts an unbounded refresh token while `/refresh` caps at 256 | The 30 MB request body limit already caps it and the route requires authorization. Adding a validator would make the body required and break the documented "omit the body and still get 204". A length check inside `LogoutAsync` is the cheap fix if it ever matters. |
 | A7 | No `UseForwardedHeaders`, though nginx and ACA both send `X-Forwarded-*` | Nothing reads the client IP or scheme. `TypedResults.Created` uses a relative path, so no wrong absolute URL is generated. Becomes real the moment rate limiting is split by IP, or anything logs a client address for audit. |
-| A8 | `ApiExceptionHandler` emits a different `type` URI namespace than `ProblemDetailsDefaults` | Two problem-details contracts for the same status, but no client reads `type` — the SPA reads `status` and `errors`. Fix by deleting the `Title` and `Type` assignments and letting the defaults fill them. |
 | B9 | The reflection rules see *usage*, not *declaration* — an unused `ProjectReference` is invisible | Roslyn omits an assembly reference when no type from it is used, so a forbidden `ProjectReference` that is not yet used passes rules 1, 5 and 6. A test that parses the csproj files would close it. Nobody has hit this, and `.Infrastructure` being `internal` limits the damage. |
 | D8 | Naming and formatting debris | `LoggingDecorator.cs` contains no type of that name; `ProblemDetailsExtensions` holds two factories that are not extensions; stray double blank lines. Cosmetic only. |
 
@@ -383,13 +470,11 @@ These were investigated and found not worth doing. The reasons are recorded so t
 
 Recorded so the same ground is not covered again.
 
-- **`PhcString` and `Argon2PasswordHasher`** — no correctness defects. Twelve properties verified, including
-  constant-time digest comparison via `FixedTimeEquals`, `ZeroMemory` ordered after `GetBytes` has been
-  consumed, `Verify` re-deriving from the *stored* salt and parameters, the `value[0] != '$'` check that
-  everything else depends on (without it a garbage-prefixed string parses), and the `padding == 3` rejection
-  in the base64 decode. The only note is that `PhcString`'s parse bounds (1 GiB memory, t=16, p=16) are far
-  wider than anything `Hash()` emits — hardening, not a defect, and exploiting it requires database write
-  access.
+- **The hand-written password hasher — no longer applicable.** `PhcString` and `Argon2PasswordHasher` were
+  audited here and found free of correctness defects. Both types, and the Argon2 package behind them, were
+  deleted when Identity moved to ASP.NET Core Identity, which brings its own hasher. There is no Argon2
+  anywhere in `src/` now. The audit is kept as a line rather than deleted so nobody re-reads a
+  twelve-property verification and looks for the code it describes.
 - **Middleware order in `Program.cs`**, including the claim that CORS must come before authentication so a
   401 still carries CORS headers. True, and the explicit `UseAuthentication` / `UseAuthorization` calls are
   what stop the framework inserting them *before* `UseCors` — deleting those calls silently reverses the

@@ -12,6 +12,7 @@ internal sealed partial class QuotePoller(
     IPollLease lease,
     IPriceWindowStore windowStore,
     ILastKnownPriceStore lastKnownStore,
+    IPollHeartbeatStore heartbeatStore,
     PollingOptions options,
     TimeProvider clock,
     ILogger<QuotePoller> logger) : BackgroundService
@@ -76,23 +77,26 @@ internal sealed partial class QuotePoller(
 
         var tickers = Canonicalise(targets);
 
-        if (tickers.Count == 0)
-        {
-            return;
-        }
+        var stored = tickers.Count == 0 ? 0 : await SampleAsync(scope.ServiceProvider, tickers, ct);
 
-        var quotes = await scope.ServiceProvider
+        // Written for an empty cycle too: with no alerts set, doing nothing is the healthy answer and only a heartbeat can say so.
+        await heartbeatStore.WriteAsync(new PollHeartbeat(clock.GetUtcNow(), tickers.Count, stored), ct);
+    }
+
+    private async Task<int> SampleAsync(IServiceProvider services, HashSet<Ticker> tickers, CancellationToken ct)
+    {
+        var quotes = await services
             .GetRequiredService<IQuoteProvider>()
             .GetQuotesAsync(tickers, apiKeyOverride: null, ct);
 
         if (quotes.Count == 0)
         {
-            return;
+            return 0;
         }
 
         await lastKnownStore.WriteAsync(quotes, ct);
 
-        var observer = scope.ServiceProvider.GetRequiredService<IPriceSampleObserver>();
+        var observer = services.GetRequiredService<IPriceSampleObserver>();
 
         foreach (var quote in quotes)
         {
@@ -101,6 +105,8 @@ internal sealed partial class QuotePoller(
 
             await NotifyAsync(observer, quote.Ticker.Value, ct);
         }
+
+        return quotes.Count;
     }
 
     /// <summary>The per-ticker catch, and the only thing enforcing that one failed observer does not end the cycle.</summary>

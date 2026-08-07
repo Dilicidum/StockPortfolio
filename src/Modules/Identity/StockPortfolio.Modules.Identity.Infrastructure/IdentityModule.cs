@@ -30,11 +30,16 @@ public static class IdentityModule
         // AddDbContext, never AddDbContextFactory: the Migrator finds contexts by their own service type.
         services.AddDbContext<IdentityDbContext>(options => options.UseNpgsql(
             connectionString,
-            npg => npg.MigrationsHistoryTable(
-                IdentityDbContext.MigrationsHistoryTableName,
-                IdentityDbContext.SchemaName)));
+            npg =>
+            {
+                npg.MigrationsHistoryTable(
+                    IdentityDbContext.MigrationsHistoryTableName,
+                    IdentityDbContext.SchemaName);
 
-        services.AddHealthChecks().AddDbContextCheck<IdentityDbContext>("postgres-identity");
+                npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(2), errorCodesToAdd: null);
+            }));
+
+        services.AddHealthChecks().AddDbContextCheck<IdentityDbContext>("postgres-identity", tags: ["ready", "detail"]);
 
         return services;
     }

@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { Alert } from '../components/Alert'
 import { Button } from '../components/Button'
 import { Card } from '../components/Card'
+import { serverMessage } from '../lib/formErrors'
 import { dashboardKeys } from '../marketdata/dashboardApi'
 import { holdingKeys, holdingsQuery, setHoldingVisibility, type Holding } from '../portfolio/holdingsApi'
 import { useSetHoldingVisibility } from '../portfolio/useHoldingMutations'
@@ -23,7 +24,10 @@ export function VisibilitySection() {
     setError('')
     setVisibility.mutate(
       { id: holding.id, isVisible: !holding.isVisible },
-      { onError: () => setError(t('visibility.toggleFailure', { ticker: holding.ticker })) },
+      {
+        onError: (reason) =>
+          setError(serverMessage(reason, t('visibility.toggleFailure', { ticker: holding.ticker }))),
+      },
     )
   }
 
@@ -51,7 +55,12 @@ export function VisibilitySection() {
             : holding,
         ),
       )
-      setError(t('visibility.showAllFailure', { tickers: failed.map((holding) => holding.ticker).join(', ') }))
+      const refusal = outcomes.find((outcome) => outcome.status === 'rejected')?.reason
+      const named = t('visibility.showAllFailure', {
+        tickers: failed.map((holding) => holding.ticker).join(', '),
+      })
+
+      setError(`${named} ${serverMessage(refusal, '')}`.trim())
     }
 
     queryClient.invalidateQueries({ queryKey: dashboardKeys.view() })

@@ -30,6 +30,9 @@
     "matchesCount_other": "Знайдено {{count}} збігів",
     "suggestionsFor": "Підказки для поля «{{label}}»"
   },
+  "routeError": {
+    "title": "Щось пішло не так"
+  },
   "loading": "Завантаження",
   "splashLabel": "Відновлення сеансу",
   "fallbackError": "Щось пішло не так. Спробуйте ще раз.",

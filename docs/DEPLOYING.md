@@ -23,7 +23,7 @@ Add `[skip ci]` to the commit message when a push should **not** deploy.
 | Resource group | `stockportfolio-rg` in `polandcentral` |
 | API | `https://stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` |
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
-| Burn rate | ~$1.26/day |
+| Burn rate | **Read it, do not quote it** — see below |
 | Running | **Phase 4, deployed and verified 2026-08-06** (PR #6, run 31087381000) |
 | Deletes itself on | **`deleteAfter`** — expected 2026-08-20 after that deploy, but **read the group's tag**; this line is a note, not the value |
 
@@ -47,11 +47,54 @@ Nothing goes live until migrations succeed.
 
 ```bash
 gh run list --repo Dilicidum/StockPortfolio --workflow deploy.yml --limit 5
-curl -s -o /dev/null -w '%{http_code}\n' <API_URL>/health/ready     # expect 200
+
+# Check the four database components BY NAME. Do not check the overall status.
+curl -s <API_URL>/health/ready \
+  | jq '[.components[] | select(.name | startswith("postgres-")) | {name, status}]'
+# expect four rows, every status "Healthy"
+
+curl -s <API_URL>/health/ready | jq '.components[] | select(.name == "redis") | {name, status}'
+# informational only — Degraded here is not a failure
+
+curl -s -o /dev/null -w '%{http_code}\n' <API_URL>/health/startup   # expect 200 — migrations applied
 ```
 
-A green run is not proof. `/health/ready` returning 200 is, because it touches Postgres and Redis.
-For a real check, `POST /api/auth/register` then `GET /api/auth/me` with the bearer.
+**Do not expect the overall `status` to read `Healthy`, and never gate on it.** The cache is
+registered with a *degraded* failure status so that a Redis outage keeps the replica in rotation
+instead of withdrawing it, and the framework maps Degraded to 200 — so the body legitimately reads
+`"status": "Degraded"` while all four databases are fine. Demanding `Healthy` re-imposes the exact
+failure that registration removed. The deploy's own smoke step works this way for the same reason: it
+asserts `postgres-identity`, `postgres-portfolio`, `postgres-marketdata` and `postgres-alerts` each
+report `Healthy` by name, prints `redis`, and asserts nothing about the overall status.
+
+A green run is not proof. For a real check, `POST /api/auth/register` then `GET /api/auth/me` with the
+bearer.
+
+## What it costs
+
+**No current figure is written down here, on purpose.** The only measurement anyone has taken is
+roughly **$1.26 a day, and it was taken while the API still scaled to zero**. That configuration is
+gone: `minReplicas: 1` bills a replica at the active rate around the clock, and a held-open alert
+stream never qualifies for the platform's reduced idle rate either. So the real rate is higher, nobody
+has measured how much higher, and inventing a number is worse than sending you to the meter.
+
+Read the real one, per resource group, either way:
+
+- **Portal** — Cost Management + Billing → Cost analysis → scope `stockportfolio-rg` → *Daily costs*.
+  This is the authority; the CLI reads the same data.
+- **CLI** — needs the `costmanagement` extension, which `az` offers to install on first use:
+
+  ```bash
+  SUB=$(az account show --query id -o tsv)
+  az costmanagement query --type ActualCost --timeframe MonthToDate \
+    --scope "/subscriptions/$SUB/resourceGroups/stockportfolio-rg" \
+    --dataset-granularity Daily
+  ```
+
+  Untested against this subscription — the portal path above is the one that has been used.
+
+Billing data lags roughly a day, so read a few days rather than yesterday alone, and remember the group
+deletes itself on the `deleteAfter` tag, which caps the total whatever the daily rate turns out to be.
 
 ## Cost ceiling — do not remove
 
@@ -68,16 +111,18 @@ provisions from empty.
 
 ## Secrets
 
-Ten GitHub repo secrets; seven are real credentials (six Postgres passwords + JWT signing key), the
-other three are Azure identifiers. Auth to Azure is an **OIDC federated credential — there is no
-client secret**.
+Nine GitHub repo secrets; six are real credentials (the six Postgres passwords), the other three
+are Azure identifiers. Auth to Azure is an **OIDC federated credential — there is no client
+secret**. `JWT_SIGNING_KEY` was the tenth until Phase 6 and is gone: nothing ever read the `Jwt`
+section, because sessions are ASP.NET Core Identity bearer tokens, which are data-protected rather
+than signed. Delete it from the repository secrets when convenient — it is now inert either way.
 
 Secrets reach `az` through an ARM parameter file, never as command-line arguments. If you add a
 parameter, add it to the `jq` block in *Write deployment parameters*, not to the `az` argument list
 — an argument is readable from `/proc/<pid>/cmdline`, and a step-level `env:` block does **not**
 fix that, because the shell expands before `exec`.
 
-### `FINNHUB_API_KEY` — the optional eleventh
+### `FINNHUB_API_KEY` — the optional tenth
 
 **Set**, so the deployed dashboard serves genuine prices and `GET /api/marketdata/health` returns
 `{"provider":"Finnhub"}`. Empty is a *supported* path, not a broken one — it is what makes
@@ -114,12 +159,14 @@ More in the Traps section of [../CLAUDE.md](../CLAUDE.md).
 
 ## Known state
 
-- `minReplicas: 0` for cost. **Set it back to `1` in `main.bicep` when MarketData ships its quote
-  poller**, or the polling stops whenever traffic does. That is Phase 4. Check the condition, not the
-  phase number: search `src/` for `BackgroundService`, `IHostedService` and `PeriodicTimer` — no hits
-  today, so `0` is right. `containerapp-api.bicep` carries a comment saying `minReplicas: 1` is
-  needed because of that poller; that comment describes the finished system, and `main.bicep` is the
-  line that actually passes `0`.
+- **`minReplicas: 1`, and it must stay there.** `main.bicep` passes 1 and
+  `containerapp-api.bicep` defaults to 1. It was 0 for cost through Phases 1–3, and Phase 4's quote
+  poller ended that: a sleeping replica samples no prices, so no alert ever fires and nothing reports
+  a fault. **The rule now runs the other way round** — search `src/` for `BackgroundService`,
+  `IHostedService` and `PeriodicTimer`, and while anything matches, 1 is correct. `QuotePoller` is a
+  `BackgroundService`, so something matches today. Do not "restore" 0 to save money; the poller and
+  the always-on replica are one decision, and reverting either alone leaves a feature that stops
+  working whenever traffic does.
 - Managed identity covers ACR pull only; Postgres and Redis use passwords by design.
 - No Key Vault — Container App secrets only.
 - A smoke-test user (`smoke-*@example.com`) exists in the production database.
