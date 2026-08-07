@@ -236,19 +236,6 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
               timeoutSeconds: 5
               failureThreshold: 3
             }
-            {
-              type: 'Startup'
-              httpGet: {
-                path: '/health/startup'
-                port: 8080
-                scheme: 'HTTP'
-              }
-              initialDelaySeconds: 5
-              periodSeconds: 30
-              timeoutSeconds: 5
-              failureThreshold: 10
-              successThreshold: 1
-            }
           ]
         }
       ]

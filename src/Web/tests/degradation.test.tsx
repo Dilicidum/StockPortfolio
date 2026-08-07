@@ -198,12 +198,7 @@ describe('the degraded dashboard', () => {
 
     await renderDashboard([
       dashboardJson(priced),
-      http.put('*/api/settings/dashboard', () =>
-        HttpResponse.json(
-          { title: 'Service unavailable', detail: 'The database is not reachable.', status: 503 },
-          { status: 503, headers: { 'Content-Type': 'application/problem+json' } },
-        ),
-      ),
+      http.put('*/api/settings/dashboard', () => new HttpResponse(null, { status: 500 })),
     ])
 
     const control = screen.getByLabelText(/refresh/i)
@@ -211,7 +206,7 @@ describe('the degraded dashboard', () => {
 
     await user.selectOptions(control, '15')
 
-    expect(await screen.findByText(/the database is not reachable/i)).toBeInTheDocument()
+    expect(await screen.findByText(/could not save the refresh interval/i)).toBeInTheDocument()
     await waitFor(() => expect(control).toHaveValue('60'))
   })
 

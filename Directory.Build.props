@@ -9,7 +9,7 @@
 
     <!-- Exhaustiveness of OneOf .Match is enforced by CS8509 being an error.
          TreatWarningsAsErrors already does that; do NOT try to relax it by editing
-         WarningsAsErrors - the only escape is WarningsNotAsErrors. See docs/plan §3. -->
+         WarningsAsErrors - the only escape is WarningsNotAsErrors. -->
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 
     <!-- NuGet audit advisories must not break a build mid-phase. -->

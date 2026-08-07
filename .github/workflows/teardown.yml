@@ -1,6 +1,6 @@
 name: Teardown
 
-# Deletes the resource group once its `deleteAfter` tag has passed — see Cost ceiling in docs/DEPLOYING.md.
+# Deletes the resource group once its `deleteAfter` tag has passed.
 # GitHub disables scheduled workflows after 60 days of repository inactivity, which is why a budget alert still exists as a backstop.
 
 on:

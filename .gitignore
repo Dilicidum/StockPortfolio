@@ -23,3 +23,8 @@ Thumbs.db
 
 # Transient agent worktrees
 .claude/worktrees/
+
+# Documentation lives locally, not in the repo: README.md is the only one that ships.
+docs/
+CLAUDE.md
+src/Modules/Identity/StockPortfolio.Modules.Identity.Contracts/README.md

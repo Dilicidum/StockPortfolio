@@ -1,61 +1,35 @@
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 using StackExchange.Redis;
 
-using StockPortfolio.Host.Health;
-
 namespace StockPortfolio.Host.Extensions;
 
-/// <summary>The four health endpoints and the two checks the host owns; each module registers its own Postgres check, because its DbContext is internal to it.</summary>
+/// <summary>The three health endpoints and the one check the host owns; each module registers its own Postgres check, because its DbContext is internal to it.</summary>
 internal static class HealthCheckExtensions
 {
     public const string LivenessPath = "/health/live";
 
     public const string ReadinessPath = "/health/ready";
 
-    public const string StartupPath = "/health/startup";
-
     public const string DetailPath = "/api/health/detail";
 
     public const string RedisCheckName = "redis";
 
-    public const string MigrationsCheckName = "migrations";
-
     /// <summary>Runs on the readiness probe, so an Unhealthy answer here withdraws the replica.</summary>
     public const string ReadyTag = "ready";
-
-    /// <summary>Runs on the startup probe only: it is a database round trip and must never reach liveness.</summary>
-    public const string StartupTag = "startup";
 
     /// <summary>Appears in the authenticated detail report, which answers 200 whatever it finds.</summary>
     public const string DetailTag = "detail";
 
     public static IServiceCollection AddStockPortfolioHealthChecks(this IServiceCollection services)
     {
-        var contextTypes = DbContextTypesIn(services);
-
-        if (contextTypes.Count == 0)
-        {
-            throw new InvalidOperationException(
-                "No DbContext is registered, so the pending-migrations check would report healthy by "
-                + "asking nothing. Call AddStockPortfolioHealthChecks after every Add<M>Module.");
-        }
-
         services.AddHealthChecks()
-
             .AddRedis(
                 sp => sp.GetRequiredService<IConnectionMultiplexer>(),
                 name: RedisCheckName,
                 failureStatus: HealthStatus.Degraded,
-                tags: [ReadyTag, DetailTag])
-
-            .Add(new HealthCheckRegistration(
-                MigrationsCheckName,
-                sp => new PendingMigrationsHealthCheck(sp, contextTypes),
-                HealthStatus.Unhealthy,
-                tags: [StartupTag]));
+                tags: [ReadyTag, DetailTag]);
 
         return services;
     }
@@ -74,14 +48,6 @@ internal static class HealthCheckExtensions
             })
             .AllowAnonymous()
             .WithName("Readiness");
-
-        app.MapHealthChecks(StartupPath, new HealthCheckOptions
-            {
-                Predicate = check => check.Tags.Contains(StartupTag),
-                ResponseWriter = WriteReportAsync,
-            })
-            .AllowAnonymous()
-            .WithName("Startup");
 
         app.MapHealthChecks(DetailPath, new HealthCheckOptions
             {
@@ -124,13 +90,4 @@ internal static class HealthCheckExtensions
 
         return context.Response.WriteAsJsonAsync(body, context.RequestAborted);
     }
-
-    private static IReadOnlyList<Type> DbContextTypesIn(IServiceCollection services) =>
-    [
-        .. services
-            .Where(descriptor => descriptor.ServiceType.IsSubclassOf(typeof(DbContext)))
-            .Select(descriptor => descriptor.ServiceType)
-            .Distinct()
-            .OrderBy(type => type.Name, StringComparer.Ordinal),
-    ];
 }

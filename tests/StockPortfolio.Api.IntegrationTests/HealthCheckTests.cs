@@ -14,12 +14,10 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 {
     private const string LivenessPath = "/health/live";
     private const string ReadinessPath = "/health/ready";
-    private const string StartupPath = "/health/startup";
     private const string DetailPath = "/api/health/detail";
 
     private const string RedisCheck = "redis";
     private const string FeedCheck = "marketdata-feed";
-    private const string MigrationsCheck = "migrations";
 
     private static readonly string[] DatabaseChecks =
     [
@@ -32,8 +30,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
     private static readonly string[] ReadyComponentNames = [.. DatabaseChecks, RedisCheck];
 
     private static readonly string[] DetailComponentNames = [.. DatabaseChecks, RedisCheck, FeedCheck];
-
-    private static readonly string[] StartupComponentNames = [MigrationsCheck];
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
@@ -55,8 +51,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
             [RedisCheck] = ["ready", "detail"],
 
             [FeedCheck] = ["detail"],
-
-            [MigrationsCheck] = ["startup"],
         };
 
         foreach (var (name, tags) in expected)
@@ -66,10 +60,12 @@ public sealed class HealthCheckTests(ApiFixture fixture)
                 .ShouldBe(tags.Order(StringComparer.Ordinal), ignoreOrder: false);
         }
 
+        expected.Count.ShouldBe(6);
+
         registrations.Count.ShouldBe(
             expected.Count,
             "Every module registers its own Postgres check in its Add<M>Module, MarketData adds the feed "
-                + "check, and the host adds Redis and migrations. A count that drifts means a check "
+                + "check, and the host adds Redis. A count that drifts means a check "
                 + "stopped being registered, or an unexpected one appeared. Never soften this to non-empty.");
     }
 
@@ -123,22 +119,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
     }
 
     [Fact]
-    public async Task Health_Startup_RunsTheMigrationsCheckAndNothingElse()
-    {
-        using var client = _fixture.CreateClient();
-
-        using var response = await client.GetAsync(StartupPath, TestContext.Current.CancellationToken);
-
-        response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
-
-        var report = await ReadReportAsync(response);
-
-        report.Status.ShouldBe(nameof(HealthStatus.Healthy));
-
-        report.Names().ShouldBe(StartupComponentNames, ignoreOrder: true);
-    }
-
-    [Fact]
     public async Task Health_Live_IgnoresDependencies()
     {
         await using var host = ApiFixture.CreateHostWithUnreachableDependencies();
@@ -162,12 +142,10 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         using var live = await client.GetAsync(LivenessPath, TestContext.Current.CancellationToken);
         using var ready = await client.GetAsync(ReadinessPath, TestContext.Current.CancellationToken);
-        using var startup = await client.GetAsync(StartupPath, TestContext.Current.CancellationToken);
         using var detail = await client.GetAsync(DetailPath, TestContext.Current.CancellationToken);
 
         live.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
         ready.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
-        startup.StatusCode.ShouldNotBe(HttpStatusCode.Unauthorized);
 
         detail.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(detail));
     }

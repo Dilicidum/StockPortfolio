@@ -1,6 +1,6 @@
 name: Deploy
 
-# Deploys the API to Azure Container Apps and the SPA to GitHub Pages. Runbook: docs/DEPLOYING.md.
+# Deploys the API to Azure Container Apps and the SPA to GitHub Pages.
 on:
   push:
     branches: [main]
@@ -103,7 +103,7 @@ jobs:
           OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
           echo "origin=https://${OWNER}.github.io" >> "$GITHUB_OUTPUT"
 
-      # Secrets reach `az` through a file, never through argv — see Secrets in docs/DEPLOYING.md.
+      # Secrets reach `az` through a file, never through argv.
       - name: Write deployment parameters
         env:
           LOCATION: ${{ vars.AZURE_LOCATION }}
@@ -257,7 +257,7 @@ jobs:
             --image '${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
             --output none
 
-      # Four databases by name, never the overall status — see Verifying in docs/DEPLOYING.md.
+      # Four databases by name, never the overall status: redis is registered degraded, so the overall status can read Degraded while every database is fine.
       - name: Smoke test readiness
         run: |
           set -euo pipefail
