@@ -36,8 +36,6 @@ public sealed class PriceWindowReaderTests
     [Fact]
     public async Task Window_Current_IsTheNewestSampleNotTheExtreme()
     {
-        // The one that separates "what is it now" from "how far did it go": Current must be the last
-        // sample even when the series ends below its own low-water reading order.
         var store = new RecordingWindowStore(
             (Now.AddMinutes(-30), 100m),
             (Now.AddMinutes(-20), 180m),
@@ -55,8 +53,7 @@ public sealed class PriceWindowReaderTests
     [Fact]
     public async Task Window_LargestGap_IsTheWidestIntervalNotTheLastOne()
     {
-        // The gap guard of the plan reads this field to reject a window straddling a closed market. A
-        // reader that reported only the most recent interval would wave a Friday-to-Monday window through.
+        // A reader reporting only the most recent interval would wave a Friday-to-Monday window through the gap check.
         var store = new RecordingWindowStore(
             (Now.AddMinutes(-60), 150m),
             (Now.AddMinutes(-55), 151m),

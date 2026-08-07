@@ -24,17 +24,6 @@ beforeEach(() => {
   __resetRefreshInFlight()
 })
 
-/**
- * P0: a hard refresh of a guarded route must keep you signed in.
- *
- * This mirrors main.tsx exactly — await `bootstrapSession()`, then mount the
- * router — and it calls the app's own bootstrap function rather than a stand-in,
- * because the failure mode being guarded against is an ordering mistake and a
- * re-implementation would order things correctly by accident.
- *
- * Invert the two statements below and this test fails the way the real app
- * would: `beforeLoad` sees no session and bounces to /login.
- */
 it('keeps a refreshable session on a hard load of /dashboard', async () => {
   server.use(
     http.post('*/api/auth/refresh', () =>
@@ -47,9 +36,6 @@ it('keeps a refreshable session on a hard load of /dashboard', async () => {
     http.get('*/api/auth/me', () =>
       HttpResponse.json({ id: 'u-1', email: 'holder@example.com' }),
     ),
-    // The route this test lands on fetches since Phase 3, and since Phase 4 its layout
-    // also opens the alert stream. MSW errors on anything unhandled — without these the
-    // session assertion would fail for an unrelated reason.
     ...dashboardHandlers,
     ...alertsHandlers,
   )
@@ -81,9 +67,6 @@ it('falls through to /login when the refresh token is rejected', async () => {
     ),
   )
 
-  // A rejected refresh must resolve, not throw. If bootstrapSession ever starts
-  // rejecting, main.tsx never calls root.render and the app hangs on the splash
-  // forever — a white screen with no console error.
   await expect(bootstrapSession()).resolves.toBeUndefined()
   expect(authStore.getState().isAuthenticated).toBe(false)
 

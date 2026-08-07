@@ -1,14 +1,11 @@
 using StackExchange.Redis;
 
-namespace StockPortfolio.Api.Extensions;
+namespace StockPortfolio.Host.Extensions;
 
-/// <summary>The one place the Redis multiplexer is built, so "who owns it" is answerable in one file.</summary>
 internal static class RedisExtensions
 {
-    /// <summary>The ConnectionStrings key holding the Redis endpoint.</summary>
     public const string RedisConnectionStringName = "Redis";
 
-    /// <summary>Registers the shared multiplexer every Redis consumer injects.</summary>
     public static IServiceCollection AddStockPortfolioRedis(
         this IServiceCollection services,
         IConfiguration configuration)
@@ -26,10 +23,9 @@ internal static class RedisExtensions
 
         var redisOptions = ConfigurationOptions.Parse(redisConnectionString);
 
-        // AbortOnConnectFail=false: a Redis blip must not kill startup.
+        // A Redis blip must not kill startup.
         redisOptions.AbortOnConnectFail = false;
 
-        // Resolved lazily: the singleton factory does not run until something asks for it.
         services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisOptions));
 
         return services;

@@ -1,8 +1,8 @@
 # =============================================================================
-#  StockPortfolio.Api
+#  StockPortfolio.Host
 #
 #  Build context is the REPOSITORY ROOT, not this directory:
-#      docker build -f src/Api/Dockerfile .
+#      docker build -f src/Host/Dockerfile .
 #  Central Package Management and global.json live at the root and restore
 #  cannot see them otherwise. docker-compose.yml sets `context: .` accordingly.
 # =============================================================================
@@ -27,7 +27,7 @@ COPY global.json Directory.Build.props Directory.Build.targets Directory.Package
 # ---------------------------------------------------------------------------
 COPY src/Shared.Kernel/StockPortfolio.Shared.Kernel.csproj                 src/Shared.Kernel/
 COPY src/Shared.Api/StockPortfolio.Shared.Api.csproj     src/Shared.Api/
-COPY src/Api/StockPortfolio.Api.csproj                                     src/Api/
+COPY src/Host/StockPortfolio.Host.csproj                                    src/Host/
 
 COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/StockPortfolio.Modules.Alerts.Contracts.csproj                   src/Modules/Alerts/StockPortfolio.Modules.Alerts.Contracts/
 COPY src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/StockPortfolio.Modules.Alerts.Domain.csproj                         src/Modules/Alerts/StockPortfolio.Modules.Alerts.Domain/
@@ -53,7 +53,7 @@ COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Application/StockP
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Infrastructure/StockPortfolio.Modules.MarketData.Infrastructure.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Infrastructure/
 COPY src/Modules/MarketData/StockPortfolio.Modules.MarketData.Api/StockPortfolio.Modules.MarketData.Api.csproj src/Modules/MarketData/StockPortfolio.Modules.MarketData.Api/
 
-RUN dotnet restore src/Api/StockPortfolio.Api.csproj
+RUN dotnet restore src/Host/StockPortfolio.Host.csproj
 
 # ---------------------------------------------------------------------------
 # 3. Sources, then publish. `-o /app` is explicit because Directory.Build.props
@@ -64,9 +64,9 @@ RUN dotnet restore src/Api/StockPortfolio.Api.csproj
 COPY src/Shared.Kernel/       src/Shared.Kernel/
 COPY src/Shared.Api/ src/Shared.Api/
 COPY src/Modules/            src/Modules/
-COPY src/Api/                src/Api/
+COPY src/Host/               src/Host/
 
-RUN dotnet publish src/Api/StockPortfolio.Api.csproj \
+RUN dotnet publish src/Host/StockPortfolio.Host.csproj \
         --configuration Release \
         --no-restore \
         --output /app
@@ -84,4 +84,4 @@ USER app
 ENV ASPNETCORE_HTTP_PORTS=8080
 EXPOSE 8080
 
-ENTRYPOINT ["dotnet", "StockPortfolio.Api.dll"]
+ENTRYPOINT ["dotnet", "StockPortfolio.Host.dll"]

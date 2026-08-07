@@ -3,10 +3,8 @@ using Microsoft.EntityFrameworkCore.Design;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 
-/// <summary>Lets dotnet ef build a PortfolioDbContext without booting the API host.</summary>
 internal sealed class PortfolioDbContextFactory : IDesignTimeDbContextFactory<PortfolioDbContext>
 {
-    /// <summary>Matches the compose stack in docker-compose.yml, so the fallback is usable rather than decorative.</summary>
     private const string FallbackConnectionString =
         "Host=localhost;Port=5432;Database=stockportfolio;Username=migrator;Password=migrator_dev_only;Maximum Pool Size=2";
 

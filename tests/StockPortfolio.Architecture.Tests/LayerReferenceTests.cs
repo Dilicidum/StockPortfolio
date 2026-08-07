@@ -3,36 +3,28 @@ using Xunit.Sdk;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Rules 2, 4, 5 and 6 — the onion, asserted layer by layer.</summary>
 public sealed class LayerReferenceTests
 {
-    /// <summary>The three .Contracts assemblies.</summary>
     public static TheoryData<string> ContractsAssemblies => AssembliesFor(SolutionAssemblies.ContractsLayer);
 
-    /// <summary>The three .Infrastructure assemblies.</summary>
     public static TheoryData<string> InfrastructureAssemblies => AssembliesFor("Infrastructure");
 
-    /// <summary>The three .Api assemblies.</summary>
     public static TheoryData<string> ApiAssemblies => AssembliesFor("Api");
 
-    /// <summary>Presses the button on the smoke detector for the rule targets themselves.</summary>
     [Fact]
     public void MemberData_NamesTheLayerEachRuleClaims()
     {
-        // The bug this replaces a comment for: AssembliesFor("Infrastructure") once fed rule 5, green.
+        // A copy-paste once pointed the .Api rule at the Infrastructure layer and it still reported green.
         ShouldNameEveryModulesLayer(ContractsAssemblies, SolutionAssemblies.ContractsLayer);
         ShouldNameEveryModulesLayer(InfrastructureAssemblies, "Infrastructure");
         ShouldNameEveryModulesLayer(ApiAssemblies, "Api");
     }
 
-    /// <summary>Rule 2.</summary>
     [Theory]
     [MemberData(nameof(ContractsAssemblies))]
     public void ContractsAssembly_ReferencesNoPersistence(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
         var violations = assembly.GetReferencedAssemblies()
             .Select(reference => reference.Name)
@@ -51,14 +43,11 @@ public sealed class LayerReferenceTests
                 + "strongly-typed ids.");
     }
 
-    /// <summary>Rule 4.</summary>
     [Theory]
     [MemberData(nameof(InfrastructureAssemblies))]
     public void InfrastructureAssembly_ReferencesNoAspNetCore(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
         var path = SolutionAssemblies.FindForbiddenReferencePath(assemblyName, IsAspNetCoreWebStack);
 
@@ -74,14 +63,11 @@ public sealed class LayerReferenceTests
                 + "project reference that leads to it.");
     }
 
-    /// <summary>Rule 5.</summary>
     [Theory]
     [MemberData(nameof(ApiAssemblies))]
     public void ApiAssembly_ReferencesNeitherPersistenceNorItsOwnInfrastructure(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
         _ = SolutionAssemblies.TryParseModuleLayer(assemblyName, out var module, out _);
         var ownInfrastructure = SolutionAssemblies.NameOf(module!, "Infrastructure");
@@ -115,7 +101,6 @@ public sealed class LayerReferenceTests
                 + "Module seam, which only the host composes.");
     }
 
-    /// <summary>Rule 6.</summary>
     [Fact]
     public void SharedKernel_ReferencesNothingButOneOfAndTheFramework()
     {
@@ -137,7 +122,6 @@ public sealed class LayerReferenceTests
                 + "Anything that needs IEndpointRouteBuilder belongs in Shared.Api; "
                 + "anything that needs a DbContext belongs in a module's .Infrastructure.");
 
-        // Named separately from the allow-list above so the two failures most worth preventing read as.
         SolutionAssemblies.FindForbiddenReferencePath(Name, IsAspNetCore).ShouldBeNull(
             Name + " must never reach ASP.NET Core; that is what Shared.Api exists for.");
 
@@ -147,14 +131,12 @@ public sealed class LayerReferenceTests
                 + "anything that needs a value converter or a DbContext belongs in .Infrastructure.");
     }
 
-    /// <summary>Presses the button on the smoke detector for rules 2, 4, 5 and 6.</summary>
     [Fact]
     public void ReferenceWalker_FindsEdgesThatDoExist_SoAnEmptyResultMeansSomething()
     {
         var apiLayer = SolutionAssemblies.NameOf("Identity", "Api");
         var infrastructure = SolutionAssemblies.NameOf("Identity", "Infrastructure");
 
-        // Direct edges, legitimate where they are, forbidden one layer over.
         SolutionAssemblies.FindForbiddenReferencePath(apiLayer, IsAspNetCore).ShouldNotBeNull(
             apiLayer + " does reference ASP.NET Core — endpoints live there. Not finding that "
                 + "edge means rule 4 cannot find it either.");
@@ -173,7 +155,6 @@ public sealed class LayerReferenceTests
         transitive.ShouldEndWith("StockPortfolio.Shared.Kernel", Case.Sensitive);
         transitive.ShouldContain(" -> ", Case.Sensitive);
 
-        // And the allow-list behind rule 6 must actually exclude things.
         IsFrameworkOrOneOf("OneOf").ShouldBeTrue();
         IsFrameworkOrOneOf("System.Collections").ShouldBeTrue();
         IsFrameworkOrOneOf("FluentValidation").ShouldBeFalse();
@@ -182,7 +163,6 @@ public sealed class LayerReferenceTests
         IsPersistence("Microsoft.EntityFrameworkCore.Relational").ShouldBeTrue();
         IsAspNetCore("Microsoft.AspNetCore.Http.Results").ShouldBeTrue();
 
-        // Rule 4's carve-out has to discriminate, or it is a hole rather than an exception.
         IsAspNetCoreWebStack("Microsoft.AspNetCore.Identity.EntityFrameworkCore").ShouldBeFalse(
             "The EF store for Identity is the one name rule 4 forgives.");
 
@@ -197,8 +177,11 @@ public sealed class LayerReferenceTests
             "Rule 6 stays strict: Shared.Kernel may not reference the EF store either.");
     }
 
-    private static TheoryData<string> AssembliesFor(string layer) =>
-        [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, layer))];
+    private static TheoryData<string> AssembliesFor(string layer) => [.. NamesFor(layer)];
+
+    private static IEnumerable<string> NamesFor(string layer) => SolutionAssemblies.ModuleNames
+        .Select(module => SolutionAssemblies.NameOf(module, layer))
+        .Where(SolutionAssemblies.HasCode);
 
     private static void ShouldNameEveryModulesLayer(TheoryData<string> data, string layer)
     {
@@ -209,10 +192,10 @@ public sealed class LayerReferenceTests
             .Select(row => (string)row.GetData()[0]!)
             .ToList();
 
+        // Counted the same way the data is built; EmptyShells_AreExactlyThePhasesNotYetBuilt is what stops that becoming a quiet hole.
         named.Count.ShouldBe(
-            SolutionAssemblies.ModuleNames.Length,
-            "The " + layer + " rule must run over one assembly per module, and there are "
-                + SolutionAssemblies.ModuleNames.Length + " modules.");
+            NamesFor(layer).Count(),
+            "The " + layer + " rule must run over one assembly per module that has code in that layer.");
 
         named.ShouldAllBe(
             name => name.EndsWith(suffix, StringComparison.Ordinal),
@@ -223,9 +206,10 @@ public sealed class LayerReferenceTests
                 + ModuleBoundaryTests.Describe(named));
 
         named.ShouldBe(
-            SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, layer)),
+            NamesFor(layer),
             ignoreOrder: true,
-            "The " + layer + " rule must name exactly one ." + layer + " assembly per module.");
+            "The " + layer + " rule must name exactly one ." + layer + " assembly per module that has "
+                + "code in that layer.");
     }
 
     private static bool IsPersistence(string? name) =>
@@ -236,14 +220,10 @@ public sealed class LayerReferenceTests
     private static bool IsAspNetCore(string? name) =>
         name is not null && name.StartsWith("Microsoft.AspNetCore", StringComparison.Ordinal);
 
-    /// <summary>Rule 4's predicate: the name prefix, minus the data-access libraries it misfires on.</summary>
     private static bool IsAspNetCoreWebStack(string? name) =>
         IsAspNetCore(name) && !IsAspNetCoreDataAccess(name);
 
-    // The rule exists to keep HTTP out of Infrastructure, and the prefix is a proxy for that.
-    // Microsoft.AspNetCore.Identity.EntityFrameworkCore carries the prefix and is an EF store:
-    // it depends on EntityFrameworkCore.Relational and Microsoft.Extensions.Identity.Stores,
-    // and on no web framework. Only rule 4 forgives it; Shared.Kernel still may not reference it.
+    // Carries the AspNetCore prefix but is an EF store with no web dependency, so only the Infrastructure rule forgives it.
     private static bool IsAspNetCoreDataAccess(string? name) =>
         string.Equals(name, "Microsoft.AspNetCore.Identity.EntityFrameworkCore", StringComparison.Ordinal);
 

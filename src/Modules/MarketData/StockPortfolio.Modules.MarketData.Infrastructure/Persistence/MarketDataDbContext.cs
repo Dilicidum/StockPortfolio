@@ -5,13 +5,10 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 
-/// <summary>The MarketData module's only DbContext.</summary>
 internal sealed class MarketDataDbContext(DbContextOptions<MarketDataDbContext> options) : DbContext(options)
 {
-    /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "marketdata";
 
-    /// <summary>The migration history table name.</summary>
     internal const string MigrationsHistoryTableName = "__EFMigrationsHistory";
 
     public DbSet<UserProviderKey> UserProviderKeys => Set<UserProviderKey>();

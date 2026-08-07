@@ -6,13 +6,10 @@ using StockPortfolio.Modules.Portfolio.Infrastructure.Persistence.Converters;
 
 namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 
-/// <summary>The Portfolio module's only DbContext.</summary>
 internal sealed class PortfolioDbContext(DbContextOptions<PortfolioDbContext> options) : DbContext(options)
 {
-    /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "portfolio";
 
-    /// <summary>The migration history table name.</summary>
     internal const string MigrationsHistoryTableName = "__EFMigrationsHistory";
 
     public DbSet<Holding> Holdings => Set<Holding>();
@@ -38,8 +35,6 @@ internal sealed class PortfolioDbContext(DbContextOptions<PortfolioDbContext> op
         configurationBuilder.Properties<HoldingId>().HaveConversion<HoldingIdConverter>();
         configurationBuilder.DefaultTypeMapping<HoldingId>().HasConversion<HoldingIdConverter>();
 
-        // DefaultTypeMapping is the line people miss: without it a Ticker used anywhere but a mapped
-        // property - a LINQ closure, say - has no mapping and throws long after model building succeeded.
         configurationBuilder.Properties<Ticker>().HaveConversion<TickerConverter>();
         configurationBuilder.DefaultTypeMapping<Ticker>().HasConversion<TickerConverter>();
 

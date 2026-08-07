@@ -9,17 +9,14 @@ using StockPortfolio.Modules.Portfolio.Infrastructure;
 
 namespace StockPortfolio.Migrator;
 
-/// <summary>The one list of modules whose migrations are applied, and the one rule for finding their contexts.</summary>
 public static class MigratedModules
 {
-    /// <summary>Registers every module that owns a schema. A module missing here never gets one created.</summary>
+    /// <summary>A module missing from this list silently never gets its schema created.</summary>
     public static IServiceCollection AddEveryMigratedModule(
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // AddDbContext, never AddDbContextFactory: DbContextTypesIn only sees a context registered as
-        // its own type. This runs against a bare ServiceCollection, so what is called here must be
-        // self-contained - and must register persistence only, so nothing else needs configuring to migrate.
+        // AddDbContext, never AddDbContextFactory: DbContextTypesIn only finds a context registered as its own type, and this runs against a bare ServiceCollection.
         services.AddIdentityPersistence(configuration);
         services.AddPortfolioModule(configuration);
         services.AddAlertsModule(configuration);
@@ -28,7 +25,6 @@ public static class MigratedModules
         return services;
     }
 
-    /// <summary>Lists the module contexts to migrate, ordered so two runs apply them in the same sequence.</summary>
     public static IReadOnlyList<Type> DbContextTypesIn(IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);

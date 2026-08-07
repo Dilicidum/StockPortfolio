@@ -7,18 +7,14 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Names;
 
-/// <summary>Names, beside the last-price key and on their own clock: refreshed occasionally, never permanent.</summary>
 internal sealed partial class RedisCompanyNameStore(
     IConnectionMultiplexer multiplexer,
     ILogger<RedisCompanyNameStore> logger) : ICompanyNameStore
 {
-    /// <summary>Sits beside marketdata:last:, and is deliberately not merged with it — different lifetimes.</summary>
     private const string KeyPrefix = "marketdata:name:";
 
-    /// <summary>Longer than any real company name; a pathological provider answer must not fill Redis.</summary>
     private const int MaxNameLength = 120;
 
-    /// <summary>A wrong name corrects itself within a week with nobody doing anything.</summary>
     private static readonly TimeSpan Lifetime = TimeSpan.FromDays(7);
 
     public async Task<IReadOnlyDictionary<Ticker, string>> ReadAsync(
@@ -38,7 +34,6 @@ internal sealed partial class RedisCompanyNameStore(
 
         try
         {
-            // One MGET for every ticker on the page, exactly as the price fallback does.
             var values = await multiplexer.GetDatabase()
                 .StringGetAsync([.. ordered.Select(ticker => (RedisKey)(KeyPrefix + ticker.Value))]);
 
@@ -74,7 +69,6 @@ internal sealed partial class RedisCompanyNameStore(
 
             foreach (var match in matches)
             {
-                // The expiry is set on every write, so a name learned again starts its week over.
                 if (Encode(match.Name) is { } name)
                 {
                     writes.Add(database.StringSetAsync(KeyPrefix + match.Ticker.Value, name, Lifetime));
@@ -89,7 +83,6 @@ internal sealed partial class RedisCompanyNameStore(
         }
     }
 
-    /// <summary>Trims and caps. A name that is nothing but whitespace is not a name, so it is never stored.</summary>
     internal static string? Encode(string? name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -102,7 +95,6 @@ internal sealed partial class RedisCompanyNameStore(
         return trimmed.Length <= MaxNameLength ? trimmed : trimmed[..MaxNameLength];
     }
 
-    /// <summary>A missing or blank entry is "no name known", which is the ordinary case, never an error.</summary>
     internal static bool TryDecode(string? stored, out string name)
     {
         name = string.Empty;

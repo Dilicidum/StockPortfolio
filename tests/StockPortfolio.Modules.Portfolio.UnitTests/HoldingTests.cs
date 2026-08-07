@@ -16,7 +16,6 @@ public sealed class HoldingTests
     private static Holding At(decimal quantity, decimal price) =>
         Holding.Create(User, Aapl, quantity, Money.Usd(price), Clock).AsT0;
 
-    // The canonical case from Initial.md:104.
     [Fact]
     public void Merge_TenAtHundredPlusTenAtOneFifty_GivesTwentyAtOneTwentyFive()
     {
@@ -40,8 +39,6 @@ public sealed class HoldingTests
         holding.AveragePrice.ShouldBe(Money.Usd(112.50m));
     }
 
-    // The scale half of the rounding decision, on the example README quotes: 1 @ 0.333333 merged with
-    // 2 @ 0.666667 weights to 0.5555556666..., which no column can hold.
     [Fact]
     public void Merge_WeightedAverageRunsPastSixDecimals_IsStoredAtSix()
     {
@@ -52,8 +49,6 @@ public sealed class HoldingTests
         holding.AveragePrice.Amount.ShouldBe(0.555556m);
     }
 
-    // The MODE half, and the pair is what pins it. (0.123456 + 0.123457) / 2 is 0.1234565 exactly, so
-    // ToEven and ToZero keep the even 6 while AwayFromZero and ToPositiveInfinity go up.
     [Fact]
     public void Merge_WeightedAverageIsAMidpointAfterAnEvenDigit_RoundsDown()
     {
@@ -67,8 +62,7 @@ public sealed class HoldingTests
             + "would give 0.123457.");
     }
 
-    // The other half: (0.123457 + 0.123458) / 2 is 0.1234575, a midpoint after an ODD digit, so ToEven
-    // rounds UP. Without this case, MidpointRounding.ToZero would also pass the test above.
+    // The odd-digit half of a pair: without it MidpointRounding.ToZero would also pass the even-digit test above.
     [Fact]
     public void Merge_WeightedAverageIsAMidpointAfterAnOddDigit_RoundsUp()
     {
@@ -82,9 +76,6 @@ public sealed class HoldingTests
             + "ToNegativeInfinity would both give 0.123457.");
     }
 
-    // Rounding is applied on every write path, not only on Merge's division. Without it the 201 body
-    // shows what the caller typed while the column stores something else, and the number the user was
-    // just shown changes by itself on the next read.
     [Fact]
     public void Create_PriceRunsPastSixDecimals_IsStoredAtSix() =>
         At(10m, 100.1234567m).AveragePrice.Amount.ShouldBe(100.123457m);
@@ -123,8 +114,7 @@ public sealed class HoldingTests
         holding.Quantity.ShouldBe(10.123457m);
     }
 
-    // numeric(18,6) holds twelve integer digits. Above that the INSERT raises 22003 and the caller
-    // gets a bare 500 for input the two validation layers both waved through.
+    // numeric(18,6) holds twelve integer digits; past that the INSERT raises 22003 and the caller gets a bare 500.
     [Fact]
     public void Create_QuantityAboveWhatTheColumnHolds_ReturnsInvalidInput() =>
         Holding.Create(User, Aapl, 1_000_000_000_000m, Money.Usd(100m), Clock).AsT1.Field.ShouldBe("quantity");
@@ -165,7 +155,6 @@ public sealed class HoldingTests
     public void Merge_NonPositivePrice_ReturnsInvalidInput(decimal price) =>
         At(10m, 100m).Merge(5m, Money.Usd(price), Clock).AsT1.Field.ShouldBe("price");
 
-    // Create is the only door into the aggregate, and it validates through the same rules Merge does.
     [Theory]
     [InlineData(0)]
     [InlineData(-1)]
@@ -179,7 +168,7 @@ public sealed class HoldingTests
     public void Create_NonPositivePrice_ReturnsInvalidInput(decimal price) =>
         Holding.Create(User, Aapl, 10m, Money.Usd(price), Clock).AsT1.Field.ShouldBe("price");
 
-    // Money.Add THROWS on a currency mismatch, so Merge must compare before it does any arithmetic.
+    // Money.Add throws on a currency mismatch, so Merge must compare before it does any arithmetic.
     [Fact]
     public void Merge_DifferentCurrency_ReturnsInvalidInput_RatherThanThrowing() =>
         At(10m, 100m).Merge(5m, new Money(150m, "EUR"), Clock).AsT1.Field.ShouldBe("price");
@@ -203,7 +192,7 @@ public sealed class HoldingTests
     public void Correct_ReplacesRatherThanAverages()
     {
         var holding = At(10m, 100m);
-        holding.Merge(10m, Money.Usd(150m), Clock);      // now 20 @ $125
+        holding.Merge(10m, Money.Usd(150m), Clock);
 
         holding.Correct(10m, Money.Usd(100m), Clock).IsT0.ShouldBeTrue();
 

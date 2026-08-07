@@ -10,16 +10,14 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The dashboard end to end, and the degradation behaviour the whole phase exists for.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class DashboardTests(ApiFixture fixture)
 {
-    /// <summary>Nothing the generated provider produces lands here, so "fresh" and "last known" cannot be confused.</summary>
+    // Nothing the generated provider produces lands here, so "fresh" and "last known" cannot be confused.
     private const decimal ScriptedPrice = 4242.4242m;
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The happy path: positions priced, and every total summed from the rows above it.</summary>
     [Fact]
     public async Task Dashboard_WithHoldingsAndPrices_ReturnsJoinedTotals()
     {
@@ -55,7 +53,6 @@ public sealed class DashboardTests(ApiFixture fixture)
                 $"{position.Ticker}'s profit is not value minus cost");
         }
 
-        // The one figure the test knows on its own: 10 @ 100 plus 4 @ 25.
         Amount(dashboard.Totals.Cost).ShouldBe(1100m);
 
         Amount(dashboard.Totals.Value).ShouldBe(
@@ -65,7 +62,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         Amount(dashboard.Totals.Profit)
             .ShouldBe(Amount(dashboard.Totals.Value) - Amount(dashboard.Totals.Cost));
 
-        // §2.8: priced weights sum to 100 within pricedCount × 0.005, never to an exact 100.
         dashboard.Positions
             .Sum(position => decimal.Parse(position.Weight!, CultureInfo.InvariantCulture))
             .ShouldBe(100m, 2 * 0.005m, "the priced weights do not account for the whole portfolio");
@@ -73,7 +69,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         dashboard.StalestObservedAt.ShouldNotBeNull("every position is priced, so min(observedAt) exists");
     }
 
-    /// <summary>Percent is a string on the wire; a JSON number would become a double in the browser.</summary>
     [Fact]
     public async Task Dashboard_SerialisesWeightAndProfitPercentAsStrings_NotJsonNumbers()
     {
@@ -81,8 +76,7 @@ public sealed class DashboardTests(ApiFixture fixture)
 
         await AddSucceedsAsync(client, token, Wire.UniqueTicker(), 3m, 40m);
 
-        // Read as text, not as an object: a deserialiser happily turns a JSON number back into the
-        // string property, so only the raw body can say which one crossed the wire.
+        // Read as text, not as an object: a deserialiser turns a JSON number back into the string property, so only the raw body says which crossed the wire.
         var body = await Wire.GetDashboardJsonAsync(client, token);
 
         body.ShouldContain(
@@ -97,7 +91,6 @@ public sealed class DashboardTests(ApiFixture fixture)
             $"profitPercent arrived as a JSON number: {body}");
     }
 
-    /// <summary>The request fetches for itself: there is no poller, so a first render must not be pending.</summary>
     [Fact]
     public async Task Dashboard_NewlyAddedTicker_HasPriceOnFirstRequest()
     {
@@ -125,7 +118,6 @@ public sealed class DashboardTests(ApiFixture fixture)
             "the observation predates the position itself, so it cannot have been fetched for it");
     }
 
-    /// <summary>The degradation test: provider gone, the table still shows the last price it saw and its age.</summary>
     [Fact]
     public async Task Dashboard_ProviderDown_ShowsLastKnownWithAge()
     {
@@ -135,8 +127,7 @@ public sealed class DashboardTests(ApiFixture fixture)
 
         await AddSucceedsAsync(client, token, ticker, 2m, 50m);
 
-        // Warm marketdata:last:{ticker} on the SHARED host first. Two hosts, one Redis container —
-        // which is the only reason the dead-provider host below has anything to fall back to.
+        // Warmed on the shared host: two hosts, one Redis container, which is the only reason the dead-provider host below has a fallback.
         var warm = await Wire.GetDashboardAsync(client, token);
         var warmed = warm.Positions.ShouldHaveSingleItem();
 
@@ -145,8 +136,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         await using var host = _fixture.CreateHostWithQuoteProvider(ScriptedQuoteProvider.ServingNothing);
         using var deadClient = host.CreateClient();
 
-        // The same access token: both hosts share the signing key, issuer and audience, and the JWT is
-        // self-contained, so re-authenticating would only be a second way of writing the same thing.
         var degraded = await Wire.GetDashboardAsync(deadClient, token);
         var position = degraded.Positions.ShouldHaveSingleItem();
 
@@ -174,7 +163,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         degraded.Totals.PricedPositionCount.ShouldBe(1);
     }
 
-    /// <summary>A blank position, not a total loss: unknown is null everywhere, and never zero.</summary>
     [Fact]
     public async Task Dashboard_ProviderDown_NeverFetchedTicker_ReturnsNullNotZero()
     {
@@ -200,7 +188,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         only.Weight.ShouldBeNull(
             "a zero weight claims this is 0% of the portfolio; the truth is that nobody knows");
 
-        // What IS known is still shown.
         Amount(only.Cost).ShouldBe(100m);
 
         dashboard.Totals.PositionCount.ShouldBe(1);
@@ -218,9 +205,7 @@ public sealed class DashboardTests(ApiFixture fixture)
             "\"0.00\" tells the holder their portfolio is exactly break-even at the moment nothing "
             + "about it could be priced — the claim Weight already refuses to make one level down");
 
-        // Null, not absent. Program.cs sets DefaultIgnoreCondition = WhenWritingNull, which drops
-        // nullable value types too, so without JsonIgnore(Never) the member never reaches the wire —
-        // and no deserialiser can tell an absent member from a null one.
+        // Null, not absent: DefaultIgnoreCondition = WhenWritingNull drops nullable value types too, so without JsonIgnore(Never) the member never reaches the wire.
         var body = await Wire.GetDashboardJsonAsync(client, tokens.AccessToken);
 
         body.ShouldContain("\"currentPrice\":null", Case.Sensitive, $"currentPrice is absent: {body}");
@@ -231,8 +216,7 @@ public sealed class DashboardTests(ApiFixture fixture)
             Case.Sensitive,
             $"stalestObservedAt is absent: {body}");
 
-        // Navigated rather than string-matched: the unpriced ROW also carries "profitPercent":null,
-        // so a substring search would pass with the totals member missing entirely.
+        // Navigated rather than string-matched: the unpriced row also carries "profitPercent":null, so a substring search would pass with the totals member missing.
         using var document = JsonDocument.Parse(body);
 
         document.RootElement.GetProperty("totals")
@@ -242,22 +226,17 @@ public sealed class DashboardTests(ApiFixture fixture)
         percent.ValueKind.ShouldBe(JsonValueKind.Null, $"totals.profitPercent is not null: {body}");
     }
 
-    /// <summary>The nudge seam is swapped with the provider, and this is the only thing that says so.</summary>
     [Fact]
     public async Task Dashboard_HostWithQuoteProvider_ResolvesNoQuoteNudge()
     {
         await using var host = _fixture.CreateHostWithQuoteProvider(ScriptedQuoteProvider.ServingNothing);
 
-        // White-box on purpose: under EnvironmentName "Testing" the nudge route is never mapped, so
-        // RemoveAll<IQuoteNudge>() has no reachable behaviour and deleting it would fail nothing. Left
-        // registered, the seam still points at the fake this host just replaced, and the first
-        // Development-environment test trips over two seams disagreeing about which provider is live.
+        // White-box on purpose: under EnvironmentName "Testing" the nudge route is never mapped, so deleting RemoveAll<IQuoteNudge>() would fail nothing here.
         host.Services.GetService<IQuoteNudge>().ShouldBeNull(
             "the swapped host still resolves an IQuoteNudge, which can only be the registration made "
             + "against the fake provider that CreateHostWithQuoteProvider removed");
     }
 
-    /// <summary>The point of the whole task: a user's own key prices their own dashboard, end to end.</summary>
     [Fact]
     public async Task Dashboard_ForAUserWithTheirOwnKey_UsesThatKey()
     {
@@ -285,18 +264,14 @@ public sealed class DashboardTests(ApiFixture fixture)
             "the dashboard fetch never carried the caller's own key to the provider");
     }
 
-    /// <summary>Some symbols refused is the common failure, and it is a 200 with a gap, not an error.</summary>
     [Fact]
     public async Task Dashboard_ProviderOmitsSomeSymbols_Returns200NotError()
     {
-        // The double omits the refused symbol rather than emitting a literal 429: IQuoteProvider's
-        // contract is "fetches what it can", so the status code never leaves FinnhubQuoteProvider's own
-        // per-item catch. What reaches this layer is a shorter list, and that is what is exercised here.
+        // The double omits the refused symbol rather than emitting a 429: IQuoteProvider fetches what it can, so what reaches this layer is a shorter list.
         var served = Wire.UniqueTicker();
         var alsoServed = Wire.UniqueTicker();
 
-        // Three positions, one of which the provider refuses. Failing ALL of them would not distinguish
-        // the per-ticker set difference from a single try/catch around the whole call — see §2.5.
+        // Three positions, one refused. Failing all three would not distinguish the per-ticker set difference from one try/catch around the whole call.
         var refused = Wire.UniqueTicker();
 
         await using var host = _fixture.CreateHostWithQuoteProvider(
@@ -336,16 +311,14 @@ public sealed class DashboardTests(ApiFixture fixture)
         Amount(Position(dashboard, alsoServed).CurrentPrice!).ShouldBe(ScriptedPrice);
         Position(dashboard, refused).CurrentPrice.ShouldBeNull();
 
-        // The flag, not just the number: discarding the two good prices and re-reading them out of the
-        // store the same request had only just written produces the identical figures with IsLastKnown
-        // set. Without this line the wrong implementation is indistinguishable here.
+        // The flag, not just the number: re-reading the two good prices out of the store this request just wrote gives the identical figures with IsLastKnown set.
         Position(dashboard, served).IsLastKnown.ShouldBeFalse(
             "this symbol was answered by the provider on this request, so its price is not a fallback");
 
         Position(dashboard, alsoServed).IsLastKnown.ShouldBeFalse();
     }
 
-    /// <summary>The test that actually pins §2.5: seventeen good prices are not thrown away because three failed.</summary>
+    // Seventeen good prices are not thrown away because three failed.
     [Fact]
     public async Task Dashboard_PartialProviderFailure_MixesFreshAndLastKnown()
     {
@@ -357,8 +330,7 @@ public sealed class DashboardTests(ApiFixture fixture)
         await AddSucceedsAsync(client, token, fresh, 1m, 10m);
         await AddSucceedsAsync(client, token, stale, 1m, 10m);
 
-        // Warm both on the shared host, so both HAVE a last-known price to fall back to. That is what
-        // makes the assertion below discriminating: a wholly-stale answer is available and is wrong.
+        // Warm both on the shared host, so a wholly-stale answer IS available and is wrong — which is what makes the assertion below discriminating.
         var warm = await Wire.GetDashboardAsync(client, token);
         var warmedStale = Position(warm, stale);
 
@@ -392,7 +364,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         dashboard.Totals.PricedPositionCount.ShouldBe(2, "both rows carry a price, from two sources");
     }
 
-    /// <summary>The fallback store failing must not break the primary path. Degraded, not broken.</summary>
     [Fact]
     public async Task Dashboard_RedisDown_StillReturnsFreshPrices()
     {
@@ -414,7 +385,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         only.IsLastKnown.ShouldBeFalse("this price came from the provider, not from a store that is down");
         dashboard.Totals.PricedPositionCount.ShouldBe(1);
 
-        // The other half of the pair: the app is honest about being degraded even while it serves.
         using var ready = await client.GetAsync("/health/ready", TestContext.Current.CancellationToken);
 
         ready.StatusCode.ShouldBe(
@@ -423,7 +393,6 @@ public sealed class DashboardTests(ApiFixture fixture)
             + $"degradation — it would look identical to a healthy instance: {await Wire.Describe(ready)}");
     }
 
-    /// <summary>A dashboard is a personal document; a fresh account starting non-empty would be the leak.</summary>
     [Fact]
     public async Task Dashboard_OnlyReturnsCallersHoldings()
     {
@@ -447,12 +416,10 @@ public sealed class DashboardTests(ApiFixture fixture)
         alices.Positions.ShouldHaveSingleItem().Ticker.ShouldBe(ticker);
     }
 
-    /// <summary>Brief P0 req 6 over the dashboard's own query, which no other test's SQL covers.</summary>
     [Fact]
     public async Task Dashboard_GeneratedSql_UsesParameterPlaceholder()
     {
-        // The shared host deliberately: RecordedCommands is only passed to that one, so a dashboard read
-        // on any of the hosts above would record nothing and this test would pass by finding nothing.
+        // The shared host deliberately: RecordedCommands is passed only to that one, so a read on any host above would record nothing and pass by finding nothing.
         var (client, token) = await SignedInAsync("dashboard-parameterised");
 
         var ticker = Wire.UniqueTicker();
@@ -496,7 +463,6 @@ public sealed class DashboardTests(ApiFixture fixture)
             command.Parameters.ShouldNotBeEmpty(
                 $"a dashboard read carrying no parameters at all: {command.CommandText}");
 
-            // Every value the statement uses is referenced from the text by its placeholder name.
             foreach (var parameter in command.Parameters)
             {
                 command.CommandText.ShouldContain(
@@ -508,7 +474,6 @@ public sealed class DashboardTests(ApiFixture fixture)
         }
     }
 
-    /// <summary>Parses the string amount back to a decimal. That it IS a string is asserted separately.</summary>
     private static decimal Amount(MoneyPayload payload) =>
         decimal.Parse(payload.Amount, CultureInfo.InvariantCulture);
 
@@ -519,7 +484,6 @@ public sealed class DashboardTests(ApiFixture fixture)
             $"The dashboard carries no row for {ticker}; it has "
             + $"[{string.Join(", ", dashboard.Positions.Select(position => position.Ticker))}].");
 
-    /// <summary>Reads the caller's own id off the running host, the way HoldingsTests does.</summary>
     private static async Task<Guid> SubjectOfAsync(HttpClient client, string accessToken)
     {
         using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", accessToken);

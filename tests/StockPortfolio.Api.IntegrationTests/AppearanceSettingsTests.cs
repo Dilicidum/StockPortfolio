@@ -10,13 +10,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-// The appearance settings pair under /api/settings, driven end to end over HTTP against a real Postgres.
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AppearanceSettingsTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    // A user who has never touched settings gets the default row, without anything being written.
     [Fact]
     public async Task Get_ForANewUser_ReturnsSystemAndEnglish()
     {
@@ -35,7 +33,6 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         payload.Language.ShouldBe("en");
     }
 
-    // What was saved is what a following read returns.
     [Fact]
     public async Task Put_ThenGet_ReturnsWhatWasSaved()
     {
@@ -68,7 +65,6 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         fetchedPayload.Language.ShouldBe("uk");
     }
 
-    // Shape validation rejects a theme outside the allowed set before any handler runs.
     [Fact]
     public async Task Put_WithAnUnknownTheme_Returns400()
     {
@@ -88,7 +84,6 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         (await Wire.FailingFieldsAsync(response)).ShouldContain("theme");
     }
 
-    // No token, no settings — the group's RequireAuthorization applies to both routes.
     [Fact]
     public async Task Get_Anonymous_Is401()
     {
@@ -99,7 +94,7 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    // A media type the route cannot read is what actually produces a 415 — checked against the running host.
+    // A media type the route cannot read is what actually produces 415; an absent body is a 400.
     [Fact]
     public async Task Put_WithWrongContentType_ReturnsWhateverItReallyReturns()
     {
@@ -117,7 +112,6 @@ public sealed class AppearanceSettingsTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.UnsupportedMediaType, await Wire.Describe(response));
     }
 
-    // The default row is built in memory and never persisted, so no row exists after the first read.
     [Fact]
     public async Task Get_ForANewUser_WritesNothing()
     {

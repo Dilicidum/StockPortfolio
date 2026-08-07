@@ -10,7 +10,6 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>The Alerts model must build, and it must bind the one constructor each entity has.</summary>
 public sealed class EfModelTests
 {
     private const string ModelOnly = "Host=localhost;Database=model-only;Username=none;Password=none";
@@ -23,8 +22,7 @@ public sealed class EfModelTests
         return context.Model.FindEntityType(typeof(TEntity))!;
     }
 
-    // Index sort order and a property's provider type are not carried by the read-optimised model that
-    // DbContext.Model returns; asking for them there throws rather than answering wrongly.
+    // Index sort order and provider types are absent from the read-optimised DbContext.Model, which throws if asked.
     private static IEntityType DesignTimeEntity<TEntity>()
     {
         using var context = new AlertsDbContext(
@@ -33,8 +31,7 @@ public sealed class EfModelTests
         return context.GetService<IDesignTimeModel>().Model.FindEntityType(typeof(TEntity))!;
     }
 
-    // The whole model fails to build at host startup, not on the first query, when a constructor
-    // parameter no longer names a property. Building it here is the cheap way to find that out.
+    // A constructor parameter that no longer names a property fails the whole model at host startup, not on first query.
     [Fact]
     public void AlertSetting_BindsItsConstructor_ForMaterialisation()
     {
@@ -134,7 +131,6 @@ public sealed class EfModelTests
             ignoreOrder: true);
     }
 
-    /// <summary>A threshold belongs to a position, not to an account, and only the index promises it.</summary>
     [Fact]
     public void AlertSettings_AreKeyedOnUserAndTicker_Uniquely() =>
         Entity<AlertSetting>()
@@ -144,7 +140,6 @@ public sealed class EfModelTests
                 index => index.IsUnique.ShouldBeTrue(),
                 index => index.Properties.Select(property => property.Name).ShouldBe(["UserId", "Ticker"]));
 
-    /// <summary>Newest first for one user is the only read the history endpoint makes.</summary>
     [Fact]
     public void FiredAlerts_AreIndexedOnUserAndFiredAtDescending()
     {
@@ -158,7 +153,7 @@ public sealed class EfModelTests
                 + "is the only query this table has.");
     }
 
-    /// <summary>Stored as text, so an int renumbered by an enum edit cannot silently rewrite history.</summary>
+    // Stored as text, so an int renumbered by an enum edit cannot silently rewrite history.
     [Fact]
     public void Direction_IsStoredAsItsName()
     {
@@ -168,7 +163,7 @@ public sealed class EfModelTests
         direction.GetMaxLength().ShouldBe(8);
     }
 
-    /// <summary>numeric(5,2) is exactly ThresholdPercent's range; unconstrained numeric would let 0.001 in.</summary>
+    // numeric(5,2) is exactly ThresholdPercent's range; unconstrained numeric would let 0.001 in.
     [Fact]
     public void ThresholdPercent_CarriesFiveTwoPrecision()
     {
@@ -189,8 +184,7 @@ public sealed class EfModelTests
         percent.GetScale().ShouldBe(6);
     }
 
-    // The classic "column is always true" bug: the CLR default false reads as "not set", so EF omits it
-    // and the store default writes true. EF8 fixed it by making the sentinel equal the store default.
+    // A bool with a store default of true silently swallows an explicit false unless EF's sentinel equals that default.
     [Fact]
     public void Enabled_DefaultsToTrueInTheDatabase_WithoutSwallowingAnExplicitFalse()
     {

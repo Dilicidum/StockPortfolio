@@ -25,8 +25,7 @@ public sealed class PollingOptionsTests
     [Fact]
     public void Options_ReadTheColonPathTheDeploymentActuallySets()
     {
-        // MarketData:Polling:* is a two-level path, and GetSection has to walk both. A section name that
-        // silently matched nothing would hand back the defaults and look exactly like a correct read.
+        // A section name that silently matched nothing would hand back the defaults and look exactly like a correct read.
         var options = Read(
             ("MarketData:Polling:IntervalSeconds", "30"),
             ("MarketData:Polling:RetentionMinutes", "90"));
@@ -44,8 +43,7 @@ public sealed class PollingOptionsTests
     [InlineData("60.5")]
     public void Options_UnusableInterval_FallsBackRatherThanThrowing(string configured)
     {
-        // Nothing here throws, on purpose: a typo in one deployment variable must not stop the host, and a
-        // zero interval would spin the poll loop as fast as the machine allows.
+        // Nothing throws on purpose: a typo must not stop the host, and a zero interval would spin the poll loop flat out.
         Read(("MarketData:Polling:IntervalSeconds", configured))
             .Interval.ShouldBe(TimeSpan.FromSeconds(60));
     }

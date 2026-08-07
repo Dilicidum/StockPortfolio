@@ -5,23 +5,18 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Rule 3 — no public settable property under a Modules.*.Domain namespace.</summary>
 public sealed class DomainShapeTests
 {
     private const string IsExternalInitTypeName = "System.Runtime.CompilerServices.IsExternalInit";
 
-    /// <summary>The three .Domain assemblies.</summary>
     public static TheoryData<string> DomainAssemblies =>
         [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, "Domain"))];
 
-    /// <summary>Rule 3, per module.</summary>
     [Theory]
     [MemberData(nameof(DomainAssemblies))]
     public void DomainType_ExposesNoPublicSetter(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
         var violations = assembly.GetTypes()
             .Where(IsDomainType)
@@ -39,7 +34,6 @@ public sealed class DomainShapeTests
                 + "PropertyAccessMode.PreferField writes the backing field and never calls it.");
     }
 
-    /// <summary>Proves rule 3 discriminates: the shapes the domain actually uses must all read as clean, and a.</summary>
     [Fact]
     public void DomainSetterRule_AcceptsTheDomainShapes_AndRejectsAPublicSetter()
     {
@@ -51,7 +45,6 @@ public sealed class DomainShapeTests
             .ShouldContain(nameof(ViolatingShape.Mutable), Case.Sensitive);
     }
 
-    /// <summary>Presses the button on the smoke detector: rule 3 passes by finding nothing, so it must find.</summary>
     [Fact]
     public void DomainSetterRule_SeesTheRealDomainTypes_SoAnEmptyResultMeansSomething()
     {
@@ -79,12 +72,7 @@ public sealed class DomainShapeTests
         SolutionAssemblies.IsDomainNamespace("StockPortfolio.Shared.Kernel").ShouldBeFalse(
             "Shared.Kernel is not a module, so it carries no module's domain namespace.");
 
-        // AppUser derives from IdentityUser<Guid>, whose properties all carry public setters — and rule 3
-        // still passes over it, with no exemption. That is not luck: DescribeMutableProperties asks for
-        // DeclaredOnly, and AppUser declares nothing of its own.
-        //
-        // Pinned because it is the load-bearing reason a framework type can sit in .Domain at all. Add one
-        // property with a public setter to AppUser and rule 3 will fail, which is the correct outcome.
+        // AppUser inherits public setters from IdentityUser and still passes, because the scan asks for DeclaredOnly.
         scanned.ShouldContain(
             typeof(AppUser).FullName!,
             "AppUser is scanned by rule 3 like any other domain type. It is not excused.");
@@ -109,7 +97,7 @@ public sealed class DomainShapeTests
 
     private static bool HasPublicSetter(PropertyInfo property)
     {
-        // A record's EqualityContract is emitted by the compiler and carries no setter anyway; named.
+        // EqualityContract is compiler-emitted and carries no setter of the author's.
         if (string.Equals(property.Name, "EqualityContract", StringComparison.Ordinal)
             || property.IsDefined(typeof(CompilerGeneratedAttribute), inherit: false))
         {

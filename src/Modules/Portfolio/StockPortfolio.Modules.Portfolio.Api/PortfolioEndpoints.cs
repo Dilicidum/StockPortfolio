@@ -23,19 +23,14 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Api;
 
-/// <summary>The Portfolio module's entire inbound HTTP surface: five routes under /api/holdings, the dashboard, two under /api/settings, and the one DI seam.</summary>
 public static class PortfolioEndpoints
 {
-    /// <summary>Where a position is addressable.</summary>
     private const string BasePath = "/api/holdings";
 
-    /// <summary>The dashboard is a portfolio read that happens to need prices, so it is Portfolio's route.</summary>
     private const string DashboardPath = "/api/dashboard";
 
-    /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
 
-    /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
     public static IServiceCollection AddPortfolioApi(this IServiceCollection services)
     {
         services.AddValidatorsFromAssemblyContaining<AddHoldingRequestValidator>();
@@ -43,12 +38,8 @@ public static class PortfolioEndpoints
         return services;
     }
 
-    /// <summary>Maps the five holdings routes onto /api/holdings, the dashboard, and the /api/settings/dashboard pair.</summary>
     public static IEndpointRouteBuilder MapPortfolioEndpoints(this IEndpointRouteBuilder app)
     {
-        // Every route needs a bearer token and every route can 500, so both are declared once here.
-        // 415 and 500 carry problem+json because AddProblemDetails and UseStatusCodePages give even
-        // framework-generated responses a body - verified against the running API, not assumed.
         var group = app.MapGroup(BasePath)
             .RequireAuthorization()
             .WithTags("Holdings")
@@ -80,8 +71,6 @@ public static class PortfolioEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status415UnsupportedMediaType);
 
-        // PATCH here and PUT on the settings sections is deliberate: this changes one field of a larger
-        // resource, the settings routes replace the whole of a small one.
         group.MapPatch("/{id:guid}/visibility", SetVisibilityAsync)
             .WithName("SetHoldingVisibility")
             .WithSummary("Shows or hides a position on the dashboard.")
@@ -95,8 +84,6 @@ public static class PortfolioEndpoints
             .Produces(StatusCodes.Status204NoContent)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // Outside the group, and deliberately not nested under /api/holdings: it is one resource of its
-        // own, not a sub-resource of a position.
         app.MapGet(DashboardPath, GetDashboardAsync)
             .RequireAuthorization()
             .WithTags("Dashboard")
@@ -129,7 +116,6 @@ public static class PortfolioEndpoints
         return app;
     }
 
-    /// <summary>Prices the caller's positions.</summary>
     private static async Task<IResult> GetDashboardAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetDashboardQuery, GetDashboardResult> handler,
@@ -143,7 +129,6 @@ public static class PortfolioEndpoints
         return TypedResults.Ok(await handler.Handle(new GetDashboardQuery(userId), ct));
     }
 
-    /// <summary>Lists the caller's positions.</summary>
     private static async Task<IResult> GetHoldingsAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetHoldingsQuery, IReadOnlyList<HoldingSummary>> handler,
@@ -157,7 +142,6 @@ public static class PortfolioEndpoints
         return TypedResults.Ok(await handler.Handle(new GetHoldingsQuery(userId), ct));
     }
 
-    /// <summary>Records a purchase.</summary>
     private static async Task<IResult> AddHoldingAsync(
         AddHoldingRequest request,
         ClaimsPrincipal principal,
@@ -174,23 +158,15 @@ public static class PortfolioEndpoints
             ct);
 
         return result.Match(
-            // 201 with a Location, because this position did not exist a moment ago.
             created => Results.Created($"{BasePath}/{created.Holding.Id}", created.Holding),
-
-            // 200 and no Location: the position already existed and this purchase changed it.
             merged => Results.Ok(merged.Holding),
-
-            // The handler's own InvalidInput case, not the filter's.
             invalid => invalid.ToValidationProblem(),
-
-            // Shape or existence: the handler asked the provider, and it said no.
             unknownTicker => new InvalidInput(
                     "ticker",
                     $"'{unknownTicker.Ticker}' is not a ticker this application recognises.")
                 .ToValidationProblem());
     }
 
-    /// <summary>Corrects a position.</summary>
     private static async Task<IResult> UpdateHoldingAsync(
         Guid id,
         UpdateHoldingRequest request,
@@ -212,11 +188,9 @@ public static class PortfolioEndpoints
 
             // 404 and never 403: a 403 would confirm to a stranger that this id exists.
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."),
-
             invalid => invalid.ToValidationProblem());
     }
 
-    /// <summary>Shows or hides a position on the dashboard.</summary>
     private static async Task<IResult> SetVisibilityAsync(
         Guid id,
         SetHoldingVisibilityRequest request,
@@ -236,7 +210,6 @@ public static class PortfolioEndpoints
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
     }
 
-    /// <summary>Closes a position.</summary>
     private static async Task<IResult> RemoveHoldingAsync(
         Guid id,
         ClaimsPrincipal principal,
@@ -255,7 +228,6 @@ public static class PortfolioEndpoints
             missing => ProblemDetailsExtensions.NotFoundProblem("No such position."));
     }
 
-    // Reads the caller's dashboard settings, creating the default row on first read.
     private static async Task<IResult> GetDashboardSettingsAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetDashboardSettingsQuery, GetDashboardSettingsResult> handler,
@@ -269,7 +241,6 @@ public static class PortfolioEndpoints
         return TypedResults.Ok(await handler.Handle(new GetDashboardSettingsQuery(userId), ct));
     }
 
-    // Saves the caller's dashboard settings.
     private static async Task<IResult> SaveDashboardSettingsAsync(
         SaveDashboardSettingsRequest request,
         ClaimsPrincipal principal,
@@ -287,15 +258,11 @@ public static class PortfolioEndpoints
 
         return result.Match(
             saved => Results.Ok(saved),
-
-            // Reachable only if the validator and RefreshInterval.Create disagree about the allowed range.
             invalid => invalid.ToValidationProblem());
     }
 
-    /// <summary>Reads the subject claim. Totality over a string?, not a security control.</summary>
     private static bool TryReadUserId(ClaimsPrincipal principal, out Guid userId, out IResult rejection)
     {
-        // OnTokenValidated already rejects a subject-less token; this only gives null a branch.
         if (Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out userId))
         {
             rejection = TypedResults.Empty;

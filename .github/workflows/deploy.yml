@@ -127,12 +127,12 @@ jobs:
       - name: Build and push API image
         uses: docker/build-push-action@v6
         with:
-          # Build context is the repository ROOT, not src/Api. The Dockerfile copies
+          # Build context is the repository ROOT, not src/Host. The Dockerfile copies
           # Directory.Build.props, Directory.Packages.props and global.json before the .csproj
           # files; without them restore fails inside the container with a Central Package
           # Management error that does not reproduce on a developer machine.
           context: .
-          file: src/Api/Dockerfile
+          file: src/Host/Dockerfile
           push: true
           tags: |
             ${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}

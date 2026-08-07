@@ -13,9 +13,7 @@ namespace StockPortfolio.Tests;
 
 public sealed class MarketDataModuleTests
 {
-    // AddMarketDataModule now calls AddMarketDataPersistence, which throws without a connection string.
-    // None of these tests open a real connection, so a syntactically-valid placeholder is all AddDbContext
-    // needs; AddInMemoryCollection is called twice so a caller-supplied value below still overrides it.
+    // AddMarketDataPersistence throws without one; AddInMemoryCollection is called twice so a test value still overrides it.
     private const string FallbackConnectionString =
         "Host=localhost;Database=marketdata-unit-tests;Username=none;Password=none";
 
@@ -62,8 +60,7 @@ public sealed class MarketDataModuleTests
     [Fact]
     public void Module_PriceWindow_RegistersTheStoreOnceAndTheReaderPerRequest()
     {
-        // Read off the collection rather than the provider: both types need IConnectionMultiplexer, which
-        // AddStockPortfolioRedis registers in the host and nothing in this module declares.
+        // Read off the collection, not the provider: both types need IConnectionMultiplexer, which only the host registers.
         var services = new ServiceCollection();
 
         services.AddLogging();
@@ -88,8 +85,7 @@ public sealed class MarketDataModuleTests
                 && descriptor.ImplementationType?.Name == "QuotePoller")
             .ShouldBeTrue();
 
-        // A no-op default, so MarketData needs no stub of its own. Nothing registers IPollTargetSource:
-        // "the host never told me what to poll" has to be a loud failure, not an empty list.
+        // IPollTargetSource is deliberately unregistered: a host that never said what to poll must fail loudly, not poll nothing.
         Lifetime<IPriceSampleObserver>(services).ShouldBe(ServiceLifetime.Singleton);
         services.Any(descriptor => descriptor.ServiceType == typeof(IPollTargetSource)).ShouldBeFalse();
     }
@@ -107,8 +103,7 @@ public sealed class MarketDataModuleTests
         using var provider = services.BuildServiceProvider();
         using var scope = provider.CreateScope();
 
-        // Last registration wins, which is the only reason the host's adapter is the one resolved. TryAdd
-        // in the module protects the reverse order; it is not what makes this case work.
+        // Last registration wins is what makes the host's adapter resolve; the module's TryAdd is not.
         scope.ServiceProvider.GetRequiredService<IPriceSampleObserver>().ShouldBeOfType<SpyObserver>();
     }
 
@@ -117,8 +112,7 @@ public sealed class MarketDataModuleTests
     {
         var handler = new CountingHandler(HttpStatusCode.Unauthorized);
 
-        // Resolving the typed client is also what runs HttpStandardResilienceOptionsCustomValidator, which
-        // is registered with AddOptionsWithValidateOnStart and is startup-fatal if the timeouts disagree.
+        // Resolving the typed client runs HttpStandardResilienceOptionsCustomValidator, which is startup-fatal if the timeouts disagree.
         using var services = Build(
             Config(("Finnhub:ApiKey", "a-real-looking-key")),
             extra => extra
@@ -134,7 +128,6 @@ public sealed class MarketDataModuleTests
         handler.Calls.ShouldBe(1);
     }
 
-    /// <summary>The provider's own signal is the only pacing left once the client-side bucket is gone.</summary>
     [Fact]
     public async Task GetQuotes_WhenTheProviderReturns429_RetriesRatherThanFailing()
     {

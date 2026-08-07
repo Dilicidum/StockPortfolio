@@ -7,27 +7,18 @@ using StockPortfolio.Modules.Identity.Infrastructure.Persistence.Converters;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
-/// <summary>The Identity module's only DbContext: the framework's four user tables plus this module's one.</summary>
-/// <remarks>
-/// IdentityUserContext, not IdentityDbContext. The difference is roles: IdentityDbContext would also map
-/// AspNetRoles, AspNetUserRoles and AspNetRoleClaims, and this app has no concept of a role. Three tables
-/// that can only ever be empty are three tables someone will eventually try to use.
-/// </remarks>
 internal sealed class IdentityDbContext(DbContextOptions<IdentityDbContext> options)
     : IdentityUserContext<AppUser, Guid>(options)
 {
-    /// <summary>The Postgres schema this context owns.</summary>
     internal const string SchemaName = "identity";
 
-    /// <summary>The migration history table name.</summary>
     internal const string MigrationsHistoryTableName = "__EFMigrationsHistory";
 
     public DbSet<UserPreferences> UserPreferences => Set<UserPreferences>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // First, and not optional: this is what maps AspNetUsers and its three siblings. Skip it and the
-        // model builds with only user_preferences in it, and UserManager fails on the first query.
+        // First and not optional: this is what maps AspNetUsers and its three siblings.
         base.OnModelCreating(modelBuilder);
 
         modelBuilder.HasDefaultSchema(SchemaName);

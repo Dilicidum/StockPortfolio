@@ -1,8 +1,7 @@
 using System.Globalization;
 
-namespace StockPortfolio.Api.Extensions;
+namespace StockPortfolio.Host.Extensions;
 
-/// <summary>Cross-module configuration checks the host runs at startup, before any request can arrive.</summary>
 internal static class StartupInvariantExtensions
 {
     private const string RetentionKey = "MarketData:Polling:RetentionMinutes";
@@ -18,8 +17,6 @@ internal static class StartupInvariantExtensions
         var retention = Read(configuration, RetentionKey, DefaultRetentionMinutes);
         var maxWindow = Read(configuration, MaxWindowKey, DefaultMaxWindowMinutes);
 
-        // Without this, somebody raises the window, nobody raises retention, and alerts stop firing
-        // with no error anywhere - the evaluator simply never sees enough history to judge one.
         if (retention <= maxWindow)
         {
             throw new InvalidOperationException(

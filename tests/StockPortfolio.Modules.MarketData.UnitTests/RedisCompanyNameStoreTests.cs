@@ -18,7 +18,6 @@ public sealed class RedisCompanyNameStoreTests
         name.ShouldBe("Apple Inc");
     }
 
-    /// <summary>A blank is not a name, so it is never written and never read back as one.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -30,7 +29,6 @@ public sealed class RedisCompanyNameStoreTests
         RedisCompanyNameStore.TryDecode(candidate, out _).ShouldBeFalse();
     }
 
-    /// <summary>A pathological provider answer must not be stored whole; the cap is silent, not a rejection.</summary>
     [Fact]
     public void Encode_AbsurdlyLongName_IsCappedRatherThanDropped()
     {
@@ -43,8 +41,7 @@ public sealed class RedisCompanyNameStoreTests
     [Fact]
     public async Task Store_RedisUnreachable_SwallowsTheFailureOnBothPaths()
     {
-        // A real multiplexer pointed at a dead port, exactly as AbortOnConnectFail=false leaves it in
-        // production: every command throws RedisConnectionException at the call site.
+        // A real multiplexer on a dead port: with AbortOnConnectFail=false every command throws at the call site, as in production.
         var options = ConfigurationOptions.Parse("127.0.0.1:1");
         options.AbortOnConnectFail = false;
         options.ConnectTimeout = 50;
@@ -60,7 +57,6 @@ public sealed class RedisCompanyNameStoreTests
             [new SymbolMatch(ticker, "Apple Inc")],
             TestContext.Current.CancellationToken));
 
-        // Redis down means names disappear and nothing else changes — an empty map, never a throw.
         var read = await store.ReadAsync([ticker], TestContext.Current.CancellationToken);
 
         read.ShouldBeEmpty();

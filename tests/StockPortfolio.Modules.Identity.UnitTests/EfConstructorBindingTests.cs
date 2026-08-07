@@ -6,7 +6,6 @@ using StockPortfolio.Modules.Identity.Infrastructure.Persistence;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Proves EF Core can materialise the entities even though neither has a parameterless constructor.</summary>
 public sealed class EfConstructorBindingTests
 {
     private static IModel BuildModel()
@@ -19,10 +18,7 @@ public sealed class EfConstructorBindingTests
         return context.Model;
     }
 
-    // User and RefreshToken are the framework's now, and IdentityUser does have a parameterless
-    // constructor — AddIdentityApiEndpoints requires one. UserPreferences is the last entity this
-    // module maps itself, so it is the only one this rule still has anything to say about.
-
+    // UserPreferences is the only entity this module still maps itself; User and RefreshToken are ASP.NET Core Identity's.
     [Fact]
     public void UserPreferences_HasNoParameterlessConstructor()
     {
@@ -63,7 +59,6 @@ public sealed class EfConstructorBindingTests
             .Select(p => p.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        // Every scalar EF persists must arrive through the constructor; anything EF had to set afterwards.
         foreach (var property in entityType.GetProperties())
         {
             bound.ShouldContain(

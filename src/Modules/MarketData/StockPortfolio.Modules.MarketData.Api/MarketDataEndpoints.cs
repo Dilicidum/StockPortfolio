@@ -25,22 +25,16 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.MarketData.Api;
 
-/// <summary>MarketData's entire inbound HTTP surface: health, ticker search, the BYOK settings trio, and a dev-only price nudge.</summary>
 public static partial class MarketDataEndpoints
 {
-    /// <summary>Anonymous, and shipped in every environment: the SPA's health panel reads it.</summary>
     private const string HealthPath = "/api/marketdata/health";
 
-    /// <summary>Ticker suggestions for the add-position form. Under /api/marketdata/, beside the health route.</summary>
     private const string SearchPath = "/api/marketdata/search";
 
-    /// <summary>Development only, and only while a nudgeable provider is registered.</summary>
     private const string NudgePath = "/api/dev/nudge";
 
-    /// <summary>The claim carrying the user id.</summary>
     private const string SubjectClaimType = "sub";
 
-    /// <summary>Registers the module's presentation-layer services: the request validators.</summary>
     public static IServiceCollection AddMarketDataApi(this IServiceCollection services)
     {
         services.AddValidatorsFromAssemblyContaining<NudgeRequestValidator>();
@@ -48,7 +42,6 @@ public static partial class MarketDataEndpoints
         return services;
     }
 
-    /// <summary>Maps the health route, announces the active provider, and maps the nudge if it applies.</summary>
     public static IEndpointRouteBuilder MapMarketDataEndpoints(this IEndpointRouteBuilder app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -57,9 +50,6 @@ public static partial class MarketDataEndpoints
         var provider = services.GetRequiredService<IQuoteProvider>();
         var logger = services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(MarketDataEndpoints));
 
-        // Emitted here because Map runs exactly once, eagerly, after Build() and before RunAsync(). A DI
-        // factory lambda would fire on first RESOLUTION instead, so with no dashboard request the line
-        // announcing a fake-priced deployment would never appear at all.
         var nudge = services.GetService<IQuoteNudge>();
 
         if (nudge is null)
@@ -80,8 +70,6 @@ public static partial class MarketDataEndpoints
             .Produces<MarketDataHealthResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // No ValidationFilter and no 400: an empty, short or nonsense q is an empty list, not an error.
-        // The form behind this is already behind sign-in, so the route is too.
         app.MapGet(SearchPath, SearchTickersAsync)
             .RequireAuthorization()
             .WithTags("MarketData")
@@ -92,10 +80,6 @@ public static partial class MarketDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // Gated on the PROVIDER as well as the environment. In Azure the environment is Production so the
-        // route does not exist at all — 404, not 401 — and with a real key there is no IQuoteNudge to map
-        // even if someone deletes the environment check. RequireAuthorization is deliberately not the gate:
-        // a price-manipulation endpoint any signed-in user can reach in production is still one.
         if (nudge is not null && services.GetRequiredService<IHostEnvironment>().IsDevelopment())
         {
             app.MapPost(NudgePath, (NudgeRequest request, IQuoteNudge target) =>
@@ -114,9 +98,6 @@ public static partial class MarketDataEndpoints
                 .ProducesProblem(StatusCodes.Status500InternalServerError);
         }
 
-        // No shared group existed here before this route: the health and search routes map straight off
-        // app, with no RequireAuthorization, no shared 401 and no shared 500. Two other modules already
-        // map a group at this path; this makes three.
         var settings = app.MapGroup("/api/settings")
             .WithTags("Settings")
             .RequireAuthorization()
@@ -148,14 +129,12 @@ public static partial class MarketDataEndpoints
         return app;
     }
 
-    /// <summary>Suggests symbols. A bare array, matching GET /api/holdings.</summary>
     private static async Task<IResult> SearchTickersAsync(
         string? q,
         IQueryHandler<SearchTickersQuery, IReadOnlyList<SearchTickersResult>> handler,
         CancellationToken ct) =>
         TypedResults.Ok(await handler.Handle(new SearchTickersQuery(q), ct));
 
-    /// <summary>Reads the caller's key status.</summary>
     private static async Task<IResult> GetApiKeyStatusAsync(
         ClaimsPrincipal principal,
         IQueryHandler<GetApiKeyStatusQuery, GetApiKeyStatusResult> handler,
@@ -169,7 +148,6 @@ public static partial class MarketDataEndpoints
         return TypedResults.Ok(await handler.Handle(new GetApiKeyStatusQuery(userId), ct));
     }
 
-    /// <summary>Validates then stores the caller's own key. Never echoes it back, on any path.</summary>
     private static async Task<IResult> SaveApiKeyAsync(
         SaveApiKeyRequest request,
         ClaimsPrincipal principal,
@@ -188,20 +166,14 @@ public static partial class MarketDataEndpoints
         return result.Match(
             saved => Results.Ok(new GetApiKeyStatusResult(true, saved.LastFour, false)),
 
-            // The handler's own failure case, not the filter's — the request was well-shaped, the
-            // provider just said no to this exact key.
             rejected => new InvalidInput("apiKey", "The provider rejected this key.").ToValidationProblem(),
 
-            // Distinct from "rejected": the provider could not be asked at all, so this must never be
-            // read as "your key is bad" — that would be the same class of mistake as the c: 0 trap.
             unanswerable => ProblemDetailsExtensions.ServiceUnavailableProblem(
                 "The provider could not be reached to verify this key. Nothing was changed."),
 
-            // 404, not 403: a switched-off feature should not confirm its own existence either.
             disabled => ProblemDetailsExtensions.NotFoundProblem("This feature is not enabled."));
     }
 
-    /// <summary>Forgets the caller's own key.</summary>
     private static async Task<IResult> RemoveApiKeyAsync(
         ClaimsPrincipal principal,
         ICommandHandler<RemoveApiKeyCommand, OneOf<Success, NotFound>> handler,
@@ -219,10 +191,8 @@ public static partial class MarketDataEndpoints
             missing => ProblemDetailsExtensions.NotFoundProblem("No provider key is configured."));
     }
 
-    /// <summary>Reads the subject claim. Totality over a string?, not a security control.</summary>
     private static bool TryReadUserId(ClaimsPrincipal principal, out Guid userId, out IResult rejection)
     {
-        // OnTokenValidated already rejects a subject-less token; this only gives null a branch.
         if (Guid.TryParse(principal.FindFirstValue(SubjectClaimType), out userId))
         {
             rejection = TypedResults.Empty;
@@ -246,5 +216,4 @@ public static partial class MarketDataEndpoints
     private static partial void LogGeneratedPrices(ILogger logger, string provider);
 }
 
-/// <summary>What GET /api/marketdata/health returns.</summary>
 public sealed record MarketDataHealthResult(string Provider);

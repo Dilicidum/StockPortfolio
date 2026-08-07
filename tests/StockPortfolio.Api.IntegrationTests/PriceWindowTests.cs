@@ -5,7 +5,6 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The price window against a real Redis, which is the only place the sorted set's own rules apply.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class PriceWindowTests(ApiFixture fixture)
 {
@@ -20,9 +19,7 @@ public sealed class PriceWindowTests(ApiFixture fixture)
     [Fact]
     public async Task Window_SamePriceTwice_KeepsBothReadings()
     {
-        // A sorted set keys on the member, so encoding the bare price makes the second write a score
-        // UPDATE of the first entry. The series then silently loses a reading and the count still looks
-        // plausible. Only a real Redis can fail this one; a fake dictionary of members cannot.
+        // A sorted set keys on the member, so a bare price makes the second write a score update: the series loses a reading and the count still looks plausible.
         const string Ticker = "WNDUP";
 
         await Store.AppendAsync(Ticker, 187.42m, Origin, Retention, Ct);
@@ -61,8 +58,7 @@ public sealed class PriceWindowTests(ApiFixture fixture)
         await Store.AppendAsync(Ticker, 100m, Origin, retention, Ct);
         await Store.AppendAsync(Ticker, 101m, Origin.AddMinutes(5), retention, Ct);
 
-        // Eleven minutes on, the first sample is older than retention and the write that follows must
-        // take it out — otherwise the series grows without bound for any ticker anyone ever watched.
+        // Eleven minutes on, the first sample is past retention and the next write must trim it, or the series grows without bound.
         await Store.AppendAsync(Ticker, 102m, Origin.AddMinutes(11), retention, Ct);
 
         var samples = await Store.ReadAsync(Ticker, Origin.AddYears(-1), Ct);

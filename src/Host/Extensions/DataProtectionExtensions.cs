@@ -2,21 +2,18 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
 using Microsoft.Extensions.Options;
 
-using StockPortfolio.Api.Adapters;
+using StockPortfolio.Host.Adapters;
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
-namespace StockPortfolio.Api.Extensions;
+namespace StockPortfolio.Host.Extensions;
 
-/// <summary>Wires the framework's Data Protection key ring onto MarketData's Postgres-backed store.</summary>
 internal static class DataProtectionExtensions
 {
-    /// <summary>Registers the protector, and points the framework's key ring at Postgres instead of the container filesystem.</summary>
     public static IServiceCollection AddStockPortfolioDataProtection(this IServiceCollection services)
     {
         services.AddSingleton<ISecretProtector, DataProtectionSecretProtector>();
 
-        // Concrete, because the options callback below needs this exact type. IXmlRepository is never
-        // registered as a service - the framework reads it off KeyManagementOptions, not from DI.
+        // Concrete type, not IXmlRepository: the framework reads the repository off KeyManagementOptions, never from DI.
         services.AddSingleton<KeyRingXmlRepository>();
 
         services.AddDataProtection()

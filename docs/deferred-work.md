@@ -90,7 +90,7 @@ and `TestClock` is still sitting in the integration project doing the same job w
 
 ### C2 — JWT configuration is read and validated twice
 
-`src/Api/Extensions/AuthenticationExtensions.cs:16-54` and
+`src/Host/Extensions/AuthenticationExtensions.cs:16-54` and
 `Identity.Infrastructure/Security/JwtOptions.cs:14-64` each read the `Jwt` section, each enforce the 32-byte
 minimum, and each declare their own `DefaultIssuer` and `DefaultAudience`. The comment at
 `AuthenticationExtensions.cs:19` acknowledges the risk rather than removing it. Change one default and the
@@ -110,7 +110,7 @@ exactly where they were. Neither default changed.
 
 ### C3 — two Dockerfiles duplicate 22 identical `COPY` lines
 
-`src/Api/Dockerfile` and `src/Migrator/Dockerfile` each copy **23** `.csproj` files, and 22 of the 23 lines
+`src/Host/Dockerfile` and `src/Migrator/Dockerfile` each copy **23** `.csproj` files, and 22 of the 23 lines
 are byte-identical between them including column alignment — only the host project differs. (23 =
 `Shared.Kernel`, `Shared.Api`, the host, and 5 layers × 4 modules.) This has already bitten once: a
 repo-wide rename left both images copying `*.Presentation.csproj`, and `dotnet build` stayed green because
@@ -130,7 +130,7 @@ done.
 `HealthCheckExtensions` parsed the connection string and registered `IConnectionMultiplexer` as a singleton,
 then registered two checks. The multiplexer is the app's Redis client; a readiness probe merely observes it.
 
-**Done.** `src/Api/Extensions/RedisExtensions.cs` now owns the connection-string name, the blank-string
+**Done.** `src/Host/Extensions/RedisExtensions.cs` now owns the connection-string name, the blank-string
 throw, `ConfigurationOptions.Parse`, `AbortOnConnectFail = false` and the singleton registration.
 `AddStockPortfolioHealthChecks` lost its now-unused `IConfiguration` parameter — an unused parameter is a lie
 the compiler will not flag — and `RedisHealthCheck` was unchanged, since it already took the multiplexer from
@@ -165,29 +165,23 @@ Portfolio's, which is precisely the mechanism this item warns about — the copy
 had dropped the history-table call would have put four contexts into one bookkeeping table with no error
 anywhere. Getting it right by copying carefully is not the same as it being enforced.
 
-### C7 — the `postgres` readiness check probes one of three roles
+### C7 — the `postgres` readiness check probed one of the module roles — **DONE**
 
-`src/Api/HealthChecks/PostgresHealthCheck.cs:11` hard-codes the `Identity` connection string but registers
-under the unqualified name `postgres`. Once the other modules have their own roles, readiness reports
-Healthy while some of them cannot reach the database, and ACA keeps routing to that revision.
+A hand-written check hard-coded the `Identity` connection string and registered under the unqualified name
+`postgres`. Readiness could report Healthy while another module's role could not reach the database, and the
+platform kept routing to that revision. Alerts sharpened it: the poller and the evaluator run on a timer
+rather than on a request, so an unreachable `alerts_svc` produced no failing HTTP call for anyone to notice.
 
-**Fix:** each module contributes its own readiness check from its `Add<M>Module`; the host only maps the
-endpoints. `AddDbContextCheck<T>()` does exactly this. Note that
-`Microsoft.Extensions.Diagnostics.HealthChecks.EntityFrameworkCore` has been removed entirely — both the
-`PackageReference` and its `PackageVersion` — so it must be re-added to `Directory.Packages.props` as well
-as to the consuming project.
+**Done.** The hand-written check and its file are gone. Every module contributes its own from its
+`Add<M>Module` using the off-the-shelf `AddDbContextCheck<T>()`, so all four database logins are probed under
+four distinct names, and `HealthCheckTests` pins the names **and their count** — a module that stops
+contributing one is a failing test rather than a quiet gap.
 
-**Trigger:** Phase 2, when the second role exists.
-
-**Status: the trigger happened in Phase 2, the gap is live, and Phase 4 widened it.** `PostgresHealthCheck.cs:11`
-still hard-codes `"Identity"` while registering as the unqualified `postgres`. There are now **three** real
-roles — `identity_svc`, `portfolio_svc` and `alerts_svc` — and readiness probes one of them. Either of the
-other two could be unreachable while the probe reports Healthy and ACA keeps routing to the revision.
-MarketData still contributes no check, correctly, because it has no `DbContext`.
-
-Alerts sharpens it in a second way: the poller and the evaluator run on a timer rather than on a request, so
-an unreachable `alerts_svc` produces no failing HTTP call for anyone to notice. It is the first module whose
-database being down is invisible from the outside.
+**One thing this did not settle, and Phase 6 owns it.** Readiness runs *every* registered check, and Redis is
+registered alongside the four. Every check defaults to reporting unhealthy on failure, so Redis being down
+takes the API out of the load balancer entirely — which is worse than the gap this item closed, and is the
+direct opposite of Phase 6's "Redis stopped, the dashboard still renders prices". Fixing it needs the cache to
+report *degraded* and the check sets to be tagged, so readiness answers only the question it is named after.
 
 ### C8 — the Migrator invents a JWT signing key — **DONE (Phase 4)**
 
@@ -253,6 +247,22 @@ nowhere at all, and it is load-bearing: raise it when a module lands, and never 
 non-empty". That is the same lesson `ReferenceWalker_FindsEdgesThatDoExist` carries — a rule that can pass by
 finding nothing needs a companion assertion that fails when the search finds nothing.
 
+### D9 — Data Protection keys were not persisted — **DONE (Phase 5)**
+
+This sat in the Skipped table because nothing used the key ring: no cookies, no bring-your-own-key, and
+sessions signed from configured key material. Keys were written to the container filesystem and lost on every
+revision, which mattered only the day something needed them.
+
+**That day was Phase 5.** Bring-your-own-key encrypts a user's provider key at rest, so the key ring became
+load-bearing between one revision and the next — an unreadable ring means every stored key is rubbish after a
+deploy. MarketData declares the need as two ports it owns, `ISecretProtector` and `IKeyRingStore`, and the
+host implements them, because `.Infrastructure` may not reference ASP.NET Core and the Data Protection
+packages pull it in transitively. The keys live in `marketdata.data_protection_keys`, and
+`DataProtectionPersistenceTests` is what proves a second host reads what the first one wrote.
+
+The skip reason is therefore false in every clause, which is the failure mode this register exists to
+prevent: an item parked with a good reason, and nobody re-reading the reason when the ground moved.
+
 ### D10 — compose startup ordering gaps
 
 `redis` defines a `redis-cli ping` healthcheck that nothing waits on — `api` uses
@@ -298,10 +308,9 @@ The item said not to close it on the strength of a plan, and it was not. What ma
 boot, which is also the acceptance gate — the same reason the leftovers were never deleted blind in the
 first place.
 
-**Two consequences that were not leftovers and are now live.** The connection budget moves: a pool is opened
-for a registered context, and there are now three, so the ceiling is 3 × 2 × 2 = **12** of the tier's 35. And
-`alerts_svc` becoming a real role widens **C7** — the readiness probe still checks one connection string of
-three.
+**Two consequences that were not leftovers.** The connection budget moved: a pool is opened for a registered
+context, and Alerts made it three. Phase 5 then gave MarketData one too, so it is four — 4 × 2 × 2 = **16** of
+the tier's 35. And `alerts_svc` becoming a real role widened **C7**, which is now closed.
 
 The fallback plan — delete the schema, the role and every reference — is no longer needed and is not recorded
 here; git has it.
@@ -354,7 +363,6 @@ Not deferred — these have no driver, and acting on them would be speculative.
 | A8 | `ApiExceptionHandler` emits a different `type` URI namespace than `ProblemDetailsDefaults` | Two problem-details contracts for the same status, but no client reads `type` — the SPA reads `status` and `errors`. Fix by deleting the `Title` and `Type` assignments and letting the defaults fill them. |
 | B9 | The reflection rules see *usage*, not *declaration* — an unused `ProjectReference` is invisible | Roslyn omits an assembly reference when no type from it is used, so a forbidden `ProjectReference` that is not yet used passes rules 1, 5 and 6. A test that parses the csproj files would close it. Nobody has hit this, and `.Infrastructure` being `internal` limits the damage. |
 | D8 | Naming and formatting debris | `LoggingDecorator.cs` contains no type of that name; `ProblemDetailsExtensions` holds two factories that are not extensions; stray double blank lines. Cosmetic only. |
-| D9 | Data Protection keys are not persisted | Nothing calls `IDataProtector` — no cookies, no BYOK, JWTs are HMAC-signed from configured key material. Keys are written to the container filesystem and lost on every revision, which matters the day anything uses them. The trap is already recorded in `CLAUDE.md`. |
 
 ---
 
@@ -389,11 +397,11 @@ Recorded so the same ground is not covered again.
 - **The liveness / readiness split** — `Predicate = _ => false` on liveness, and a test that boots a host
   with unreachable dependencies and asserts live=200 and ready=503. Not decorative.
 - **`Maximum Pool Size=2`** on every production connection string. Connection strings are defined for five
-  roles, but a pool is only opened for a context that exists, and `Program.cs` registers three — Identity's,
-  Portfolio's and Alerts'. Three pools per replica × size 2 × `maxReplicas: 2` = **12** of the B1ms budget of
-  35. MarketData has no `DbContext` and opens no pool; `migrator` runs as a separate job. Do not restate this
-  figure from memory — count `AddDbContext` calls. It was 8 through Phase 3 and that figure is now wrong
-  wherever it survives.
+  roles, but a pool is only opened for a context that exists, and `Program.cs` registers four — Identity's,
+  Portfolio's, Alerts' and, since Phase 5, MarketData's. Four pools per replica × size 2 × `maxReplicas: 2` =
+  **16** of the B1ms budget of 35; `migrator` runs as a separate job. Do not restate this figure from memory —
+  count `AddDbContext` calls. It has been 8, then 12, and is now 16, so any other number in any other document
+  is out of date rather than describing something else.
 - **`AddProblemDetails()` and `UseStatusCodePages()` are both registered**, so the 415 and 500
   `problem+json` declarations are honest — for JSON `Accept` headers. A client sending `Accept: text/html`
   gets the plain-text fallback.

@@ -10,15 +10,12 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>The P&amp;L arithmetic, asserted where it lives: a pure calculator needs no fake repository.</summary>
 public sealed class DashboardCalculatorTests
 {
     private static readonly DateTimeOffset Now = new(2026, 8, 5, 12, 0, 5, TimeSpan.Zero);
 
-    /// <summary>The ordinary case: nothing has been searched for, so no ticker has a cached name.</summary>
     private static readonly Dictionary<string, string> NoNames = new(StringComparer.Ordinal);
 
-    /// <summary>The canonical case from the spec: 20 @ $125, now $150.</summary>
     [Fact]
     public void Position_ProfitInCurrencyAndPercent()
     {
@@ -79,7 +76,6 @@ public sealed class DashboardCalculatorTests
         unpriced.ProfitPercent.ShouldBeNull();
         unpriced.ObservedAt.ShouldBeNull();
 
-        // Cost is still known for a position nobody could price; only the market side is unknown.
         unpriced.Cost.ShouldBe(Money.Usd(1000m));
     }
 
@@ -96,7 +92,6 @@ public sealed class DashboardCalculatorTests
         result.Totals.ProfitPercent.ShouldBe("20.00");
     }
 
-    /// <summary>Nothing priced is not break-even: the totals row makes the same claim Weight does.</summary>
     [Fact]
     public void Totals_NothingPriced_ProfitPercentIsNullNotZero()
     {
@@ -109,14 +104,12 @@ public sealed class DashboardCalculatorTests
             + "about it is known — the argument DashboardPosition.Weight already makes one level down");
     }
 
-    /// <summary>An empty portfolio has no cost either, so it cannot be up or down by any percentage.</summary>
     [Fact]
     public void Totals_NoPositions_ProfitPercentIsNull()
     {
         DashboardCalculator.Calculate([], Prices(), NoNames, Now).Totals.ProfitPercent.ShouldBeNull();
     }
 
-    /// <summary>The single-currency assumption, stated: mixing them would mislabel every total.</summary>
     [Fact]
     public void Calculate_MixedCurrencies_Throws()
     {
@@ -155,7 +148,6 @@ public sealed class DashboardCalculatorTests
             [Row("AAPL", 20m, 125m), Row("TSLA", 5m, 200m)],
             Prices(("AAPL", 150m)));
 
-        // The one priced position is the whole of what can be weighed, so it is all of it.
         result.Positions.Single(position => position.Ticker == "AAPL").Weight.ShouldBe("100.00");
 
         // Null, not "0.00": zero is a claim about the share, and the share is unknown.
@@ -178,7 +170,6 @@ public sealed class DashboardCalculatorTests
         result.StalestObservedAt.ShouldBe(older);
         result.AsOf.ShouldBe(Now);
 
-        // Null rather than a zero timestamp when nothing at all could be priced.
         Calculate([Row("AAPL", 20m, 125m)], Prices()).StalestObservedAt.ShouldBeNull();
     }
 

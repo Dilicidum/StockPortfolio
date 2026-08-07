@@ -5,7 +5,6 @@ using StockPortfolio.Modules.Alerts.Domain;
 
 namespace StockPortfolio.Modules.Alerts.Application.Streaming;
 
-/// <summary>What crosses the pub/sub channel and, unchanged, the server-sent-events frame.</summary>
 public sealed record AlertNotification(
     Guid Id,
     Guid UserId,
@@ -20,16 +19,12 @@ public sealed record AlertNotification(
     bool IsSimulated,
     string Reason)
 {
-    /// <summary>The same two-decimal form the history route uses, so one row cannot render two ways.</summary>
     public const string PercentFormat = "0.00";
 
-    /// <summary>Describes a saved row. The row is the source, so a pushed alert and a fetched one agree.</summary>
     public static AlertNotification From(FiredAlert alert)
     {
         ArgumentNullException.ThrowIfNull(alert);
 
-        // One currency for both prices: a trigger and the window extreme it was measured against are
-        // the same instrument, so two currency fields could only ever disagree by being wrong.
         return new AlertNotification(
             alert.Id.Value,
             alert.UserId,

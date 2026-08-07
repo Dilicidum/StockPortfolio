@@ -28,8 +28,7 @@ public sealed class SearchTickersQueryHandlerTests
 
         results.ShouldBeEmpty();
 
-        // Every keystroke reaches this handler, so a one-letter query costing a provider call would
-        // spend the whole rate-limit budget on typing.
+        // Every keystroke reaches this handler, so a one-letter query costing a provider call spends the budget on typing.
         provider.Queries.ShouldBeEmpty();
         names.Written.ShouldBeEmpty();
     }
@@ -46,7 +45,6 @@ public sealed class SearchTickersQueryHandlerTests
         provider.Queries.ShouldHaveSingleItem().ShouldBe("appl");
     }
 
-    /// <summary>Every match is cached, not only the suggested ones: it warms the symbol about to be picked.</summary>
     [Fact]
     public async Task Search_CachesEveryMatch_NotJustTheOnesItSuggests()
     {
@@ -99,7 +97,6 @@ public sealed class SearchTickersQueryHandlerTests
         only.Description.ShouldBe("Apple Inc");
     }
 
-    /// <summary>The read side of the same store, and the reason the holdings page never calls a provider.</summary>
     [Fact]
     public async Task NameReader_ReturnsOnlyWhatIsCached_KeyedCanonically()
     {
@@ -113,7 +110,6 @@ public sealed class SearchTickersQueryHandlerTests
             ["aapl", "  AAPL  ", "MSFT", "BRK.B", ""],
             TestContext.Current.CancellationToken);
 
-        // One key, canonical and Ordinal: both sides canonicalise, so a divergence is a visible miss.
         names.Keys.ShouldBe(["AAPL"]);
         names["AAPL"].ShouldBe("Apple Inc");
         names.ContainsKey("aapl").ShouldBeFalse();
@@ -134,7 +130,6 @@ public sealed class SearchTickersQueryHandlerTests
     private static SearchTickersQueryHandler Build(IQuoteProvider provider, ICompanyNameStore names) =>
         new(provider, names);
 
-    /// <summary>AAA..DD, so thirty distinct symbols all fit the 1-to-5-letter shape.</summary>
     private static string Symbol(int index) =>
         new([(char)('A' + (index / 26)), (char)('A' + (index % 26))]);
 

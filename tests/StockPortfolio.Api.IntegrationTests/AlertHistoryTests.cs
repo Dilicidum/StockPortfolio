@@ -4,13 +4,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-// History is a plain GET — there is no replay, so this list is the whole of "what did I miss".
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AlertHistoryTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    // Empty list, not a 404: the panel reads this on every dashboard mount.
     [Fact]
     public async Task History_ForAUserWithNoAlerts_IsAnEmptyList()
     {

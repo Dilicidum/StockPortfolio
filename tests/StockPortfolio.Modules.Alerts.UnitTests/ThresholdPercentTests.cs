@@ -21,7 +21,6 @@ public sealed class ThresholdPercentTests
     public void Create_RejectsZeroNegativeAndOverAHundred(decimal raw) =>
         ThresholdPercent.Create(raw).AsT1.Field.ShouldBe("thresholdPercent");
 
-    /// <summary>numeric(5,2) is the column, so the entity rounds before it judges — never after.</summary>
     [Fact]
     public void Create_RoundsToTheStoredScale_BeforeItValidates()
     {

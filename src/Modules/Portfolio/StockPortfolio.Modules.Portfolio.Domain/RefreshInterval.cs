@@ -3,7 +3,6 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Portfolio.Domain;
 
-// How often the dashboard re-polls prices, in seconds. A plain JSON number both ways - the user typed it.
 public readonly record struct RefreshInterval(int Seconds)
 {
     public const int Minimum = 10;

@@ -3,7 +3,7 @@ using StockPortfolio.Modules.Alerts.Domain;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Alerts' own Ticker. The rules are written out rather than shared: Portfolio's type is off-limits.</summary>
+// Alerts' own Ticker: the rules are restated rather than shared, because Portfolio's type is across a module boundary.
 public sealed class TickerTests
 {
     [Theory]

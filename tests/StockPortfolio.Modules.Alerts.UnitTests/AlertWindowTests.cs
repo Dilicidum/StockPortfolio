@@ -32,7 +32,6 @@ public sealed class AlertWindowTests
     public void Duration_IsTheMinutesAsATimeSpan() =>
         AlertWindow.Create(15, MaxMinutes).AsT0.Duration.ShouldBe(TimeSpan.FromMinutes(15));
 
-    /// <summary>The cap is a parameter, not a constant: Alerts:MaxWindowMinutes is configuration.</summary>
     [Fact]
     public void Create_JudgesAgainstTheCapItIsGiven_NotAFixedOne()
     {

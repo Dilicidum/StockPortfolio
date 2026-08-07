@@ -11,7 +11,6 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure;
 
-/// <summary>Handler registrations, kept out of MarketDataModule so the public seam stays one method.</summary>
 internal static class DependencyInjection
 {
     internal static IServiceCollection AddMarketDataHandlers(this IServiceCollection services)

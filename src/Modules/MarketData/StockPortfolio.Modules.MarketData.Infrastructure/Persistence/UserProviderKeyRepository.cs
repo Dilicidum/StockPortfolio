@@ -7,8 +7,6 @@ namespace StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 
 internal sealed class UserProviderKeyRepository(MarketDataDbContext context, TimeProvider clock) : IUserProviderKeyRepository
 {
-    // No AsNoTracking: ChangeTracker.Entries<T>() only sees tracked entities, so an untracked read means
-    // Replace changes an object nobody saves, with no error at all.
     public Task<UserProviderKey?> FindAsync(Guid userId, CancellationToken ct) =>
         context.UserProviderKeys.FirstOrDefaultAsync(key => key.UserId == userId, ct);
 

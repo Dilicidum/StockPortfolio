@@ -39,8 +39,7 @@ public sealed class RedisLastKnownPriceStoreTests
     [Fact]
     public async Task Store_RedisUnreachable_SwallowsTheFailureOnBothPaths()
     {
-        // A real multiplexer pointed at a dead port, exactly as AbortOnConnectFail=false leaves it in
-        // production: every command throws RedisConnectionException at the call site.
+        // A real multiplexer on a dead port: with AbortOnConnectFail=false every command throws at the call site, as in production.
         var options = ConfigurationOptions.Parse("127.0.0.1:1");
         options.AbortOnConnectFail = false;
         options.ConnectTimeout = 50;

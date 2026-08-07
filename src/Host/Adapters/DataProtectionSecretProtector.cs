@@ -5,9 +5,8 @@ using Microsoft.Extensions.Logging;
 
 using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
-namespace StockPortfolio.Api.Adapters;
+namespace StockPortfolio.Host.Adapters;
 
-/// <summary>Protects a secret through the framework's key ring, so MarketData never sees ASP.NET Core.</summary>
 internal sealed partial class DataProtectionSecretProtector(
     IDataProtectionProvider provider,
     ILogger<DataProtectionSecretProtector> logger) : ISecretProtector
@@ -15,10 +14,8 @@ internal sealed partial class DataProtectionSecretProtector(
     // Part of the ciphertext itself. Changing this string later makes every stored key unreadable.
     private readonly IDataProtector protector = provider.CreateProtector("StockPortfolio.MarketData.UserProviderKey");
 
-    /// <inheritdoc/>
     public string Protect(string plaintext) => protector.Protect(plaintext);
 
-    /// <inheritdoc/>
     public string? Unprotect(string ciphertext)
     {
         try
@@ -27,9 +24,7 @@ internal sealed partial class DataProtectionSecretProtector(
         }
         catch (CryptographicException ex)
         {
-            // A rotated-away key ring, or a tampered row. Neither is recoverable and neither is an outage -
-            // but it must not be silent, or a dead key reads identically to "nothing configured" forever.
-            // Never the ciphertext or any key material: only the fact that decryption failed.
+            // Never silent - a dead key otherwise reads as "nothing configured" forever - and never logs the ciphertext or any key material.
             LogUnprotectFailed(logger, ex);
             return null;
         }

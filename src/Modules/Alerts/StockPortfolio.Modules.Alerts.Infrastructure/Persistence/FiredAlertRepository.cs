@@ -14,9 +14,6 @@ internal sealed class FiredAlertRepository(AlertsDbContext context) : IFiredAler
         await context.SaveChangesAsync(ct);
     }
 
-    // AsNoTracking here and nowhere else in this module: history is read and rendered, never changed.
-    // The two Money members are projected rather than their complex properties, so Money's constructor
-    // - and its ToUpperInvariant - stays off the per-row load path. Rebuilt below instead.
     public async Task<IReadOnlyList<FiredAlertRow>> ListRecentAsync(
         Guid userId,
         int limit,
@@ -56,7 +53,6 @@ internal sealed class FiredAlertRepository(AlertsDbContext context) : IFiredAler
         ];
     }
 
-    /// <summary>What the query materialises: converter-backed values and scalars, no complex type.</summary>
     private sealed record Projected(
         FiredAlertId Id,
         Ticker Ticker,

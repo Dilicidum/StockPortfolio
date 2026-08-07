@@ -7,11 +7,9 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.RemoveHolding;
 
-/// <summary>Closes a position. Deleting the row is the whole operation — there is no domain event.</summary>
 public sealed class RemoveHoldingCommandHandler(IHoldingRepository holdings)
     : ICommandHandler<RemoveHoldingCommand, OneOf<Success, NotFound>>
 {
-    /// <inheritdoc/>
     public async Task<OneOf<Success, NotFound>> Handle(RemoveHoldingCommand command, CancellationToken ct)
     {
         var holding = await holdings.FindByIdAsync(command.UserId, new HoldingId(command.HoldingId), ct);

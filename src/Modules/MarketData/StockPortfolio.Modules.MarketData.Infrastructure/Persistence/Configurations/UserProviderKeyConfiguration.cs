@@ -5,7 +5,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Persistence.Configurations;
 
-/// <summary>Maps UserProviderKey to marketdata.user_provider_keys.</summary>
 internal sealed class UserProviderKeyConfiguration : IEntityTypeConfiguration<UserProviderKey>
 {
     internal const string TableName = "user_provider_keys";
@@ -16,7 +15,6 @@ internal sealed class UserProviderKeyConfiguration : IEntityTypeConfiguration<Us
     {
         builder.ToTable(TableName);
 
-        // One key per user, so the user id is the key itself rather than a separate surrogate id.
         builder.HasKey(key => key.UserId);
 
         builder.Property(key => key.UserId)

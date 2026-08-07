@@ -3,7 +3,6 @@ using StockPortfolio.Shared.Kernel;
 
 namespace StockPortfolio.Modules.Alerts.Application.History.Queries.GetFiredAlerts;
 
-/// <summary>One row of history on the wire. Percentages are strings; the server computed them.</summary>
 public sealed record GetFiredAlertsResult(
     Guid Id,
     string Ticker,

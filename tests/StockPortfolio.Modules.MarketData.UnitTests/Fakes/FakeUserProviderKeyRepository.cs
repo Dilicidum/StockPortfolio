@@ -3,7 +3,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Tests.Fakes;
 
-/// <summary>An in-memory user_provider_keys table, on the pattern of Alerts.UnitTests/Fakes.</summary>
 internal sealed class FakeUserProviderKeyRepository : IUserProviderKeyRepository
 {
     public List<UserProviderKey> Saved { get; } = [];

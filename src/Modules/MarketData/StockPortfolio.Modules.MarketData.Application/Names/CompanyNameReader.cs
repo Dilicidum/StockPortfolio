@@ -4,7 +4,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Application.Names;
 
-/// <summary>Cache only, by design: the holdings page has no provider dependency and must not gain one.</summary>
 public sealed class CompanyNameReader(ICompanyNameStore store) : ICompanyNameReader
 {
     public async Task<IReadOnlyDictionary<string, string>> GetNamesAsync(

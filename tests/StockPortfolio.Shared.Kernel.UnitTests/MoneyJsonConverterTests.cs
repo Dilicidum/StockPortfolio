@@ -11,7 +11,6 @@ public sealed class MoneyJsonConverterTests
     private static readonly JsonSerializerOptions Options =
         new(JsonSerializerDefaults.Web) { Converters = { new MoneyJsonConverter() } };
 
-    // Static, not built in the test body: CA1869 is an error here and bans a per-call instance.
     private static readonly JsonSerializerOptions StrictOptions = new(JsonSerializerDefaults.Web)
     {
         NumberHandling = JsonNumberHandling.Strict,
@@ -23,8 +22,7 @@ public sealed class MoneyJsonConverterTests
         JsonSerializer.Serialize(Money.Usd(125.5m), Options)
             .ShouldBe("""{"amount":"125.5","currency":"USD"}""");
 
-    // Parsed rather than an InlineData literal: decimal is not a legal attribute constant, and the double
-    // xUnit would convert loses the trailing zeroes that are the whole subject of this test.
+    // Parsed, not an InlineData decimal literal: the double xUnit would convert drops the trailing zeroes this test is about.
     [Theory]
     [InlineData("125.000000")]
     [InlineData("1.500000")]
@@ -41,7 +39,6 @@ public sealed class MoneyJsonConverterTests
             .ShouldBe(original);
     }
 
-    // The reason the converter exists: Strict rejects a quoted number for a bare decimal.
     [Fact]
     public void Read_AcceptsTheStringForm_UnderStrictNumberHandling() =>
         JsonSerializer.Deserialize<Money>("""{"amount":"7.25","currency":"usd"}""", StrictOptions)
@@ -51,8 +48,7 @@ public sealed class MoneyJsonConverterTests
     public void Read_MissingCurrency_Throws() =>
         Should.Throw<JsonException>(() => JsonSerializer.Deserialize<Money>("""{"amount":"1"}""", Options));
 
-    // Without the skip, reading into the nested object consumes the outer EndObject: the converter
-    // binds "XXX" from inside `meta` and returns a reader the serializer rejects as under-read.
+    // Without a whole-subtree skip the converter binds "XXX" from inside `meta` and eats the outer EndObject.
     [Fact]
     public void Read_UnknownNestedProperty_IsSkippedWhole()
     {

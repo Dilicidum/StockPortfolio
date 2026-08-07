@@ -1,16 +1,6 @@
 import { http, HttpResponse } from 'msw'
 import type { AlertNotification, AlertSetting, FiredAlert } from '../../src/alerts/alertsApi'
 
-/**
- * `_authenticated` opens the alert connection and the dashboard mounts the panel, so EVERY test
- * that merely mounts a protected route makes two alert requests — history and settings — before
- * it asserts anything. `tests/setup.ts` runs MSW with `onUnhandledRequest: 'error'`, so these
- * are not optional extras for the alerts tests; they are what keeps the dashboard and portfolio
- * suites from failing on a request neither of them cares about. The connection itself makes no
- * HTTP request these handlers would see: SignalR is faked in `tests/fakeHubConnection.ts`.
- */
-
-/** A signed-in account with no thresholds and nothing fired — the quiet default. */
 export const alertHistoryHandler = (alerts: FiredAlert[] = []) =>
   http.get('*/api/alerts', () => HttpResponse.json(alerts))
 
@@ -21,7 +11,6 @@ export const alertsHandlers = [alertHistoryHandler(), alertSettingsHandler()]
 
 let sequence = 0
 
-/** A fired alert with sane defaults. Overrides are spread last so any field can be pinned. */
 export function firedAlert(overrides: Partial<FiredAlert> = {}): FiredAlert {
   sequence += 1
 
@@ -40,11 +29,6 @@ export function firedAlert(overrides: Partial<FiredAlert> = {}): FiredAlert {
   }
 }
 
-/**
- * The pushed shape, which is NOT the history shape: prices are bare strings beside one
- * shared `currency`. Building it from a `FiredAlert` here is what makes the stream tests
- * assert against the same row the panel would have rendered from the wire.
- */
 export function notificationOf(alert: FiredAlert): AlertNotification {
   return {
     id: alert.id,

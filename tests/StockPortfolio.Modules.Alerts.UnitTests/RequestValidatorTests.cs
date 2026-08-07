@@ -5,7 +5,6 @@ using StockPortfolio.Modules.Alerts.Api.Validators;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Shape validation, the layer that answers 400 before a handler ever runs.</summary>
 public sealed class RequestValidatorTests
 {
     private static readonly SaveAlertSettingRequestValidator Save = new();
@@ -17,8 +16,7 @@ public sealed class RequestValidatorTests
     public void Save_AcceptsAWellFormedThreshold(string ticker, decimal percent, int window) =>
         Save.Validate(new SaveAlertSettingRequest(ticker, percent, window, true)).IsValid.ShouldBeTrue();
 
-    // 1440 above is a day, and it is accepted here on purpose: the cap is configuration, so refusing it
-    // is the handler's 409 and not a shape rule. Pinning that keeps the two layers from both owning it.
+    // A day-long window is accepted here on purpose: the cap is configuration, so refusing it is the handler's 409.
     [Theory]
     [InlineData("TOOLONG", 5, 30, "Ticker")]
     [InlineData("", 5, 30, "Ticker")]

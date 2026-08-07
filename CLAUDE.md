@@ -45,14 +45,14 @@ Three levels, each with one job.
 
 A plan holds ideas, decisions, reasoning, behaviour and architecture. It never holds class names, method names, file paths, line numbers, task numbers or test names. Domain words and public API routes are fine.
 
-Phases 1, 2 and 3 have shipped, so they have no implementation plan any more. **Phase 4 has not.** It is
-built and verified locally, and a phase is done when it runs in a browser *and is deployed* — so its
-implementation plan is still in `docs/plan/`, carrying the deployment and browser-verification tasks that
-close it. Delete it on the day those pass, not before.
+Phases 1 to 5 have shipped, so none of them has an implementation plan any more. **Phase 6 is in flight**, so
+`phase-6-implementation.md` exists and carries its build order, its file names and its deployment and
+browser-verification tasks. Delete it on the day those pass, not before — a phase is done when it runs in a
+browser *and is deployed*, not when its tests pass.
 
 A plan is short enough to read from start to finish in one sitting. When something changes, change it everywhere and leave only the new version. Do not write down what it used to say — git keeps that.
 
-**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. **It is at seven today**: Phase 4 shipped and its implementation plan went with it. A phase ships when it runs in a browser and is deployed, not when its tests pass, so the plan outlives the last commit of code by however long verification takes.
+**`docs/plan/` holds plans and nothing else** — the overview and one file per phase, so seven at rest, plus one implementation plan while a phase is in flight. **It is at eight today**, the eighth being Phase 6's. The plan outlives the last commit of code by however long verification takes.
 
 ## Reference documents
 
@@ -91,18 +91,18 @@ npm --prefix src/Web test
 
 # migrations: --project is the module's Infrastructure, --startup-project is always the host
 dotnet ef migrations add <Name> --context <Module>DbContext --output-dir Persistence/Migrations \
-  --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Api
+  --project src/Modules/<M>/StockPortfolio.Modules.<M>.Infrastructure --startup-project src/Host
 
 az deployment group what-if -g <rg> -f infra/main.bicep    # before any deploy
 ```
 
-`/openapi/v1.json` is served in Development only — which `docker-compose.override.yml` makes the default, so it *is* reachable at `:8080` on a plain `docker compose up`, as well as from `dotnet run --project src/Api`.
+`/openapi/v1.json` is served in Development only — which `docker-compose.override.yml` makes the default, so it *is* reachable at `:8080` on a plain `docker compose up`, as well as from `dotnet run --project src/Host`.
 
 With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a warning. That is deliberate — Finnhub killed its sandbox in 2022, so the demo must work without a key.
 
 ## Architecture
 
-Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. **All four exist.** Plus `Shared.Kernel`, `Shared.Api`, the `Api` host and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
+Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. **All four exist.** Plus `Shared.Kernel`, `Shared.Api`, the `Host` project and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
 **Boundaries are argued from the cost of pulling a module out, not from subdomain labels.** The test for every boundary: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the number of calls bounded, can one side fail while the other keeps working, is there exactly one writer per table. Full reasoning in [docs/reference/module-boundaries.md](docs/reference/module-boundaries.md).
 
@@ -130,7 +130,7 @@ Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with *
 
 Two reference rules are enforced by the compiler and checked again by `Architecture.Tests`: **`.Infrastructure` never references ASP.NET Core; `.Api` never references EF Core or its own `.Infrastructure`.** They meet only through `.Application/Abstractions`.
 
-- Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **`Api` host** (that makes the host the place every feature has to touch). `StockPortfolio.Api` is the host; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, no collision.
+- Inbound HTTP is presentation, not infrastructure. Do not move endpoints back into `.Infrastructure` (tried, wrong) or up into the **host** (that makes the host the place every feature has to touch). `StockPortfolio.Host` in `src/Host` is the composition root and defines no business routes of its own; `StockPortfolio.Modules.<M>.Api` is a module's HTTP layer — different assemblies, and now different words.
 - `Shared.Kernel` must stay free of frameworks — `Money`, `InvalidInput` and the CQRS interfaces, nothing else. There is no `AggregateRoot` and no domain-event machinery: `IDomainEvent`, `IDomainEventHandler` and `IDomainEventPublisher` do not exist. Nothing raises an event, so nothing needs them. Anything taking an `IEndpointRouteBuilder` goes in `Shared.Api`.
 - A module references only other modules' `.Contracts`. The compiler cannot check this now that Domain is public, so `Architecture.Tests` is the only thing enforcing it — do not weaken or skip those tests.
 - `.Contracts` holds records of primitives only. No EF reference, no aggregates, no strongly-typed IDs — use raw `Guid`. A strongly-typed id stays in the `.Domain` of the module that owns it: `UserId` lives beside `User` in `Identity.Domain`, and a module referencing a user it does not own stores a plain `Guid`. `Shared.Kernel` is for types that belong to **no** module — `Money`, `InvalidInput`, the CQRS interfaces — so moving `UserId` there would turn the kernel into a shared domain, which is exactly what modules exist to prevent.
@@ -208,7 +208,9 @@ The trade is worth knowing: the typed union made the compiler reject a result th
 
 **Comments: one line, and only where the code cannot say it.** No `<remarks>`, no `<param>`/`<returns>`/`<exception>` blocks, no banner rules. A doc comment is a single `/// <summary>…</summary>`. If a comment must span lines to make sense, the reasoning belongs in `docs/plan/` or a commit message, not in the file.
 
-**`src/Web` carries no comments at all.** Every one was deleted deliberately: 359 blocks, a fifth of the frontend by line. 303 of them narrated the code, argued with a version that no longer existed, or restated an API contract the generated OpenAPI document already owns. The 12 facts that were genuinely load-bearing became Traps entries below, which is why several of those entries are about the browser. **Do not reintroduce a comment there.** A fact worth writing down goes in Traps, where one place holds it and it cannot rot beside code that has moved on. This rule is the frontend only — C# keeps the one-line rule above.
+**`src/Web` carries no comments at all** — application code, tests, `vite.config.ts`, `nginx.conf`, the `Dockerfile` and `.env.example` alike. Every one was deleted deliberately: about 1,800 lines, a fifth of the folder. Of the 359 blocks under `src/`, 303 narrated the code, argued with a version that no longer existed, or restated an API contract the generated OpenAPI document already owns; 43 more repeated something this file already said. The 12 facts that were genuinely load-bearing became Traps entries below, which is why several of those entries are about the browser. **Do not reintroduce a comment there.** A fact worth writing down goes in Traps, where one place holds it and it cannot rot beside code that has moved on. This rule is the frontend only — C# keeps the one-line rule above.
+
+**Three lines in `src/Web` look like comments and are not**: the `/// <reference types="…" />` at the top of `vite.config.ts` and `src/vite-env.d.ts`, and the `#!` on `scripts/check-locale-parity.mjs`. They are instructions to TypeScript and to the shell. Deleting the first one breaks `npm run typecheck` with an error about `test` not existing on `UserConfigExport`, two steps from the cause.
 
 **Money is `decimal` server-side and serialised as strings.** Never compute money in the browser. Weights and percentages are computed server-side too.
 
@@ -218,23 +220,25 @@ The rule is narrower than "every percentage is a string", and the alert threshol
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** **723 passing and 2 skipped of 725 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** **723 passing, nothing skipped, of 723 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
-| Assembly | Passed | Skipped |
-|---|---|---|
-| `Shared.Kernel.UnitTests` | 21 | 0 |
-| `Modules.Identity.UnitTests` | 15 | 0 |
-| `Modules.Portfolio.UnitTests` | 115 | 0 |
-| `Modules.MarketData.UnitTests` | 182 | 0 |
-| `Modules.Alerts.UnitTests` | 108 | 0 |
-| `Architecture.Tests` | 60 | **2** |
-| `Api.IntegrationTests` | 222 | 0 |
+| Assembly | Passed |
+|---|---|
+| `Shared.Kernel.UnitTests` | 21 |
+| `Modules.Identity.UnitTests` | 15 |
+| `Modules.Portfolio.UnitTests` | 115 |
+| `Modules.MarketData.UnitTests` | 182 |
+| `Modules.Alerts.UnitTests` | 108 |
+| `Architecture.Tests` | 60 |
+| `Api.IntegrationTests` | 222 |
 
-The browser tests are counted separately by `npm --prefix src/Web test` — **65 passing across 13 files**. These are the only test counts in the repository; do not copy them into another document.
+The browser tests are counted separately by `npm --prefix src/Web test` — **64 passing across 13 files**. These are the only test counts in the repository; do not copy them into another document.
 
-**Both skips are architecture rules waiting on an empty assembly.** A rule that skips checks nothing. Both are `Identity.Contracts` — rule 1 (`Assembly_ReferencingAnotherModule_ReachesOnlyItsContracts`) and rule 2 (`ContractsAssembly_ReferencesNoPersistence`) — and both are correct: nothing reaches into Identity, so its `.Contracts` is deliberately empty. `EmptyShells_AreExactlyThePhasesNotYetBuilt` fixes the exact list of empty assemblies, so one appearing or disappearing is a deliberate edit rather than a silent change in what is enforced. The number of empty assemblies and the number of skips are different quantities and any match between them is a coincidence — read both from the test source, never from here. Quoting a passing count without the skip count hides all of this.
+**Nothing skips, and `Identity.Contracts` is why that took work.** It is empty on purpose — nothing depends on Identity at runtime, so its `.Contracts` has nothing to hold. An empty assembly has its project references trimmed out of the metadata by the compiler, so a rule walking them finds an empty list and reports green. That used to be handled by skipping the two rules over it. It is now handled by **not generating a case at all**: `ScannedAssemblies` and `AssembliesFor` filter on `SolutionAssemblies.HasCode`, computed at run time. Add a type to `Identity.Contracts` and both rules switch themselves back on with no edit — verified by doing it, which took the architecture suite from 60 tests to 62.
 
-**A rule that skips is not a rule, and Phase 4 proved it the expensive way.** Creating Alerts' five projects empty took the skip count from 2 to 9, and it fell back to 2 one layer at a time as each was filled. In between, rule 1 reported green over `Alerts.Application` and proved nothing: with no type in that assembly the compiler trims its project references straight out of assembly metadata, so there was nothing to walk. Do not read a green rule over a layer you have not populated as evidence of anything.
+`EmptyShells_AreExactlyThePhasesNotYetBuilt` hard-codes the list of assemblies no rule runs over, so that filter can never become a quiet hole: the same experiment turned it red. **Read the list from that test, never from here.** `MemberData_NamesTheLayerEachRuleClaims` derives its expected count the same way, so a rule pointed at the wrong layer is still caught.
+
+**A rule that reports green over an empty assembly is not a rule, and Phase 4 proved it the expensive way.** Creating Alerts' five projects empty put seven more assemblies in that state, and it fell back one layer at a time as each was filled. In between, rule 1 was green over `Alerts.Application` and proved nothing. Do not read a green rule over a layer you have not populated as evidence of anything.
 
 **A test that cannot fail is worse than no test**, because it reads as enforcement. Every architecture rule was checked by deliberately breaking it and watching it go red — that is how `PresentationAssemblies => AssembliesFor("Infrastructure")` was found, a copy-paste that pointed one rule at the wrong layer while still reporting green. `ReferenceWalker_FindsEdgesThatDoExist` protects against the same class of mistake permanently: a rule that passes by finding nothing needs a companion test that fails if the search finds nothing.
 

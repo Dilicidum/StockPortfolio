@@ -12,7 +12,6 @@ using StockPortfolio.Tests.Fakes;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Simulate goes down the real path, so what arrives proves the mechanism, not the button.</summary>
 public sealed class SimulateAlertCommandHandlerTests
 {
     private const decimal Threshold = 5m;
@@ -29,7 +28,6 @@ public sealed class SimulateAlertCommandHandlerTests
     private readonly FakeAlertPublisher _publisher;
     private readonly SimulateAlertCommandHandler _handler;
 
-    /// <summary>Wires the handler over in-memory fakes.</summary>
     public SimulateAlertCommandHandlerTests()
     {
         _firedAlerts = new FakeFiredAlertRepository(_journal);
@@ -42,7 +40,6 @@ public sealed class SimulateAlertCommandHandlerTests
             _clock);
     }
 
-    /// <summary>With no threshold anywhere there is nothing to simulate, and that is a 409, not a fake row.</summary>
     [Fact]
     public async Task WithNoEnabledThreshold_ThereIsNothingToSimulate()
     {
@@ -54,7 +51,6 @@ public sealed class SimulateAlertCommandHandlerTests
         _firedAlerts.Rows.ShouldBeEmpty();
     }
 
-    /// <summary>A threshold that is switched off is not a threshold to simulate.</summary>
     [Fact]
     public async Task ADisabledThreshold_IsNotChosen()
     {
@@ -67,7 +63,6 @@ public sealed class SimulateAlertCommandHandlerTests
         result.IsT1.ShouldBeTrue();
     }
 
-    /// <summary>Naming a ticker you have no threshold on says so, rather than quietly firing another.</summary>
     [Fact]
     public async Task ATickerWithNoThreshold_IsRefused_RatherThanSubstituted()
     {
@@ -84,7 +79,6 @@ public sealed class SimulateAlertCommandHandlerTests
                 + "button look like it worked and report the wrong instrument.");
     }
 
-    /// <summary>The row is badged, carries the threshold as its move, and is saved before it is pushed.</summary>
     [Fact]
     public async Task ASimulatedAlert_IsBadged_SavedThenPublished()
     {
@@ -110,7 +104,6 @@ public sealed class SimulateAlertCommandHandlerTests
         _publisher.Sent.ShouldHaveSingleItem().IsSimulated.ShouldBeTrue();
     }
 
-    /// <summary>A ticker with no samples yet still simulates: the button must work in the first minute.</summary>
     [Fact]
     public async Task ATickerWithNoSeriesYet_StillSimulates()
     {
@@ -124,7 +117,6 @@ public sealed class SimulateAlertCommandHandlerTests
         _firedAlerts.Rows.ShouldHaveSingleItem().TriggerPrice.Amount.ShouldBe(100m);
     }
 
-    /// <summary>Pressed twice, two alerts: no cooldown claim, because the user asked for exactly two.</summary>
     [Fact]
     public async Task PressedTwiceInAMoment_ProducesTwoAlerts()
     {
@@ -143,7 +135,6 @@ public sealed class SimulateAlertCommandHandlerTests
                 + "evaluation opened - it would read as a broken button.");
     }
 
-    /// <summary>Lower case in is still the caller's own position.</summary>
     [Fact]
     public async Task ANamedTicker_IsMatchedCanonically()
     {

@@ -5,16 +5,14 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>A threshold belongs to a position: you must hold it, and there is one per ticker.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AlertSettingsTests(ApiFixture fixture)
 {
-    /// <summary>Matches Alerts:MaxWindowMinutes in appsettings.json.</summary>
+    // Matches Alerts:MaxWindowMinutes in appsettings.json.
     private const int MaxWindowMinutes = 60;
 
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>An empty list, not a 404: the portfolio page reads this on every mount.</summary>
     [Fact]
     public async Task Settings_ForAUserWithNone_AreAnEmptyList()
     {
@@ -24,7 +22,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
         (await Wire.ListAlertSettingsAsync(client, token)).ShouldBeEmpty();
     }
 
-    /// <summary>A threshold on something you do not own is refused by state, so 409 rather than 400.</summary>
     [Fact]
     public async Task Saving_AThresholdOnATickerYouDoNotHold_IsRejected()
     {
@@ -42,7 +39,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
             "a refused save must not leave a row behind.");
     }
 
-    /// <summary>The cap is configuration, so the message has to carry both numbers to be actionable.</summary>
     [Fact]
     public async Task Saving_AWindowOverTheCap_IsRejected_NamingBothNumbers()
     {
@@ -66,7 +62,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
         body.ShouldContain(MaxWindowMinutes.ToString(CultureInfo.InvariantCulture));
     }
 
-    /// <summary>The cap's edge is accepted, so the rule above is a boundary and not an off-by-one.</summary>
     [Fact]
     public async Task Saving_AWindowExactlyAtTheCap_IsAccepted()
     {
@@ -80,7 +75,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(response));
     }
 
-    /// <summary>Lower case in, canonical out — and the round trip through GET returns the same row.</summary>
     [Fact]
     public async Task AValidThreshold_RoundTripsThroughGet_Canonicalised()
     {
@@ -106,7 +100,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
         listed.Enabled.ShouldBeTrue();
     }
 
-    /// <summary>Saving twice updates the row rather than adding a second — the unique index proves it.</summary>
     [Fact]
     public async Task SavingTwice_ReplacesTheThreshold_RatherThanDuplicatingIt()
     {
@@ -135,7 +128,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
                 + "wrong sentinel would silently write it back on.");
     }
 
-    /// <summary>One user's thresholds are their own, which is the only thing keeping them private.</summary>
     [Fact]
     public async Task Settings_AreScopedToTheCaller()
     {
@@ -154,7 +146,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
         (await Wire.ListAlertSettingsAsync(client, stranger)).ShouldBeEmpty();
     }
 
-    /// <summary>Shape is the filter's job and reaches no handler, so it is a 400 naming the field.</summary>
     [Theory]
     [InlineData("BRK.B", 5, 30, "ticker")]
     [InlineData("AAPL", 0, 30, "thresholdPercent")]
@@ -179,7 +170,6 @@ public sealed class AlertSettingsTests(ApiFixture fixture)
     private static async Task<string> SignedInAsync(HttpClient client, string prefix) =>
         (await Wire.RegisterSucceedsAsync(client, Wire.UniqueEmail(prefix))).AccessToken;
 
-    /// <summary>Opens a position on a fresh symbol and returns it, so a threshold has something to sit on.</summary>
     private static async Task<string> OpenPositionAsync(HttpClient client, string accessToken)
     {
         var ticker = Wire.UniqueTicker();

@@ -109,7 +109,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: src/Api/Dockerfile
+      dockerfile: src/Host/Dockerfile
     image: stockportfolio-api:local
     depends_on:
       migrations:

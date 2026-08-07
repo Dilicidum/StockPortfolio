@@ -81,12 +81,17 @@ algorithm change, not a move of code.
 |---|---|---|---|
 | **Identity** | its own schema — users, sign-in sessions | — | — |
 | **Portfolio** | its own schema — positions | — | — |
-| **MarketData** | **nothing** | the last price seen for each ticker, each ticker's company name, a trimmed recent series for each watched ticker, and the two poll locks | the price provider, over HTTP |
+| **MarketData** | its own schema — each user's own provider key, and the key ring that encrypts them | the last price seen for each ticker, each ticker's company name, a trimmed recent series for each watched ticker, and the two poll locks | the price provider, over HTTP |
 | **Alerts** | its own schema — thresholds and fired alerts | cooldowns, and the channel that carries a pushed alert to whichever copy holds the browser's connection | — |
 
-**MarketData has no database at all**, and that is deliberate: everything it keeps is one value per
-ticker, which expires and can be re-fetched. Giving it a database would buy an empty migration and a row
-of bookkeeping for no behaviour.
+**MarketData was the one module with no database, and Phase 5 ended that.** Everything it kept was one value
+per ticker, which expires and can be re-fetched, so a database would have bought an empty migration and a row
+of bookkeeping for no behaviour. A key a user brings is the opposite kind of thing — it must survive a restart
+and it must be unreadable to anyone with the raw rows — so it needs a table and the encryption keys need one
+beside it.
+
+That is why all four database logins are now real. `marketdata_svc` was created in Phase 1 and connected as
+nothing for four phases.
 
 **Each module connects as its own database user**, with no permission to read another module's schema.
 That is not a convention — a query across the line is refused by the database itself.

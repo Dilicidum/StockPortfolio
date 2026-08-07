@@ -5,8 +5,6 @@ using StockPortfolio.Modules.Identity.Domain;
 
 namespace StockPortfolio.Modules.Identity.Infrastructure.Persistence.Configurations;
 
-// Maps UserPreferences to identity.user_preferences. The only table this module still owns:
-// everything else in the schema is the framework's.
 internal sealed class UserPreferencesConfiguration : IEntityTypeConfiguration<UserPreferences>
 {
     public void Configure(EntityTypeBuilder<UserPreferences> builder)

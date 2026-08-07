@@ -23,9 +23,7 @@ public sealed class QuotePollerTests
     [Fact]
     public async Task Cycle_WithNoPollTargets_NeverReachesTheProviderAndStoresNothing()
     {
-        // The phase's stated exit condition: with nobody holding an alert, the poller costs one Redis SET,
-        // one list read and nothing else. A provider call here is a rate-limit budget spent on no user, and
-        // a window write here is a series nobody asked to keep.
+        // With nobody holding an alert, a provider call here is rate-limit budget spent on no user.
         using var harness = new Harness(new StubSource());
 
         await harness.Poller.RunCycleAsync(Ct);
@@ -35,8 +33,7 @@ public sealed class QuotePollerTests
         harness.LastKnown.Written.ShouldBeEmpty();
         harness.Observer.Notified.ShouldBeEmpty();
 
-        // Still released: an early return that keeps the in-flight flag stops the next cycle for five
-        // intervals, and the symptom is "polling stopped" with nothing in the log.
+        // Still released: an early return holding the in-flight flag stops polling for several intervals, silently.
         harness.Lease.Releases.ShouldBe(1);
     }
 
@@ -52,8 +49,7 @@ public sealed class QuotePollerTests
         source.Calls.ShouldBe(0);
         harness.Provider.Calls.ShouldBe(0);
 
-        // Nothing was taken, so nothing may be given back: deleting the in-flight key this replica does not
-        // hold is exactly the overlap the second lock exists to prevent.
+        // Releasing after a refused claim deletes the winner's in-flight key — the overlap the second lock prevents.
         harness.Lease.Releases.ShouldBe(0);
     }
 
@@ -67,8 +63,7 @@ public sealed class QuotePollerTests
 
         await harness.Poller.RunCycleAsync(Ct);
 
-        // Both, from one place. The window is what alerts read and the last-known key is the dashboard's
-        // fallback; a sample in one and not the other is two features disagreeing about the same fetch.
+        // A sample in the window but not in the last-known key is alerts and the dashboard disagreeing about one fetch.
         harness.Window.Appended.Select(sample => sample.Ticker).ShouldBe(["AAPL", "MSFT"], ignoreOrder: true);
         harness.Window.Appended.ShouldAllBe(sample => sample.Retention == TimeSpan.FromMinutes(75));
         harness.LastKnown.Written.Select(quote => quote.Ticker.Value).ShouldBe(["AAPL", "MSFT"], ignoreOrder: true);
@@ -79,8 +74,7 @@ public sealed class QuotePollerTests
     [Fact]
     public async Task Cycle_Always_LeavesTheProviderOnTheApplicationKey()
     {
-        // The shared window is shared. A user's own key must never spend a user's quota filling it, and
-        // the poller has no user to have resolved one from in the first place.
+        // The window is shared, so a user's own key must never be spent filling it.
         using var harness = new Harness(
             new StubSource("AAPL"),
             new Quote(T("AAPL"), 187.42m, Now));
@@ -109,8 +103,7 @@ public sealed class QuotePollerTests
 
         await Should.ThrowAsync<InvalidOperationException>(() => harness.Poller.RunCycleAsync(Ct));
 
-        // The release is in a finally, not on the happy path. Without it a crashed cycle blocks polling
-        // until the key expires, and only on the replica that failed.
+        // The release is in a finally: without it a crashed cycle blocks polling until the key expires.
         harness.Lease.Releases.ShouldBe(1);
     }
 
@@ -126,8 +119,7 @@ public sealed class QuotePollerTests
 
         await harness.Poller.RunCycleAsync(Ct);
 
-        // The abstraction's doc comment says a failed observer must not stop the next ticker being sampled.
-        // Only the loop can make that true, so the loop is what this asserts.
+        // Only the per-ticker catch inside the loop stops a failed observer from ending the cycle.
         harness.Observer.Notified.ShouldBe(["AAPL", "MSFT"], ignoreOrder: true);
         harness.Window.Appended.Count.ShouldBe(2);
     }
@@ -141,9 +133,7 @@ public sealed class QuotePollerTests
 
         await harness.Poller.StartAsync(Ct);
 
-        // Nudged rather than counted. PeriodicTimer does not buffer a tick that arrives before the service
-        // has registered its wait, and neither that moment nor the end of a cycle is observable from out
-        // here — a single Advance right after StartAsync races both and loses.
+        // Advance in steps: PeriodicTimer does not buffer a tick arriving before the service registered its wait.
         var deadline = DateTimeOffset.UtcNow + Patience;
 
         while (source.Cycles < 2 && DateTimeOffset.UtcNow < deadline)
@@ -155,9 +145,7 @@ public sealed class QuotePollerTests
 
         await harness.Poller.StopAsync(Ct);
 
-        // A second cycle out of a service whose first cycle threw. With the try/catch around the loop
-        // instead of inside it, ExecuteAsync would have ended on the first throw — and because StopHost is
-        // the default BackgroundServiceExceptionBehavior, the whole host would have gone down with it.
+        // With the try/catch around the loop rather than inside it, the first throw ends ExecuteAsync and StopHost kills the host.
         source.FirstCycleThrew.ShouldBeTrue();
         source.Cycles.ShouldBeGreaterThanOrEqualTo(2);
         harness.Lease.Releases.ShouldBe(source.Cycles);

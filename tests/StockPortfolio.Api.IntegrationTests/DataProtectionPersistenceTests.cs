@@ -9,7 +9,6 @@ using StockPortfolio.Modules.MarketData.Application.Abstractions;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>Proves the encryption key ring lives in Postgres rather than the container filesystem.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class DataProtectionPersistenceTests(ApiFixture fixture)
 {
@@ -27,9 +26,6 @@ public sealed class DataProtectionPersistenceTests(ApiFixture fixture)
         store.GetAll().ShouldContain(xml);
     }
 
-    /// <summary>The whole reason the ring is in Postgres rather than the container filesystem: a second
-    /// process, built against the same database after the first is gone, must still read what the first
-    /// wrote.</summary>
     [Fact]
     public async Task Protect_ThenUnprotectOnASecondHost_ReturnsTheOriginalValue()
     {
@@ -46,15 +42,7 @@ public sealed class DataProtectionPersistenceTests(ApiFixture fixture)
         second.Services.GetRequiredService<ISecretProtector>().Unprotect(ciphertext).ShouldBe(secret);
     }
 
-    // Two hosts agreeing is not proof of Postgres on its own: SetApplicationName is exactly what makes the
-    // framework's default filesystem key ring shareable between instances on one machine, so that test
-    // would pass even with KeyRingXmlRepository never wired up. This one reads the table instead.
-    //
-    // The framework names its own elements "key-{guid}". Store_ThenGetAll writes "key-1" by hand, so the
-    // prefix alone is not enough to tell them apart - the guid is. A row matching key- followed by a uuid
-    // can only have come from the real key manager going through KeyRingXmlRepository, and if that
-    // repository were not registered the framework would use local disk for the whole run and no such row
-    // would exist anywhere.
+    // Two hosts agreeing proves nothing: SetApplicationName alone makes the default filesystem key ring shareable, so this reads the table and matches "key-{guid}", which only the real key manager writes.
     [Fact]
     public async Task Protect_WritesARowTheFrameworkItselfCreated()
     {

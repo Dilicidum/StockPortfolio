@@ -4,13 +4,11 @@ using System.Text.Json.Serialization;
 
 namespace StockPortfolio.Shared.Kernel;
 
-/// <summary>Serialises Money with the amount as a string, so no consumer parses it as a float.</summary>
 public sealed class MoneyJsonConverter : JsonConverter<Money>
 {
     private const string AmountName = "amount";
     private const string CurrencyName = "currency";
 
-    /// <inheritdoc/>
     public override Money Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
     {
         if (reader.TokenType != JsonTokenType.StartObject)
@@ -33,7 +31,7 @@ public sealed class MoneyJsonConverter : JsonConverter<Money>
 
             if (string.Equals(name, AmountName, StringComparison.Ordinal))
             {
-                // The string form is the point: a quoted number is what Strict would otherwise reject.
+                // The string form is the point: a quoted number is what NumberHandling.Strict would otherwise reject.
                 amount = reader.TokenType == JsonTokenType.String
                     ? decimal.Parse(reader.GetString()!, CultureInfo.InvariantCulture)
                     : reader.GetDecimal();
@@ -44,8 +42,7 @@ public sealed class MoneyJsonConverter : JsonConverter<Money>
             }
             else
             {
-                // Skip the whole value: stepping into an object or array would consume this object's
-                // EndObject as if it were ours and hand the serializer back a half-read reader.
+                // Skip the whole value: stepping in would consume this object's EndObject and hand back a half-read reader.
                 reader.Skip();
             }
         }
@@ -58,7 +55,6 @@ public sealed class MoneyJsonConverter : JsonConverter<Money>
         return new Money(amount.Value, currency);
     }
 
-    /// <inheritdoc/>
     public override void Write(Utf8JsonWriter writer, Money value, JsonSerializerOptions options)
     {
         ArgumentNullException.ThrowIfNull(writer);

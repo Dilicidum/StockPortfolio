@@ -4,7 +4,6 @@ using StockPortfolio.Modules.Alerts.Domain;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>EF binds a constructor by parameter NAME, and there is no parameterless one to fall back on.</summary>
 public sealed class EntityConstructorShapeTests
 {
     private const BindingFlags AnyConstructor =
@@ -50,7 +49,7 @@ public sealed class EntityConstructorShapeTests
                 + "startup rather than on the first query.");
     }
 
-    /// <summary>Presses the button on the smoke detector: the rule above passes by finding nothing.</summary>
+    // The companion to a rule that passes by finding nothing: this one fails if the search finds nothing.
     [Fact]
     public void ConstructorRule_ReadsRealParameters_SoAnEmptyResultMeansSomething()
     {
@@ -63,7 +62,7 @@ public sealed class EntityConstructorShapeTests
         parameters.ShouldContain("ticker");
     }
 
-    /// <summary>Money is a ComplexProperty and cannot be a constructor parameter — efcore#31621.</summary>
+    // Money is a ComplexProperty and cannot be a constructor parameter — efcore#31621.
     [Fact]
     public void FiredAlert_OmitsItsMoneyMembersFromTheConstructor()
     {

@@ -1,9 +1,8 @@
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Http;
 
-namespace StockPortfolio.Api.Middleware;
+namespace StockPortfolio.Host.Middleware;
 
-/// <summary>Turns any unhandled exception into an RFC 7807 application/problem+json response.</summary>
 internal sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsService) : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(

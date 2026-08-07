@@ -3,15 +3,12 @@ using StockPortfolio.Modules.Alerts.Domain;
 
 namespace StockPortfolio.Tests.Fakes;
 
-/// <summary>An in-memory alert_settings table. The first fake in the repository — see B4/B6.</summary>
 internal sealed class FakeAlertSettingRepository : IAlertSettingRepository
 {
     private readonly List<AlertSetting> _rows = [];
 
-    /// <summary>Gets how many times a ticker's enabled settings were read.</summary>
     public int EnabledReadCount { get; private set; }
 
-    /// <summary>Adds a row without going through the handler, so a test can arrange its own state.</summary>
     public FakeAlertSettingRepository With(AlertSetting setting)
     {
         _rows.Add(setting);

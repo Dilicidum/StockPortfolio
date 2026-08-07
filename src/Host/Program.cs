@@ -1,8 +1,8 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
-using StockPortfolio.Api.Adapters;
-using StockPortfolio.Api.Extensions;
-using StockPortfolio.Api.Middleware;
+using StockPortfolio.Host.Adapters;
+using StockPortfolio.Host.Extensions;
+using StockPortfolio.Host.Middleware;
 using StockPortfolio.Modules.Alerts.Api;
 using StockPortfolio.Modules.Alerts.Infrastructure;
 using StockPortfolio.Modules.Identity.Infrastructure;
@@ -16,41 +16,32 @@ using StockPortfolio.Shared.Kernel;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// 1.
 builder.Services.AddProblemDetails();
 builder.Services.AddExceptionHandler<ApiExceptionHandler>();
-builder.Services.AddOpenApi();                       // built-in; Swashbuckle is not used on .NET 9+
+builder.Services.AddOpenApi();
 builder.Services.AddSingleton(TimeProvider.System);
 
-// Before the modules: the missing-connection-string throw then fires before any module wiring, and
-// MarketData injects IConnectionMultiplexer rather than depending on the health checks having registered it.
+// Before the modules: MarketData injects IConnectionMultiplexer and nothing in it says so.
 builder.Services.AddStockPortfolioRedis(builder.Configuration);
 
-// After the multiplexer, because it reads the same connection string and that call is what proves
-// the string is there. The backplane is the whole of the cross-replica fan-out for alerts.
 builder.Services.AddStockPortfolioSignalR(builder.Configuration);
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    // camelCase: the SPA reads accessToken / refreshToken / accessExpiresAt.
     options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
 
-    // Money is decimal server-side and a string on the wire; a converter bypasses NumberHandling.Strict.
     options.SerializerOptions.Converters.Add(new MoneyJsonConverter());
     options.SerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
 
-    // Strict is safe because nothing consumes this API yet.
     options.SerializerOptions.PropertyNameCaseInsensitive = false;
     options.SerializerOptions.NumberHandling = JsonNumberHandling.Strict;
 });
 
-// 2. After AddIdentityModule below would be too late: nothing here needs the store, but the bearer
-// scheme must be the default before any endpoint calls RequireAuthorization.
+// Before the modules: the bearer scheme must be the default before any endpoint calls RequireAuthorization.
 builder.Services.AddStockPortfolioAuthentication();
 builder.Services.AddAuthorization();
 
-// 3.
 var corsOrigins = builder.Configuration.GetSection("Cors:Origins").Get<string[]>();
 
 if (corsOrigins is null || corsOrigins.Length == 0)
@@ -68,7 +59,6 @@ builder.Services.AddCors(options => options.AddPolicy("spa", policy => policy
     .AllowAnyMethod()
     .AllowCredentials()));
 
-// 4.
 builder.Services.AddIdentityModule(builder.Configuration);
 builder.Services.AddIdentityApi();
 
@@ -78,29 +68,17 @@ builder.Services.AddPortfolioApi();
 builder.Services.AddMarketDataModule(builder.Configuration);
 builder.Services.AddMarketDataApi();
 
-// After AddMarketDataModule: the protector depends on MarketData's key-ring store. No eager warm-up:
-// see CLAUDE.md, key ring vs migration job.
+// After AddMarketDataModule: the protector depends on MarketData's key-ring store.
 builder.Services.AddStockPortfolioDataProtection();
 
 builder.Services.AddAlertsModule(builder.Configuration);
 builder.Services.AddAlertsApi();
 
-// The two halves of the poll cycle. MarketData states both needs in its own words and depends on
-// nothing; these are the only place the two modules are named together.
-//
-// Both MUST be plain Add, and MUST come after AddMarketDataModule. That module registers a no-op
-// observer with TryAdd, which skips only when the service type is ALREADY there - so it always wins
-// the race and these two lines win by being last. Write TryAddScoped here and the no-op survives:
-// the poller fetches prices, stores windows, and evaluates nothing, with no error anywhere.
+// Plain Add and after AddMarketDataModule: TryAdd here loses to MarketData's no-op observer, and no alert ever fires, silently.
 builder.Services.AddScoped<IPollTargetSource, AlertsPollTargetSource>();
 builder.Services.AddScoped<IPriceSampleObserver, AlertsPriceSampleObserver>();
 
-// Retention belongs to MarketData and the window cap to Alerts, so this is the only place both are
-// visible. A window longer than retention stops alerts firing and reports nothing.
 builder.Services.ValidateAlertWindowFitsRetention(builder.Configuration);
-
-// TryAdd cannot give ISecretProtector a default: a module's TryAdd always wins the race to be first,
-// so a missing registration must fail loudly here rather than on the first key someone saves.
 builder.Services.ValidateSecretProtectorIsRegistered();
 
 builder.Services.AddStockPortfolioHealthChecks();

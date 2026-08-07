@@ -7,8 +7,7 @@ namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence;
 
 internal sealed class HoldingRepository(PortfolioDbContext context) : IHoldingRepository
 {
-    // No AsNoTracking anywhere here. ChangeTracker.Entries<T>() only sees tracked entities, so an
-    // untracked read means a command handler saves nothing, with no error at all.
+    // No AsNoTracking anywhere here: an untracked read means a command handler saves nothing, silently.
     public async Task<Holding?> FindAsync(Guid userId, Ticker ticker, CancellationToken ct)
         => await context.Holdings.FirstOrDefaultAsync(h => h.UserId == userId && h.Ticker == ticker, ct);
 
@@ -27,8 +26,7 @@ internal sealed class HoldingRepository(PortfolioDbContext context) : IHoldingRe
         await context.SaveChangesAsync(ct);
     }
 
-    // Takes the holding it does not use: the parameter says at the call site which aggregate is being
-    // persisted, and keeps the interface honest if an implementation ever needs to Attach.
+    // Takes the holding it does not use: the parameter names the aggregate being persisted at the call site.
     public async Task UpdateAsync(Holding holding, CancellationToken ct)
         => await context.SaveChangesAsync(ct);
 

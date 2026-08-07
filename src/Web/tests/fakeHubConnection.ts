@@ -1,16 +1,5 @@
 import type { AlertNotification } from '../src/alerts/alertsApi'
 
-/**
- * A stand-in for the SignalR client, installed globally in `setup.ts`.
- *
- * jsdom has no WebSocket that reaches anything, and the authenticated layout opens the alert
- * connection on mount — so without this every protected-route test would hang or throw. It also
- * makes the two things that ARE ours drivable from a test: the pushed alert, and what happens
- * when a dropped connection comes back.
- *
- * Deliberately not a mock of the protocol. Asserting on SignalR's frames would be testing
- * Microsoft's code; what these tests care about is which of our callbacks ran.
- */
 export interface FakeHubOptions {
   accessTokenFactory?: () => string | Promise<string>
   transport?: number
@@ -66,18 +55,15 @@ export class FakeHubConnection {
     return Promise.resolve()
   }
 
-  /** Server pushes one message. An unknown method name is dropped, exactly as SignalR drops it. */
   push(methodName: string, payload: AlertNotification): void {
     this.methods.get(methodName)?.(payload)
   }
 
-  /** The connection dropped and SignalR's own retry got it back. */
   dropAndRecover(): void {
     this.onReconnecting?.()
     this.onReconnected?.()
   }
 
-  /** The connection dropped and the retry schedule ran out. */
   dropForGood(): void {
     this.onReconnecting?.()
     this.onClosed?.()
@@ -104,7 +90,6 @@ class FakeHubConnectionBuilder {
   }
 }
 
-/** The real enum's values, so a test asserting on the transport asserts on the real number. */
 const HttpTransportType = {
   None: 0,
   WebSockets: 1,

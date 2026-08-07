@@ -1,7 +1,7 @@
 <Solution>
   <Folder Name="/src/" />
-  <Folder Name="/src/Api/">
-    <Project Path="src/Api/StockPortfolio.Api.csproj" />
+  <Folder Name="/src/Host/">
+    <Project Path="src/Host/StockPortfolio.Host.csproj" />
   </Folder>
   <Folder Name="/src/Migrator/">
     <Project Path="src/Migrator/StockPortfolio.Migrator.csproj" />

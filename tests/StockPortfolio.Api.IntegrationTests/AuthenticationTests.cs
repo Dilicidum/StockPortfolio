@@ -8,24 +8,20 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>The five /api/auth routes, driven end to end over HTTP against a real Postgres.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class AuthenticationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>Registering issues a usable session, and the same credentials sign in again.</summary>
     [Fact]
     public async Task Register_ThenLogin_ReturnsTokens()
     {
         using var client = _fixture.CreateClient();
         var email = Wire.UniqueEmail("register-then-login");
 
-        // Registering signs the caller straight in: one call, and the pair comes back with it.
         using var registered = await Wire.RegisterAsync(client, email, Wire.ValidPassword);
         registered.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(registered));
 
-        // 201 without a Location reads as an oversight.
         registered.Headers.Location?.ToString().ShouldBe("/api/auth/me");
 
         var fromRegister = await Wire.ReadTokensAsync(registered);
@@ -44,11 +40,9 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         var fromSecondLogin = await Wire.ReadTokensAsync(again);
 
-        // A second sign-in is a second session, not a re-issue of the first.
         fromSecondLogin.RefreshToken.ShouldNotBe(fromLogin.RefreshToken);
     }
 
-    /// <summary>The second registration of one address conflicts rather than overwriting.</summary>
     [Fact]
     public async Task Register_DuplicateEmail_Returns409()
     {
@@ -63,7 +57,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         second.Content.Headers.ContentType?.MediaType.ShouldBe(Wire.ProblemJson);
     }
 
-    /// <summary>The taken-address check normalises the same way the entity does, so a variant still conflicts.</summary>
     [Theory]
     [InlineData("uppercased")]
     [InlineData("padded")]
@@ -86,12 +79,10 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         using var second = await Wire.RegisterAsync(client, variant, Wire.ValidPassword);
 
-        // If the handler's pre-check normalised differently from User.Create, the insert would reach the
-        // unique index instead and surface as a 500.
+        // A pre-check that normalised differently from User.Create would reach the unique index instead and surface as a 500.
         second.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(second));
     }
 
-    /// <summary>A password under the floor is a field-level 400, not a generic one.</summary>
     [Fact]
     public async Task Register_WeakPassword_Returns400WithProblemDetails()
     {
@@ -112,13 +103,11 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         problem.Errors["Password"].ShouldNotBeEmpty();
     }
 
-    /// <summary>One address is one account whatever the casing, and the casing typed is what is stored.</summary>
     [Fact]
     public async Task Register_TreatsEmailCaseInsensitively_ButKeepsTheCasingTyped()
     {
         using var client = _fixture.CreateClient();
 
-        // Foo@Bar.com, in the shape the brief's example uses: mixed case on both sides of the '@'.
         var mixed = $"Foo-{Guid.NewGuid():N}@Bar.Example.Test";
         var lower = mixed.ToLowerInvariant();
 
@@ -144,12 +133,10 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         user.ShouldNotBeNull();
         user.Email.ShouldBe(mixed);
 
-        // The property that matters: the lower-cased form is the same account, so it cannot register again.
         using var again = await Wire.RegisterAsync(client, lower, Wire.ValidPassword);
         again.StatusCode.ShouldBe(HttpStatusCode.Conflict, await Wire.Describe(again));
     }
 
-    /// <summary>An anonymous call to a guarded route is rejected.</summary>
     [Fact]
     public async Task Me_WithoutToken_Returns401()
     {
@@ -160,7 +147,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>A bearer token resolves back to the account that owns it.</summary>
     [Fact]
     public async Task Me_WithValidToken_ReturnsEmail()
     {
@@ -169,7 +155,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
 
         var tokens = await Wire.RegisterSucceedsAsync(client, email);
 
-        // /me is this app's own route, over UserManager. It carries the id as well as the email.
         using var response = await Wire.SendAsync(
             client, HttpMethod.Get, "/api/auth/me", tokens.AccessToken);
 
@@ -185,7 +170,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         user.Id.ShouldNotBe(Guid.Empty);
     }
 
-    /// <summary>Signing out answers 204 and does not require a body.</summary>
     [Fact]
     public async Task Logout_Returns204_AndIsIdempotent()
     {
@@ -203,13 +187,7 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         repeated.StatusCode.ShouldBe(HttpStatusCode.NoContent, await Wire.Describe(repeated));
     }
 
-    /// <summary>Logout actually revokes: the refresh token stops working immediately.</summary>
-    /// <remarks>
-    /// This is the assertion the migration nearly lost. MapIdentityApi ships no logout, and the version
-    /// Microsoft documents only calls SignOutAsync — which for a bearer caller revokes nothing and leaves
-    /// the refresh token good for its full lifetime. Rolling the security stamp is what closes it, and
-    /// /refresh checking that stamp is the only reason this test can go red.
-    /// </remarks>
+    // MapIdentityApi ships no logout, and SignOutAsync alone revokes nothing for a bearer caller: rolling the security stamp is what closes it.
     [Fact]
     public async Task Refresh_AfterLogout_IsRejected()
     {
@@ -238,7 +216,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
                 + "stays good for its whole lifetime and logout is cosmetic: " + await Wire.Describe(after));
     }
 
-    /// <summary>Sign-out still needs a bearer token — it is not an anonymous route.</summary>
     [Fact]
     public async Task Logout_WithoutToken_Returns401()
     {
@@ -249,7 +226,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized, await Wire.Describe(response));
     }
 
-    /// <summary>A wrong password and an unknown address give the identical answer.</summary>
     [Fact]
     public async Task Login_WithWrongPassword_IsIndistinguishableFromUnknownAccount()
     {
@@ -271,7 +247,6 @@ public sealed class AuthenticationTests(ApiFixture fixture)
         first.ShouldBe(second);
     }
 
-    /// <summary>Reads the identifying fields of a ProblemDetails body, ignoring the trace id.</summary>
     private static async Task<(string? Type, string? Title, int? Status, string? Detail)> ReadProblemAsync(
         HttpResponseMessage response)
     {

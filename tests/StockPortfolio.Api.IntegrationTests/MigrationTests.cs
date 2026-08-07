@@ -4,13 +4,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>What the migration and db/init/01-roles.sql left behind, asserted against the live server.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class MigrationTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>The four module schemas exist, every module holds its tables, and — the part that is easy to get wrong.</summary>
     [Fact]
     public async Task Migrations_ApplyCleanly_OnEmptyDatabase()
     {
@@ -86,13 +84,10 @@ public sealed class MigrationTests(ApiFixture fixture)
              ORDER BY table_schema
             """);
 
-        // The load-bearing line, and with a fourth context it finally has something to say: HasDefaultSchema
-        // does not move __EFMigrationsHistory, so without MigrationsHistoryTable per context all four land
-        // in public, each context reads the others' ids as applied, and it looks exactly like corruption.
+        // HasDefaultSchema does not move __EFMigrationsHistory: without MigrationsHistoryTable per context all four land in public and read each other's ids as applied.
         historySchemas.ShouldBe(["alerts", "identity", "marketdata", "portfolio"]);
         historySchemas.ShouldNotContain("public");
 
-        // The migration is recorded, not merely the tables created: an empty history table with the right.
         var applied = await ReadStringsAsync(
             connection,
             """SELECT "MigrationId" FROM identity."__EFMigrationsHistory" ORDER BY "MigrationId" """);

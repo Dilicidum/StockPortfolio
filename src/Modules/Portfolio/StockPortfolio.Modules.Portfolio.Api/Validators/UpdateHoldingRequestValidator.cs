@@ -3,10 +3,8 @@ using StockPortfolio.Modules.Portfolio.Api.Requests;
 
 namespace StockPortfolio.Modules.Portfolio.Api.Validators;
 
-/// <summary>Shape rules for UpdateHoldingRequest — the same two numeric rules, without a ticker.</summary>
 public sealed class UpdateHoldingRequestValidator : AbstractValidator<UpdateHoldingRequest>
 {
-    /// <summary>Builds the rule set.</summary>
     public UpdateHoldingRequestValidator()
     {
         RuleFor(request => request.Quantity)

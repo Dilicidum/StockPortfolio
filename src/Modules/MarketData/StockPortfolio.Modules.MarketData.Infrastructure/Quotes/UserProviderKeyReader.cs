@@ -5,7 +5,6 @@ using StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 
-/// <summary>Reads a user's own key back in plaintext, resolved once per dashboard load by QuoteReader.</summary>
 internal sealed class UserProviderKeyReader(MarketDataDbContext context, ISecretProtector protector)
     : IUserProviderKeyReader
 {

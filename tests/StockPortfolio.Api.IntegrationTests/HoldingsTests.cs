@@ -10,13 +10,11 @@ using StockPortfolio.Modules.Portfolio.Contracts;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>Portfolio CRUD end to end, over real HTTP against a real Postgres.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class HoldingsTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    /// <summary>A new position is 201 and addressable.</summary>
     [Fact]
     public async Task AddHolding_ReturnsCreated_WithLocationHeader()
     {
@@ -28,7 +26,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         response.Headers.Location!.ToString().ShouldStartWith("/api/holdings/");
     }
 
-    /// <summary>The canonical case of the whole phase: 10 @ 100 then 10 @ 150 is one row, 20 @ 125.</summary>
     [Fact]
     public async Task AddHolding_SameTickerTwice_Returns200Merged_OneRowInDatabase()
     {
@@ -47,14 +44,11 @@ public sealed class HoldingsTests(ApiFixture fixture)
         only.Ticker.ShouldBe("AAPL");
         only.Quantity.ShouldBe(20m);
 
-        // Parsed, not string-compared: decimal preserves scale, so the serialised form is legitimately
-        // either "125" or "125.000000" depending on what the division and the column produced. Asserting
-        // the string here would be asserting an implementation detail of decimal arithmetic.
+        // Parsed, not string-compared: decimal preserves scale, so "125" and "125.000000" are both legitimate serialisations.
         Amount(only.AveragePrice).ShouldBe(125m);
         Amount(only.Invested).ShouldBe(2500m);
     }
 
-    /// <summary>The string form is the wire contract, so it is asserted directly and exactly once.</summary>
     [Fact]
     public async Task Holdings_SerialiseMoneyAsAString_NotANumber()
     {
@@ -72,7 +66,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
             "MoneyJsonConverter must emit a quoted amount; an unquoted one means it is not registered.");
     }
 
-    /// <summary>Shape validation rejects a symbol that is not one, before any handler runs.</summary>
     [Theory]
     [InlineData("TOOLONG")]
     [InlineData("BRK.B")]
@@ -87,7 +80,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         response.Content.Headers.ContentType!.MediaType.ShouldBe(Wire.ProblemJson);
     }
 
-    /// <summary>Three bad fields, one 400 naming all three — which only the filter can do, since a handler returns one InvalidInput.</summary>
     [Fact]
     public async Task AddHolding_TickerQuantityAndPriceAllInvalid_NamesEveryFailingField()
     {
@@ -100,15 +92,13 @@ public sealed class HoldingsTests(ApiFixture fixture)
 
         var fields = await Wire.FailingFieldsAsync(response);
 
-        // Remove AddEndpointFilter<ValidationFilter<AddHoldingRequest>> and this is still a 400 — the
-        // handler's UnknownTicker becomes one — but it can only ever name one field. That is the gap.
+        // Without the ValidationFilter this is still a 400 — the handler's UnknownTicker becomes one — but it can only ever name one field.
         fields.SetEquals(["ticker", "quantity", "price"]).ShouldBeTrue(
             $"the 400 named [{string.Join(", ", fields.Order(StringComparer.Ordinal))}]. All three fields "
             + "are invalid, and only ValidationFilter<AddHoldingRequest> reports them together: a handler "
             + "returns a single InvalidInput, so one name here means the filter is no longer in the pipeline.");
     }
 
-    /// <summary>The PATCH validator is otherwise never exercised in place, because nothing else sends an invalid PATCH.</summary>
     [Fact]
     public async Task UpdateHolding_QuantityAndPriceBothInvalid_NamesBothFailingFields()
     {
@@ -139,7 +129,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         (await Wire.ListHoldingsAsync(client, token)).ShouldHaveSingleItem().Quantity.ShouldBe(5m);
     }
 
-    /// <summary>A correction replaces the position; it is not a second purchase and must never average.</summary>
     [Fact]
     public async Task UpdateHolding_ChangesQuantityAndPrice_AndDoesNotAverage()
     {
@@ -167,14 +156,12 @@ public sealed class HoldingsTests(ApiFixture fixture)
         Amount(corrected.Invested).ShouldBe(1800m);
     }
 
-    /// <summary>The 201 body and the GET after it must be the same numbers, or the screen changes by itself.</summary>
     [Fact]
     public async Task AddHolding_ValuesFinerThanTheColumn_ReadBackExactlyAsTheyWereReturned()
     {
         var (client, token) = await SignedInAsync("holdings-round-trip");
 
-        // A seventh decimal of exactly 5 is the case that separates the two rounding rules, so if the
-        // domain does not round and the column is left to do it, the 201 body and the row disagree.
+        // A seventh decimal of exactly 5 separates the two rounding rules: leave the column to round and the 201 body and the stored row disagree.
         using var created = await Wire.AddHoldingAsync(client, token, "NFLX", 2.0000005m, 1.0000005m);
         created.StatusCode.ShouldBe(HttpStatusCode.Created, await Wire.Describe(created));
 
@@ -198,7 +185,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         fetched.Quantity.ShouldBe(2m);
     }
 
-    /// <summary>Correct writes through the same column, so it needs the same round-trip proof.</summary>
     [Fact]
     public async Task UpdateHolding_ValuesFinerThanTheColumn_ReadBackExactlyAsTheyWereReturned()
     {
@@ -232,7 +218,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         fetched.Quantity.ShouldBe(2m);
     }
 
-    /// <summary>A quantity numeric(18,6) cannot hold is a 400 naming the field, never a 22003 as a bare 500.</summary>
     [Fact]
     public async Task AddHolding_QuantityTooLargeForTheColumn_Returns400_NotAnOverflow500()
     {
@@ -250,7 +235,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         body.ShouldContain("uantity", Case.Sensitive, "the 400 must say which field was wrong");
     }
 
-    /// <summary>The security assertion of the phase: a 403 would confirm to a stranger that this id exists.</summary>
     [Fact]
     public async Task UpdateHolding_OtherUsersHolding_Returns404_NotForbidden()
     {
@@ -275,7 +259,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         untouched.Quantity.ShouldBe(5m);
     }
 
-    /// <summary>The same control on the delete route, which has its own repository call.</summary>
     [Fact]
     public async Task RemoveHolding_OtherUsersHolding_Returns404_AndLeavesItThere()
     {
@@ -297,7 +280,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         (await Wire.ListHoldingsAsync(ownerClient, ownerToken)).ShouldHaveSingleItem();
     }
 
-    /// <summary>Closing a position removes it.</summary>
     [Fact]
     public async Task RemoveHolding_Returns204_ThenGetIsEmpty()
     {
@@ -313,7 +295,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         (await Wire.ListHoldingsAsync(client, token)).ShouldBeEmpty();
     }
 
-    /// <summary>A second delete of the same id is a 404, not a cheerful second 204.</summary>
     [Fact]
     public async Task RemoveHolding_Twice_SecondReturns404()
     {
@@ -330,7 +311,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         second.StatusCode.ShouldBe(HttpStatusCode.NotFound, await Wire.Describe(second));
     }
 
-    /// <summary>The list is scoped to the caller, and a fresh account starting non-empty would be the leak.</summary>
     [Fact]
     public async Task GetHoldings_ShowsOnlyTheCallersPositions()
     {
@@ -345,7 +325,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         (await Wire.ListHoldingsAsync(aliceClient, aliceToken)).ShouldHaveSingleItem();
     }
 
-    /// <summary>The unique index is the guarantee, not the handler's look-up. See §2.6.</summary>
     [Fact]
     public async Task AddHolding_ConcurrentSameTicker_OneRowSurvives()
     {
@@ -356,8 +335,7 @@ public sealed class HoldingsTests(ApiFixture fixture)
 
         try
         {
-            // Deliberately not asserting the losers' status: under §2.6 a loser is a 500, and pinning
-            // that would pin an accident. What ix_holdings_user_id_ticker guarantees is the row count.
+            // Not asserting the losers' status: a loser is a 500 by accident. What the unique index guarantees is the row count.
             responses.ShouldContain(
                 response => response.IsSuccessStatusCode,
                 "at least one of four concurrent purchases must land");
@@ -375,7 +353,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         }
     }
 
-    /// <summary>The one thing Portfolio.Contracts exports, resolved from the host and answered both ways.</summary>
     [Fact]
     public async Task UserHoldsTicker_IsTrueForAPositionJustOpened_AndFalseForOneNeverBought()
     {
@@ -396,7 +373,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
         (await holds.HoldsAsync(userId, "META", TestContext.Current.CancellationToken)).ShouldBeFalse();
     }
 
-    /// <summary>Presses the button on ParameterisationTests: its assembly-wide claim only covers a context the recorder reached.</summary>
     [Fact]
     public async Task PortfolioContext_IsRecorded_SoTheParameterisationProofCoversHoldingsToo()
     {
@@ -408,8 +384,7 @@ public sealed class HoldingsTests(ApiFixture fixture)
 
         var thisRequest = _fixture.RecordedCommands.Commands.Skip(before).ToArray();
 
-        // Without AddToPortfolio nothing here is recorded, every other test still passes, and req 6's
-        // evidence silently stops covering the second module. Nothing else in the suite notices.
+        // Without AddToPortfolio nothing here is recorded, every other test still passes, and req 6's evidence silently stops covering this module.
         thisRequest.ShouldContain(
             command => command.CommandText.Contains("portfolio.holdings", StringComparison.OrdinalIgnoreCase),
             "the recording interceptor captured no SQL against portfolio.holdings for a request that "
@@ -431,11 +406,9 @@ public sealed class HoldingsTests(ApiFixture fixture)
         }
     }
 
-    /// <summary>Parses the string amount back to a decimal. That it IS a string is asserted separately.</summary>
     private static decimal Amount(MoneyPayload payload) =>
         decimal.Parse(payload.Amount, CultureInfo.InvariantCulture);
 
-    /// <summary>Reads the caller's own id off the running host.</summary>
     private static async Task<Guid> SubjectOfAsync(HttpClient client, string accessToken)
     {
         using var response = await Wire.SendAsync(client, HttpMethod.Get, "/api/auth/me", accessToken);
@@ -446,7 +419,6 @@ public sealed class HoldingsTests(ApiFixture fixture)
 
         user.ShouldNotBeNull();
 
-        // Portfolio stores the owner as a uuid, so the parse is the same one its endpoints do.
         return user.Id;
     }
 

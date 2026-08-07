@@ -50,16 +50,13 @@ public sealed class GetApiKeyStatusQueryHandlerTests
         result.Rejected.ShouldBeTrue();
     }
 
-    /// <summary>The status this test exists for: a key nobody could ever decrypt again must not read as
-    /// healthy just because the provider never got a chance to reject it.</summary>
     [Fact]
     public async Task Handle_WithACiphertextThatCannotBeDecrypted_IsRejected()
     {
         var protector = new FakeSecretProtector();
         var repository = new FakeUserProviderKeyRepository();
 
-        // Not run through protector.Protect: FakeSecretProtector.Unprotect returns null for anything
-        // missing its "protected:" prefix, mimicking a rotated-away key ring or a tampered row.
+        // Deliberately not protected: the fake returns null without its prefix, mimicking a rotated-away key ring.
         repository.Saved.Add(UserProviderKey.Create(AUser, "unreadable-ciphertext", "a1b2", TimeProvider.System));
 
         var handler = new GetApiKeyStatusQueryHandler(repository, protector);

@@ -8,16 +8,13 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Portfolio.Application.Holdings.Commands.UpdateHolding;
 
-/// <summary>Rewrites a position to what the user meant to type.</summary>
 public sealed class UpdateHoldingCommandHandler(IHoldingRepository holdings, TimeProvider clock)
     : ICommandHandler<UpdateHoldingCommand, OneOf<HoldingSummary, NotFound, InvalidInput>>
 {
-    /// <inheritdoc/>
     public async Task<OneOf<HoldingSummary, NotFound, InvalidInput>> Handle(
         UpdateHoldingCommand command,
         CancellationToken ct)
     {
-        // Scoped to the user by the repository, so another user's id is NotFound and never Forbidden.
         var holding = await holdings.FindByIdAsync(command.UserId, new HoldingId(command.HoldingId), ct);
 
         if (holding is null)

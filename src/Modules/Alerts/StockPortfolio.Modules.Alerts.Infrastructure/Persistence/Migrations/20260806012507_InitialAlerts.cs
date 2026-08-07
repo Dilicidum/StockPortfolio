@@ -8,9 +8,6 @@ namespace StockPortfolio.Modules.Alerts.Infrastructure.Persistence.Migrations
     /// <inheritdoc />
     public partial class InitialAlerts : Migration
     {
-        // Hand-edit to the scaffolded file, the same one InitialPortfolio carries: EF emits
-        // `new[] { … }` inline, which is CA1861 and therefore a build error under
-        // TreatWarningsAsErrors. Redo it on any regenerated migration.
         private static readonly string[] UserIdTickerColumns = ["user_id", "ticker"];
 
         private static readonly string[] UserIdFiredAtColumns = ["user_id", "fired_at"];

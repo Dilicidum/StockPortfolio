@@ -6,13 +6,11 @@ using StockPortfolio.Api.IntegrationTests.Infrastructure;
 
 namespace StockPortfolio.Api.IntegrationTests;
 
-/// <summary>Hiding a position is a display filter over /api/holdings/{id}/visibility.</summary>
 [Collection(ApiCollectionDefinition.Name)]
 public sealed class HoldingVisibilityTests(ApiFixture fixture)
 {
     private readonly ApiFixture _fixture = fixture ?? throw new ArgumentNullException(nameof(fixture));
 
-    // Hiding drops the row from the dashboard but leaves it, marked hidden, on the holdings list.
     [Fact]
     public async Task Patch_ToHidden_RemovesFromDashboard_ButStaysOnHoldingsList()
     {
@@ -52,9 +50,7 @@ public sealed class HoldingVisibilityTests(ApiFixture fixture)
         (await Wire.ListHoldingsAsync(ownerClient, ownerToken)).ShouldHaveSingleItem().IsVisible.ShouldBeTrue();
     }
 
-    // The assertion this task exists for: IUserHoldsTicker deliberately ignores visibility, because a
-    // hidden position is still held and an alert on it must still fire. An implementation that filtered
-    // HoldsAsync on IsVisible would turn this 200 into a 409 and every other test here would stay green.
+    // IUserHoldsTicker ignores visibility on purpose: filtering HoldsAsync on IsVisible turns this 200 into a 409 with every other test still green.
     [Fact]
     public async Task Patch_ToHidden_StillLetsAnAlertBeConfigured()
     {
@@ -70,10 +66,7 @@ public sealed class HoldingVisibilityTests(ApiFixture fixture)
         settingResponse.StatusCode.ShouldBe(HttpStatusCode.OK, await Wire.Describe(settingResponse));
     }
 
-    // Probes the declared 400 on PATCH .../visibility: the route has no ValidationFilter and its handler
-    // returns only Success or NotFound, so if anything produces a 400 here it has to be the framework's
-    // own JSON-body binding failure, not application validation. Written to settle exactly that question
-    // against a real request rather than by reasoning about the code.
+    // The declared 400 here can only be the framework's JSON binding failure: the route has no ValidationFilter and the handler returns Success or NotFound.
     [Fact]
     public async Task Patch_WithMalformedJsonBody_Returns400()
     {

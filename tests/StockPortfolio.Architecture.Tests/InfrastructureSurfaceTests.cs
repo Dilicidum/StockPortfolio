@@ -2,26 +2,19 @@ using Shouldly;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>Rule 7 — a module's .Infrastructure is internal apart from the one seam the host composes.</summary>
 public sealed class InfrastructureSurfaceTests
 {
-    // EF writes every generated migration public and puts the modifier back whenever one is regenerated,
-    // so the rule forgives that base type rather than fighting the generator. The smoke test below fails
-    // if the carve-out ever stops matching a real type, which is what stops it becoming a blanket pardon.
+    // EF writes every generated migration public and restores the modifier on regeneration, so the rule forgives that base type.
     private const string MigrationBaseTypeName = "Microsoft.EntityFrameworkCore.Migrations.Migration";
 
-    /// <summary>The four .Infrastructure assemblies.</summary>
     public static TheoryData<string> InfrastructureAssemblies =>
         [.. SolutionAssemblies.ModuleNames.Select(module => SolutionAssemblies.NameOf(module, "Infrastructure"))];
 
-    /// <summary>Rule 7.</summary>
     [Theory]
     [MemberData(nameof(InfrastructureAssemblies))]
     public void InfrastructureAssembly_ExportsOnlyItsModuleSeam(string assemblyName)
     {
         var assembly = SolutionAssemblies.Get(assemblyName);
-
-        ModuleBoundaryTests.SkipIfEmptyShell(assembly, assemblyName);
 
         _ = SolutionAssemblies.TryParseModuleLayer(assemblyName, out var module, out _);
         var seam = module + "Module";
@@ -62,7 +55,6 @@ public sealed class InfrastructureSurfaceTests
                 + ", so the host has nothing to compose and the check above passed over an empty set.");
     }
 
-    /// <summary>Presses the button on the smoke detector for rule 7.</summary>
     [Fact]
     public void ExportedTypeRule_SeesARealInfrastructureSurface_SoAnEmptyResultMeansSomething()
     {
@@ -80,9 +72,7 @@ public sealed class InfrastructureSurfaceTests
             "IdentityModule is the seam the host calls. Not finding it means GetExportedTypes is not "
                 + "seeing this assembly's public surface, so rule 7 is checking nothing.");
 
-        // The half that matters: the assembly has plenty of types, and almost none of them are exported.
-        // If GetExportedTypes ever started behaving like GetTypes, rule 7 would go red rather than quiet —
-        // but this says so out loud, naming the type the rule most exists to keep internal.
+        // If GetExportedTypes ever behaved like GetTypes the rule would pass over everything, quietly.
         assembly.GetTypes().Length.ShouldBeGreaterThan(
             exported.Length,
             name + " exports every type it declares. Infrastructure is internal apart from its seam, so "
@@ -101,7 +91,6 @@ public sealed class InfrastructureSurfaceTests
             "GetExportedTypes returned an internal type, so rule 7's whole question is being answered "
                 + "wrongly and its silence means nothing.");
 
-        // And the migration carve-out has to match something real, or it is a hole rather than an exception.
         IsGeneratedMigration(assembly.GetType("StockPortfolio.Modules.Identity.Infrastructure.IdentityModule", throwOnError: true)!)
             .ShouldBeFalse("The carve-out must not forgive the seam itself, or rule 7 would forgive anything.");
 

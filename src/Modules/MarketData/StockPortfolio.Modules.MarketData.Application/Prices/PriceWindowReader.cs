@@ -4,7 +4,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Application.Prices;
 
-/// <summary>Reduces a stored series to one window in a single pass; the shape fields are what the guards read.</summary>
 public sealed class PriceWindowReader(IPriceWindowStore store, TimeProvider clock) : IPriceWindowReader
 {
     public async Task<PriceWindow?> GetWindowAsync(string ticker, TimeSpan window, CancellationToken ct)
@@ -19,7 +18,6 @@ public sealed class PriceWindowReader(IPriceWindowStore store, TimeProvider cloc
 
         if (samples.Count == 0)
         {
-            // Absent, never a zero-filled window: a window of zeroes reads as a 100% crash to every rule.
             return null;
         }
 

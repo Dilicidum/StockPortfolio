@@ -17,19 +17,14 @@ using StockPortfolio.Modules.MarketData.Infrastructure.Quotes;
 
 namespace StockPortfolio.Modules.MarketData.Infrastructure;
 
-/// <summary>The MarketData module's entire public surface to the host.</summary>
 public static class MarketDataModule
 {
-    // A default .NET user agent is a common WAF trigger; Finnhub's own client sends finnhub/python.
     private const string UserAgent = "StockPortfolio/1.0";
 
-    /// <summary>The ConnectionStrings key this module reads.</summary>
     public const string ConnectionStringName = "MarketData";
 
-    /// <summary>The configuration key the BYOK feature switch is read from.</summary>
     private const string ByokEnabledKey = "MarketData:Byok:Enabled";
 
-    /// <summary>Registers only the MarketData DbContext, for the migrator, which fetches nothing and encrypts nothing.</summary>
     public static IServiceCollection AddMarketDataPersistence(this IServiceCollection services, IConfiguration configuration)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -45,26 +40,19 @@ public static class MarketDataModule
                 + "neither the key nor the file.");
         }
 
-        // AddDbContext, never AddDbContextFactory: the Migrator finds contexts by service type.
         services.AddDbContext<MarketDataDbContext>(options => options.UseNpgsql(
             connectionString,
             npg => npg.MigrationsHistoryTable(
                 MarketDataDbContext.MigrationsHistoryTableName,
                 MarketDataDbContext.SchemaName)));
 
-        // This module's own readiness check. It lives here and not in the host because MarketDataDbContext
-        // is internal, and it borrows the scoped context rather than opening a connection, which is
-        // what keeps four checks inside a Maximum Pool Size=2 budget.
         services.AddHealthChecks().AddDbContextCheck<MarketDataDbContext>("postgres-marketdata");
 
-        // KeyRingStore is internal to this assembly, so it is registered here rather than by the host,
-        // which can only ever see it through IKeyRingStore.
         services.AddSingleton<IKeyRingStore, KeyRingStore>();
 
         return services;
     }
 
-    /// <summary>Registers MarketData: its DbContext, a provider, the Redis stores, the contracts and the poller.</summary>
     public static IServiceCollection AddMarketDataModule(this IServiceCollection services, IConfiguration config)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -72,8 +60,6 @@ public static class MarketDataModule
 
         services.AddMarketDataPersistence(config);
 
-        // No eager validation of anything: a missing Finnhub key is a supported state and a throw here
-        // would take down `docker compose up`, which is the P0 gate.
         var options = FinnhubOptions.FromConfiguration(config);
 
         services.AddSingleton(options);
@@ -82,16 +68,12 @@ public static class MarketDataModule
         {
             services.AddHttpClient<IQuoteProvider, FinnhubQuoteProvider>(client =>
                 {
-                    // No HttpClient.Timeout: the standard handler sets it to InfiniteTimeSpan and owns timeouts.
                     client.BaseAddress = options.BaseUrl;
                     client.DefaultRequestHeaders.Add("X-Finnhub-Token", options.ApiKey);
                     client.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgent);
                 })
                 .AddStandardResilienceHandler(ConfigureResilience);
 
-            // A separate client, so a user's revoked key trips a breaker that is theirs alone. Sharing the
-            // client above would mean ten 401s from one bad key opens the circuit for every dashboard and
-            // the poller too. No default token header: the key travels per request instead.
             services.AddHttpClient(FinnhubQuoteProvider.ByokClientName, client =>
                 {
                     client.BaseAddress = options.BaseUrl;
@@ -103,8 +85,6 @@ public static class MarketDataModule
         {
             services.AddSingleton(FakeQuoteOptions.FromConfiguration(config));
 
-            // One owner, no cast. Registering IQuoteNudge as a cast off IQuoteProvider breaks the moment a
-            // test swaps the provider out: RemoveAll<IQuoteProvider>() leaves the lambda casting the replacement.
             services.AddSingleton<FakeQuoteProvider>();
             services.AddSingleton<IQuoteProvider>(sp => sp.GetRequiredService<FakeQuoteProvider>());
             services.AddSingleton<IQuoteNudge>(sp => sp.GetRequiredService<FakeQuoteProvider>());
@@ -127,7 +107,6 @@ public static class MarketDataModule
         return services;
     }
 
-    /// <summary>BYOK: the feature switch, the repository, and the reader QuoteReader uses.</summary>
     private static void AddKeys(IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton(ReadByokOptions(config));
@@ -136,22 +115,17 @@ public static class MarketDataModule
         services.AddScoped<IUserProviderKeyReader, UserProviderKeyReader>();
     }
 
-    /// <summary>A blank, unparseable value or a missing key is a file that has not been told, not a "no".</summary>
     private static ByokOptions ReadByokOptions(IConfiguration config) =>
         new(bool.TryParse(config[ByokEnabledKey], out var enabled) ? enabled : ByokOptions.DefaultEnabled);
 
-    /// <summary>The poller, its two locks, and the observer the host is expected to replace.</summary>
     private static void AddPolling(IServiceCollection services, IConfiguration config)
     {
         services.AddSingleton(PollingOptions.FromConfiguration(config));
         services.AddSingleton<IPollLease, RedisPollLease>();
 
-        // TryAdd, so a host that registers its adapter BEFORE this call still keeps it. A host registering
-        // after wins on last-one-wins instead; either order leaves exactly one observer resolved.
+        // TryAdd, so a host adapter registered before this call survives; one registered after wins on last-registration-wins.
         services.TryAddSingleton<IPriceSampleObserver, NoOpPriceSampleObserver>();
 
-        // No default IPollTargetSource on purpose: "nobody told me what to poll" must be a visible failure
-        // in the log, not an empty list that reads the same as "nobody has an alert".
         services.AddHostedService<QuotePoller>();
     }
 
@@ -161,15 +135,8 @@ public static class MarketDataModule
         o.TotalRequestTimeout.Timeout = TimeSpan.FromSeconds(15);
         o.Retry.MaxRetryAttempts = 2;
 
-        // The shipped 100 can never trip on a twenty-ticker dashboard, so the breaker would be decoration.
         o.CircuitBreaker.MinimumThroughput = 10;
 
-        // The validator runs under AddOptionsWithValidateOnStart and is startup-fatal: AttemptTimeout must
-        // stay under TotalRequestTimeout, and SamplingDuration at or above twice AttemptTimeout.
         o.CircuitBreaker.SamplingDuration = TimeSpan.FromSeconds(30);
-
-        // NEVER assign o.Retry.DelayGenerator - ShouldRetryAfterHeader's setter *is* that assignment, and
-        // setting a generator silently overwrites Retry-After handling. With no client-side rate limiter,
-        // this header is the provider's only way to tell this client to slow down.
     }
 }

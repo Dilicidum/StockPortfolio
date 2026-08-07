@@ -8,9 +8,6 @@ namespace StockPortfolio.Modules.Portfolio.Infrastructure.Persistence.Migrations
     /// <inheritdoc />
     public partial class InitialPortfolio : Migration
     {
-        // Hand-edit to the scaffolded file: EF emits `new[] { "user_id", "ticker" }` inline, which is
-        // CA1861 and therefore a build error under TreatWarningsAsErrors. Identity has no composite
-        // index, so this is the first migration to hit it. Redo it on any regenerated migration.
         private static readonly string[] UserIdTickerColumns = ["user_id", "ticker"];
 
         /// <inheritdoc />

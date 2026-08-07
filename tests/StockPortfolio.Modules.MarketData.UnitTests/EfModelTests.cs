@@ -8,7 +8,6 @@ using StockPortfolio.Modules.MarketData.Infrastructure.Persistence;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>The MarketData model must build, and it must bind the one constructor each entity has.</summary>
 public sealed class EfModelTests
 {
     private const string ModelOnly = "Host=localhost;Database=model-only;Username=none;Password=none";
@@ -21,8 +20,7 @@ public sealed class EfModelTests
         return context.Model.FindEntityType(typeof(TEntity))!;
     }
 
-    // The whole model fails to build at host startup, not on the first query, when a constructor
-    // parameter no longer names a property. Building it here is the cheap way to find that out.
+    // A constructor parameter that no longer names a property fails the whole model at host startup, not on first query.
     [Fact]
     public void UserProviderKey_BindsItsConstructor_ForMaterialisation()
     {

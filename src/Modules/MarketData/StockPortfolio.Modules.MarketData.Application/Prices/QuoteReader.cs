@@ -4,7 +4,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Application.Prices;
 
-/// <summary>Provider first, last-known second. The dashboard's whole path to a price.</summary>
 public sealed class QuoteReader(
     IQuoteProvider provider,
     ILastKnownPriceStore store,
@@ -36,24 +35,15 @@ public sealed class QuoteReader(
             return prices;
         }
 
-        // Resolved once per call, before the fan-out: one database read and one decrypt for a whole
-        // dashboard load, never one per ticker. Skipped entirely while the switch is off, so a stored key
-        // is never read, decrypted or sent to the provider once BYOK is disabled - a saved key stays on
-        // file, but stops being used.
         var apiKeyOverride = byokOptions.Enabled ? await keyReader.ReadPlaintextAsync(userId, ct) : null;
 
         var fetched = await provider.GetQuotesAsync(requested, apiKeyOverride, ct);
 
         if (apiKeyOverride is not null && fetched.Count == 0)
         {
-            // Every fetch using this key came back empty. That is also what a provider outage looks
-            // like, so ask the provider directly rather than guessing from the shape of the miss.
             await MarkKeyIfRejectedAsync(userId, apiKeyOverride, ct);
         }
 
-        // The write lives here and in the poller, never in a provider: with no API key the fake is the only
-        // provider, so a write inside FinnhubQuoteProvider would leave marketdata:last:* empty on the whole
-        // P0 compose path.
         await store.WriteAsync(fetched, ct);
 
         foreach (var quote in fetched)
@@ -62,8 +52,6 @@ public sealed class QuoteReader(
                 new QuotedPrice(quote.Ticker.Value, quote.Price, quote.ObservedAt, IsLastKnown: false);
         }
 
-        // A set difference, not one try/catch round the whole call: three tickers failing must not discard
-        // the seventeen that succeeded and replace them with stale values.
         var missing = requested.Where(ticker => !prices.ContainsKey(ticker.Value)).ToArray();
 
         if (missing.Length == 0)
@@ -85,7 +73,6 @@ public sealed class QuoteReader(
         return prices;
     }
 
-    /// <summary>Confirms a rejection before recording one: an outage must degrade quietly, not brand the key bad.</summary>
     private async Task MarkKeyIfRejectedAsync(Guid userId, string apiKeyOverride, CancellationToken ct)
     {
         if (await provider.VerifyKeyAsync(apiKeyOverride, ct) == KeyVerdict.Rejected)

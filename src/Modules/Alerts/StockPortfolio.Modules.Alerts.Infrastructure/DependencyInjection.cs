@@ -12,7 +12,6 @@ using StockPortfolio.Shared.Kernel.Cqrs;
 
 namespace StockPortfolio.Modules.Alerts.Infrastructure;
 
-/// <summary>Handler registrations, kept out of AlertsModule so the public seam stays one method.</summary>
 internal static class DependencyInjection
 {
     internal static IServiceCollection AddAlertsHandlers(this IServiceCollection services)

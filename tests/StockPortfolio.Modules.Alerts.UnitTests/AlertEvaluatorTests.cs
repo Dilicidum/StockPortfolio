@@ -12,7 +12,6 @@ using StockPortfolio.Tests.Fakes;
 
 namespace StockPortfolio.Tests;
 
-/// <summary>The guards, the cooldown and the order of the two writes. No infrastructure anywhere.</summary>
 public sealed class AlertEvaluatorTests
 {
     private const string Symbol = "AAPL";
@@ -33,7 +32,6 @@ public sealed class AlertEvaluatorTests
     private FakeAlertPublisher _publisher = null!;
     private FakeAlertCooldownStore _cooldowns = null!;
 
-    /// <summary>A ticker nobody watches must cost nothing at all — not even one window read.</summary>
     [Fact]
     public async Task ATickerNobodyWatches_ReadsNoWindow()
     {
@@ -46,7 +44,6 @@ public sealed class AlertEvaluatorTests
         _firedAlerts.Rows.ShouldBeEmpty();
     }
 
-    /// <summary>A move well over the threshold fires once, and the row carries both measurements.</summary>
     [Fact]
     public async Task ABreachOnAWatchedTicker_RecordsAndPublishesOnce()
     {
@@ -68,7 +65,6 @@ public sealed class AlertEvaluatorTests
         _publisher.Sent.ShouldHaveSingleItem().Id.ShouldBe(alert.Id.Value);
     }
 
-    /// <summary>Persist, then publish — and it is the ORDER that matters, not that both happened.</summary>
     [Fact]
     public async Task ABreach_IsSavedBeforeItIsPublished()
     {
@@ -81,7 +77,6 @@ public sealed class AlertEvaluatorTests
         _journal.ShouldBe([FakeFiredAlertRepository.Saved, FakeAlertPublisher.Published]);
     }
 
-    /// <summary>A publisher that throws loses the push and nothing else. The row is what matters.</summary>
     [Fact]
     public async Task APublisherThatThrows_LeavesTheRowSavedAndRaisesNothing()
     {
@@ -97,7 +92,6 @@ public sealed class AlertEvaluatorTests
                 + "whole poll cycle down over a Redis blip and lose every later ticker in it.");
     }
 
-    /// <summary>The same breach evaluated twice inside the cooldown is one alert, not two.</summary>
     [Fact]
     public async Task TheSameBreachTwiceInsideTheCooldown_FiresOnce()
     {
@@ -117,7 +111,6 @@ public sealed class AlertEvaluatorTests
         _cooldowns.Attempts.ShouldBe(2, "the second cycle must ask, and be told no.");
     }
 
-    /// <summary>Past the cooldown the same breach is news again.</summary>
     [Fact]
     public async Task TheSameBreachAfterTheCooldown_FiresAgain()
     {
@@ -131,8 +124,7 @@ public sealed class AlertEvaluatorTests
 
         _clock.Advance(TimeSpan.FromMinutes(AlertsOptions.DefaultCooldownMinutes + 1));
 
-        // The feed has to have kept up as well: a window whose newest sample is a quarter of an hour
-        // old is a stale feed, and the stale guard would suppress this before the cooldown was asked.
+        // The window is re-dated too: otherwise the stale-feed check suppresses this before the cooldown is ever asked.
         _windows.Returning(WindowMinutes, Falling() with { NewestAt = _clock.GetUtcNow() });
 
         await evaluator.EvaluateAsync(Symbol, TestContext.Current.CancellationToken);
@@ -140,7 +132,6 @@ public sealed class AlertEvaluatorTests
         _firedAlerts.Rows.Count.ShouldBe(2);
     }
 
-    /// <summary>A refused claim writes nothing — the cooldown is asked BEFORE the row, not after it.</summary>
     [Fact]
     public async Task ARefusedCooldownClaim_WritesNoRowAndPushesNothing()
     {
@@ -158,7 +149,6 @@ public sealed class AlertEvaluatorTests
         _journal.ShouldBeEmpty();
     }
 
-    /// <summary>Guard one. A window still filling up is the ordinary state, and it judges nothing.</summary>
     [Fact]
     public async Task AWindowWithTooFewSamples_FiresNothing()
     {
@@ -171,7 +161,6 @@ public sealed class AlertEvaluatorTests
         _firedAlerts.Rows.ShouldBeEmpty();
     }
 
-    /// <summary>Guard two. A weekend-shaped gap compares two prices that never faced each other.</summary>
     [Fact]
     public async Task AWindowStraddlingAGap_FiresNothing()
     {
@@ -186,7 +175,6 @@ public sealed class AlertEvaluatorTests
                 + "would mean the gap guard is not in the path at all.");
     }
 
-    /// <summary>Guard three, and the one that must not read as "nothing moved": the feed itself stopped.</summary>
     [Fact]
     public async Task AStaleFeed_SuppressesEveryPriceAlertRatherThanReportingCalm()
     {
@@ -205,15 +193,13 @@ public sealed class AlertEvaluatorTests
                 + "was judged as a price, and the only thing standing between it and an alert was luck.");
     }
 
-    /// <summary>Two users, two window lengths, two reads. One read for the longest would widen the other.</summary>
     [Fact]
     public async Task TwoUsersWithDifferentWindows_AreEachJudgedOverTheirOwn()
     {
         _ = WatchedBy("short", windowMinutes: 5);
         _ = WatchedBy("long", windowMinutes: 60);
 
-        // Calm over five minutes, a slide over sixty. Judged over the longest window alone, the
-        // five-minute user is told about an hour-long move they deliberately did not ask about.
+        // Calm over five minutes, a slide over sixty: one read for the longest window alone would alert the five-minute user.
         _windows.Returning(5, Calm());
         _windows.Returning(60, Falling());
 
@@ -223,7 +209,6 @@ public sealed class AlertEvaluatorTests
         _firedAlerts.Rows.ShouldHaveSingleItem().ChangePercent.ShouldBeLessThan(-Threshold);
     }
 
-    /// <summary>A ticker with no series at all — a symbol just added — is silent, not an exception.</summary>
     [Fact]
     public async Task AWatchedTickerWithNoSeries_FiresNothing()
     {
@@ -235,7 +220,6 @@ public sealed class AlertEvaluatorTests
         _firedAlerts.Rows.ShouldBeEmpty();
     }
 
-    /// <summary>A symbol that is not a ticker never reaches the database.</summary>
     [Fact]
     public async Task AMalformedTicker_ReadsNothing()
     {
@@ -256,7 +240,6 @@ public sealed class AlertEvaluatorTests
         SampleCount: 60,
         LargestGap: TimeSpan.FromMinutes(1));
 
-    /// <summary>A flat series: nothing to report at any threshold.</summary>
     private static PriceWindow Calm() => new(
         Ticker: Symbol,
         Current: 150m,

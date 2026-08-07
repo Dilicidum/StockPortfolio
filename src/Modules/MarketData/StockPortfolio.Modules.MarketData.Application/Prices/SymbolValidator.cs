@@ -4,7 +4,6 @@ using StockPortfolio.Modules.MarketData.Domain;
 
 namespace StockPortfolio.Modules.MarketData.Application.Prices;
 
-/// <summary>Existence, failing open: a Finnhub outage must not reject a valid purchase.</summary>
 public sealed class SymbolValidator(IQuoteProvider provider) : ISymbolValidator
 {
     public Task<bool> IsKnownSymbolAsync(string ticker, CancellationToken ct) =>
