@@ -40,15 +40,21 @@ Still open:
 
 - Server-generated text (API validation messages, a fired alert's reason) stays English; the backend does no
   language negotiation.
-- Nothing since Phase 4 has been deployed, so Phases 5 and 6 are unproven against the public URL.
+- The by-hand browser walkthrough against the public URL is unfinished. The probes, the four database logins, the cache and the real price provider all answer correctly there, and the SPA loads clean; what is unproven is everything a person has to click.
 
-[docs/deferred-work.md](docs/deferred-work.md) is the register for anything deferred, unbuilt or rejected. Something described in a plan and missing from the code belongs there too, not only defects found in code that exists. Read it before assuming an unimplemented feature is simply "not that phase yet".
+`docs/deferred-work.md` is the register for anything deferred, unbuilt or rejected. Something described in a plan and missing from the code belongs there too, not only defects found in code that exists. Read it before assuming an unimplemented feature is simply "not that phase yet".
+
+## `docs/` is a working folder, not part of the repository
+
+**`README.md` is the only documentation that ships.** Everything under `docs/` — the plans, the reference documents, the runbook and the register — is deliberately untracked and lives only in a working tree. That is why every path to it below is written plain rather than as a link: a link would resolve for you and 404 for anyone reading this on GitHub.
+
+Two consequences. **If you cloned this repository you do not have `docs/`**, and nothing in it is required to work in the code — this file carries the conventions and the traps, and `README.md` carries the architecture. And **`docs/` is not backed up by git**, so a file deleted there is gone; `git restore` will not bring it back.
 
 ## Plans
 
 Three levels, each with one job.
 
-1. **The overall plan** — [docs/plan/00-overview.md](docs/plan/00-overview.md). The whole system: the core ideas, the decisions, how it behaves, why it behaves that way, and the flow from one end to the other.
+1. **The overall plan** — `docs/plan/00-overview.md`. The whole system: the core ideas, the decisions, how it behaves, why it behaves that way, and the flow from one end to the other.
 2. **One plan per phase** — the decisions for that phase, in more detail.
 3. **One implementation plan per phase** — the tasks and the order to build them in. It is written when the phase starts and **deleted when the phase ships**. It is the only place where file names and type names belong.
 
@@ -67,16 +73,16 @@ A plan is short enough to read from start to finish in one sitting. When somethi
 
 These describe the shape of the system rather than the order it gets built in, so they live in `docs/reference/`, not in the plans folder.
 
-- [docs/reference/er-diagram.md](docs/reference/er-diagram.md) — the data model: tables, what lives in Redis instead, which indexes carry weight, and which tables exist today.
-- [docs/reference/module-interactions.md](docs/reference/module-interactions.md) — which module depends on which, what crosses each line and why.
-- [docs/reference/service-interactions.md](docs/reference/service-interactions.md) — the runtime picture: browser, the one process, and which module talks to Postgres, Redis or the price provider.
-- [docs/reference/module-boundaries.md](docs/reference/module-boundaries.md) — why the boundaries are where they are, and the three places one was deliberately not drawn.
-- [docs/reference/bounded-contexts.md](docs/reference/bounded-contexts.md) — what kind of relationship crosses each boundary.
-- [docs/reference/identity-contracts.md](docs/reference/identity-contracts.md) — how sessions and tokens behave, and what about them is fixed.
+- `docs/reference/er-diagram.md` — the data model: tables, what lives in Redis instead, which indexes carry weight, and which tables exist today.
+- `docs/reference/module-interactions.md` — which module depends on which, what crosses each line and why.
+- `docs/reference/service-interactions.md` — the runtime picture: browser, the one process, and which module talks to Postgres, Redis or the price provider.
+- `docs/reference/module-boundaries.md` — why the boundaries are where they are, and the three places one was deliberately not drawn.
+- `docs/reference/bounded-contexts.md` — what kind of relationship crosses each boundary.
+- `docs/reference/identity-contracts.md` — how sessions and tokens behave, and what about them is fixed.
 
 Where `bounded-contexts.md` and `module-boundaries.md` disagree, `module-boundaries.md` decides *where* a boundary goes and `bounded-contexts.md` decides *what kind* of relationship crosses it.
 
-Read before touching code: the overview, then the phase file you are working in. [docs/Initial.md](docs/Initial.md) is the original architecture essay and is historical; where it conflicts with a plan, the plan wins.
+Read before touching code: the overview, then the phase file you are working in. `docs/Initial.md` is the original architecture essay and is historical; where it conflicts with a plan, the plan wins.
 
 Work phase by phase. A phase is done when it runs in a browser, not when tests pass.
 
@@ -84,8 +90,8 @@ Work phase by phase. A phase is done when it runs in a browser, not when tests p
 
 Read these before touching deploys, Bicep, workflows, cost or teardown.
 
-- [docs/DEPLOYING.md](docs/DEPLOYING.md) — **the runbook. Start here.** How to deploy (push to `main`, and nothing else — never run `az deployment group create` by hand), what exists, how to verify, the cost ceiling, and five failures that each cost a deploy cycle.
-- [docs/superpowers/specs/2026-08-02-azure-deployment-design.md](docs/superpowers/specs/2026-08-02-azure-deployment-design.md) — the **why**: the cost model, the four decisions behind the sizing and the time-bounded ceiling, the six-step verification, and the six failed attempts. Its `minReplicas` decision records both settings — 0 through Phases 1–3, and 1 from Phase 4 because of the poller. It sits outside `docs/plan/` because `docs/plan/` is the numbered product build and this cuts across it.
+- `docs/DEPLOYING.md` — **the runbook. Start here.** How to deploy (push to `main`, and nothing else — never run `az deployment group create` by hand), what exists, how to verify, the cost ceiling, and five failures that each cost a deploy cycle.
+- `docs/superpowers/specs/2026-08-02-azure-deployment-design.md` — the **why**: the cost model, the four decisions behind the sizing and the time-bounded ceiling, the six-step verification, and the six failed attempts. Its `minReplicas` decision records both settings — 0 through Phases 1–3, and 1 from Phase 4 because of the poller. It sits outside `docs/plan/` because `docs/plan/` is the numbered product build and this cuts across it.
 
 Four of their failure cases are copied into Traps below; the rest are only there.
 
@@ -113,7 +119,7 @@ With no `Finnhub__ApiKey` configured the app uses `FakeQuoteProvider` and logs a
 
 Four modules — `Identity`, `Portfolio`, `MarketData`, `Alerts` — each with **five** projects: `.Contracts` / `.Domain` / `.Application` / `.Infrastructure` / `.Api`. **All four exist.** Plus `Shared.Kernel`, `Shared.Api`, the `Host` project and a `Migrator` console. Assembly and namespace prefix is `StockPortfolio.`; modules are `StockPortfolio.Modules.<Module>.<Layer>`.
 
-**Boundaries are argued from the cost of pulling a module out, not from subdomain labels.** The test for every boundary: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the number of calls bounded, can one side fail while the other keeps working, is there exactly one writer per table. Full reasoning in [docs/reference/module-boundaries.md](docs/reference/module-boundaries.md).
+**Boundaries are argued from the cost of pulling a module out, not from subdomain labels.** The test for every boundary: would it survive becoming a network call? Four questions — does anything need a transaction across it, is the number of calls bounded, can one side fail while the other keeps working, is there exactly one writer per table. Full reasoning in `docs/reference/module-boundaries.md`.
 
 - **Alerts is its own module.** Sharing a word does not make two models one: `Ticker` means the same thing in Portfolio and in Alerts, and they are still two contexts. Different words are enough to prove two contexts exist, but they are not required.
 - `AlertSettings` and `FiredAlert` never share a transaction with `Holding`, no rule spans any two of the three aggregates, they are written at different times, and alerts can be down while the dashboard still renders.
@@ -231,7 +237,7 @@ The rule is narrower than "every percentage is a string", and the alert threshol
 
 **Frontend: zero external UI component libraries.** No Radix, Headless UI or React Aria — the brief bans UI kits and its list ends in "тощо". Hand-build with Tailwind; use native `<select>` and `<input role="switch">`.
 
-**Tests.** Nothing is skipped and nothing ever should be, so passing and discovered stay equal. **786 passing, nothing skipped, of 786 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
+**Tests.** Nothing is skipped and nothing ever should be, so passing and discovered stay equal. **785 passing, nothing skipped, of 785 discovered**, from one `dotnet test` run with Docker up: unit (touch no infrastructure), architecture (reflection over assembly references), integration (Testcontainers Postgres + Redis, one collection fixture for the assembly, needs `public partial class Program;`). Use `FakeTimeProvider` for anything timer-driven.
 
 | Assembly | Passed |
 |---|---|
@@ -241,7 +247,7 @@ The rule is narrower than "every percentage is a string", and the alert threshol
 | `Modules.MarketData.UnitTests` | 240 |
 | `Modules.Alerts.UnitTests` | 108 |
 | `Architecture.Tests` | 60 |
-| `Api.IntegrationTests` | 227 |
+| `Api.IntegrationTests` | 226 |
 
 The browser tests are counted separately by `npm --prefix src/Web test` — **79 passing across 15 files**, measured on 2026-08-07. These are the only test counts in the repository; do not copy them into another document.
 
@@ -299,11 +305,12 @@ Each of these costs a day if you meet it cold.
 - **`Clients.User(...)` matches a claim these tokens do not carry.** The built-in provider reads `nameidentifier`; this app issues `sub`. Without `SubjectClaimUserIdProvider` every alert is delivered to nobody, with no exception and no log line — `AlertStreamTests` pins both the registration and the claim name.
 - **A browser cannot set a header on the hub connection**, so SignalR's client sends the token as `?access_token=`. `BearerTokenEvents.OnMessageReceived` reads it, and the `StartsWithSegments` path check is what stops every other route in the app accepting a credential in its URL.
 - **ACA liveness must not check Postgres or Redis.** A brief dependency failure then becomes a container restart loop, turning a degraded app into a down one.
-- **Three probes, three questions, and every check must be tagged or it silently joins readiness.** Liveness runs zero checks; readiness runs the tag `"ready"` — the four database logins and the cache; startup runs the tag `"startup"` — pending migrations only, which is a database round trip and is exactly why it cannot be liveness. `MapHealthChecks` with no predicate runs **everything**, so an untagged check added later joins readiness by accident and a probe quietly changes meaning. There is a fourth map, `GET /api/health/detail`, authenticated, tag `"detail"`, and it is a `MapHealthChecks` rather than a hand-written route on purpose — a hand-written one makes the host the place every new component has to touch.
+- **Two probes, two questions, and every check must be tagged or it silently joins readiness.** Liveness runs zero checks; readiness runs the tag `"ready"` — the four database logins and the cache. `MapHealthChecks` with no predicate runs **everything**, so an untagged check added later joins readiness by accident and a probe quietly changes meaning. There is a third map, `GET /api/health/detail`, authenticated, tag `"detail"`, and it is a `MapHealthChecks` rather than a hand-written route on purpose — a hand-written one makes the host the place every new component has to touch. A startup probe over pending migrations existed briefly and was removed as overkill: the migration job runs before the API and the deploy waits on it, so the probe re-checked a guarantee that already held.
 - **Readiness must never read a cache outage as an inability to serve traffic.** Every check registers with a default failure status of Unhealthy, so Redis down would answer 503 on `/health/ready`, Container Apps would withdraw the replica, and at `maxReplicas: 2` the whole API goes unreachable — from a *cache* being down, when the dashboard does not even read the cache on the happy path. Register it with `failureStatus: HealthStatus.Degraded`; the framework already maps Degraded to 200. The only test that catches this boots a host with Redis down and asserts `/health/ready` is **200**.
 - **All four contexts set `EnableRetryOnFailure` to three attempts two seconds apart, not the six-attempt default.** A stopped database has to answer before the readiness probe times out, and the default backoff does not get there. The cost applies to every query on every context, not only to a failing one: switching retries on makes EF buffer each result set instead of streaming it.
-- **A health route must never answer 503 because the database is down.** `ApiExceptionHandler` turns a transient `DbException` — including Npgsql's exhausted-pool message, which is not flagged transient — into a 503 with a `Retry-After`, so *every* database-touching route can now emit one. **None of them declares it.** No `.Produces` list changed: the repo's rule is to drive a real request before declaring a status, and nothing in the suite drives a real 503 through a route yet. Declaring them is the outstanding step. The only `.ProducesProblem(503)` in the codebase is on `POST /api/settings/api-key`, and that one is about the price provider, not the database. The health routes are carved out by hand instead: `/api/health/detail` maps all three states to 200. An endpoint whose job is to report that Postgres is unhealthy has to say so in a body — otherwise the browser's health card goes blank at the exact moment it becomes useful, and the alerts-suppressed banner, which reads the cache entry out of that same body, stops working whenever Redis and Postgres are down together.
-- **Container Apps caps `failureThreshold` at 10 and `initialDelaySeconds` at 60**, and the obvious startup-probe numbers are refused at deployment validation, not at run time. Ten failures on thirty-second periods is five minutes and is inside both limits. `successThreshold` must stay 1 for a startup probe.
+- **A health route must never answer 503 because the database is down.** `/api/health/detail` maps all three states to 200. An endpoint whose job is to report that Postgres is unhealthy has to say so in a body — otherwise the browser's health card goes blank at the exact moment it becomes useful, and the alerts-suppressed banner, which reads the cache entry out of that same body, stops working whenever Redis and Postgres are down together. Readiness keeps the default mapping, so an unhealthy database there still answers 503 and still withdraws the replica, which is the point of it.
+- **`ApiExceptionHandler` answers 500 for everything, deliberately.** A mapping from a transient `DbException` to a 503 with `Retry-After` was built and then removed as overkill. If it is ever reintroduced, remember what made it awkward: *every* database-touching route can then emit a 503 and none of them declares it, and the repo's rule is to drive a real request before adding a `.Produces` entry. The only `.ProducesProblem(503)` in the codebase is on `POST /api/settings/api-key`, and that one is about the price provider, not the database.
+- **Container Apps caps `failureThreshold` at 10 and `initialDelaySeconds` at 60**, and numbers above either are refused at deployment validation, not at run time. Ten failures on thirty-second periods is five minutes and is inside both limits. `successThreshold` must stay 1 for a liveness or startup probe.
 - **`InvariantGlobalization` is on, so a time-zone id resolves on one operating system and not the other.** `Directory.Build.props` sets it, which removes ICU. Measured, not assumed: the Linux container then resolves `America/New_York` and throws on `Eastern Standard Time`, and a Windows machine does the exact opposite. So look up the first, catch `TimeZoneNotFoundException`, look up the second. **`TryConvertWindowsIdToIanaId` is not a way out** — it is one of the calls invariant mode disables. Do not hand-roll daylight-saving arithmetic instead; `TimeZoneInfo` carries the real rules and any future change to them.
 - **TanStack Query v5.89.0 renamed the mutation callbacks' `TContext` generic to `TOnMutateResult` and *added* a new `context` (`{ client, meta, mutationKey }`) as the last parameter of each**; `mutationFn` gained a second argument. **Argument positions did not move** — the `onMutate` snapshot is still argument 3 in `onError`/`onSuccess` and 4 in `onSettled` — so rollback code written before 5.89 still compiles and still restores the correct value. Pinned version is 5.101.4.
 - **Tailwind v4 has no config file.** `darkMode: 'class'` does not exist; dark mode is `@custom-variant` in CSS. The failure is silent — `dark:` classes just never apply.
@@ -326,7 +333,7 @@ Each of these costs a day if you meet it cold.
 - **`CREATE SCHEMA … AUTHORIZATION migrator` needs `GRANT migrator TO CURRENT_USER` first.** Compose runs as superuser so it passes locally; the Azure Flexible Server admin is not a superuser and the migration job fails on first deploy.
 - **`beforeLoad` is synchronous; React effects run after the first render.** Load the session *before* mounting `RouterProvider`, or a hard refresh of a protected route always bounces to `/login` — which is the session-persistence requirement failing while every test passes.
 - **Vite `base` must come from the environment**, not be hardcoded to `/<repo>/`. nginx serves the compose SPA at `/`, so a baked-in base makes it request `/<repo>/assets/*.js` and render blank.
-- **ACA adds default TCP probes when ingress is on.** Declare all three `httpGet` probes in Bicep — liveness, readiness and startup — or `/health/live`, `/health/ready` and `/health/startup` are never called and the split does nothing.
+- **ACA adds default TCP probes when ingress is on.** Declare both `httpGet` probes in Bicep — liveness and readiness — or `/health/live` and `/health/ready` are never called and the split does nothing.
 - **`OneOf.Types.NotFound` collides with `Microsoft.AspNetCore.Http.HttpResults.NotFound`.** Only affects a file that imports `HttpResults`, which endpoints no longer need now that they return `Task<IResult>`. If one ever does, alias it — `using NotFound = OneOf.Types.NotFound;` — rather than writing the full name at each use.
 - **`[GenerateOneOf]` crashes on types in the global namespace.** It builds the generated filename from the namespace and emits `<global namespace>_Foo.g.cs`; `<` is illegal, so the generator throws `CS8785` and every implicit conversion then fails with unrelated-looking errors. Nothing uses the attribute now — handlers return `OneOf<…>` directly — but if one is ever reintroduced, declare it inside a namespace.
 - **Revoking and rotating a refresh token are not the same ending.** Both stamp `SupersededAt`; only rotation sets `SupersededBy`. A grace-period check written against `SupersededAt` alone therefore keeps accepting the token the user just logged out with, for the whole window — logout silently does nothing for 30 seconds while every test stays green. `Refresh_AfterLogout_IsRejectedInsideTheGraceWindow` pins it.
@@ -360,7 +367,7 @@ Each of these costs a day if you meet it cold.
 
 ## Deployment
 
-📄 **[docs/DEPLOYING.md](docs/DEPLOYING.md) is the runbook; [the design record](docs/superpowers/specs/2026-08-02-azure-deployment-design.md) is the why. Read the runbook before any deploy work.** This section is the summary; those files have the procedure, the cost model, the four decisions, the six-step verification and the six failed attempts.
+📄 **`docs/DEPLOYING.md` is the runbook; the design record (`docs/superpowers/specs/2026-08-02-azure-deployment-design.md`) is the why. Read the runbook before any deploy work.** This section is the summary; those files have the procedure, the cost model, the four decisions, the six-step verification and the six failed attempts.
 
 Three targets: `docker compose` (whole stack, local, the P0 gate), **GitHub Pages** (SPA, static, `VITE_API_BASE_URL` baked in at build), **Azure Container Apps** (API only).
 
