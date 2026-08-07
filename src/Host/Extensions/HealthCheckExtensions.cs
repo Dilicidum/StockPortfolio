@@ -99,7 +99,10 @@ internal static class HealthCheckExtensions
                 },
             })
             .RequireAuthorization()
-            .WithName("GetHealthDetail");
+            .WithName("GetHealthDetail")
+            // MapHealthChecks hands back an IEndpointConventionBuilder, so .Produces does not chain here.
+            .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status200OK, typeof(void), ["application/json"]))
+            .WithMetadata(new ProducesResponseTypeMetadata(StatusCodes.Status401Unauthorized, typeof(void), ["application/problem+json"]));
 
         return app;
     }

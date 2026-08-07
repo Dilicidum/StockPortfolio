@@ -125,8 +125,15 @@ what happens with each sample — see §2. Whatever it fetches on that path upda
 the **same single writer** the dashboard uses, so the real and generated provider paths cannot record
 differently.
 
-**It keeps no database.** Everything it stores is one value per ticker in Redis. A schema and a database
-role exist for it and are inert; they become real when per-user provider keys arrive.
+**Everything about a price it keeps in Redis** — one value per ticker, plus the trimmed series, the poll
+locks and the poll heartbeat. Those are derived and can be fetched again, which is what licenses a store
+with no durability guarantee.
+
+**It does have a database, since Phase 5.** Per-user provider keys ended the exception: the `marketdata`
+schema holds the keys themselves and the data-protection key ring that seals them, and `marketdata_svc` —
+created in Phase 1 and connected as nothing for four phases — is finally a real login. A key a user brings
+is the opposite kind of thing from a price: it must survive a restart and must be unreadable to anyone
+holding the raw rows.
 
 Worth being honest: MarketData has almost no domain model. Its rules are integration policy — how long
 history is kept, how ticker existence is decided, when a price counts as stale, when to stop calling a

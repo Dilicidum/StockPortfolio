@@ -23,9 +23,18 @@ public sealed class FeedHealthCheckTests
     public async Task Check_CycleWithNoTargetsAtAll_IsHealthy()
     {
         // Nobody has set an alert, so the poller took its lease, read an empty list and did nothing. That is a working feed, and a naive check calls a brand-new deployment broken for ever.
-        var result = await Run(new FeedHealth(Now - TimeSpan.FromHours(6), 0, 0, "Fake", false));
+        var result = await Run(new FeedHealth(Now - TimeSpan.FromSeconds(30), 0, 0, "Fake", false));
 
         result.Status.ShouldBe(HealthStatus.Healthy);
+    }
+
+    [Fact]
+    public async Task Check_NoTargetsButTheHeartbeatStopped_IsUnhealthy()
+    {
+        // An idle poller still writes a heartbeat every cycle, so reading "no targets" as healthy at any age hides a poller that died hours ago.
+        var result = await Run(new FeedHealth(Now - TimeSpan.FromHours(6), 0, 0, "Fake", false));
+
+        result.Status.ShouldBe(HealthStatus.Unhealthy);
     }
 
     [Fact]

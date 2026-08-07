@@ -211,8 +211,9 @@ unwired), that the random marker appears in **no** `CommandText`, that it *does*
 value (so the hostile string reached the database rather than being filtered out upstream, which would
 prove nothing), and that every parameter on those commands is referenced by name from the statement.
 
-**One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from
-`identity.users` fails with SQLSTATE `42501`. There is a test for exactly that, because a module
+**One Postgres role per module, and no cross-schema grants.** `portfolio_svc` selecting from anything in
+the `identity` schema fails with SQLSTATE `42501`, and a second test reads `has_schema_privilege` directly
+so the denial is shown to be the missing `USAGE` grant rather than a missing table. There is a test for exactly that, because a module
 boundary you cannot demonstrate is a diagram, not a boundary. All four roles are in use — `identity_svc`,
 `portfolio_svc`, `alerts_svc` and, since Phase 5, `marketdata_svc`, which sat created and inert until the
 per-user provider keys needed it.
@@ -232,7 +233,9 @@ its list ends with "тощо" (etc.). Every control is hand-built with Tailwind.
 
 `sessionStorage` is weaker than an httpOnly cookie and it is the honest consequence of hosting the
 SPA statically on a different origin from its API: the cookie would be third-party, and Safari
-blocks those outright. It argues for a short refresh-token lifetime — see `TokenPolicy`.
+blocks those outright. It argues for a short refresh-token lifetime, and the lifetimes are ASP.NET Core
+Identity's: the host sets the access token to 15 minutes, and the refresh token keeps the framework's
+14-day default.
 
 Being tab-scoped, `sessionStorage` also meant a second tab started with no credential and bounced to
 `/login` while the first was still signed in. Rather than move the token somewhere shared — which on
@@ -528,9 +531,12 @@ every company in the world, which is a worse answer than showing what the provid
 
 With no `Finnhub__ApiKey` configured the app registers `FakeQuoteProvider`, logs a single warning naming the
 active provider, and serves a deterministic seeded random walk — stable per `(ticker, minute)`, continuous
-within a UTC day, priced $20–$500 per symbol and identical across replicas and restarts. `GET
-/api/marketdata/health` returns the active provider's name, and the SPA's health panel renders the same
-string, so the log and the page cannot disagree.
+within a UTC day, priced $20–$500 per symbol and identical across replicas and restarts. The provider's name
+reaches a reader two ways, and both come from the same string the startup log prints, so the log and the page
+cannot disagree: the anonymous `GET /api/marketdata/health` returns `{"provider":"…"}` and is what a deploy
+or a curl checks without a credential, while **the SPA's health panel reads `provider` out of the
+authenticated `GET /api/health/detail`** — one request that carries the databases, the cache and the feed as
+well, instead of a second round trip for one word.
 
 This is the clean-clone path and the test path, and it is why `docker compose up` needs no credentials. It is
 **not** for the deployed app: leaving the fake on in Azure serves invented prices for real tickers, which
@@ -716,7 +722,7 @@ language negotiation.
 | Suite | Covers |
 |---|---|
 | `Shared.Kernel.UnitTests` | `Money` arithmetic and its currency checks |
-| `Modules.Identity.UnitTests` | entities, Argon2id, PHC encoding, validators |
+| `Modules.Identity.UnitTests` | the `UserPreferences` entity, the appearance-settings request validator, and EF's constructor binding over that entity — password hashing is the framework's now, so nothing here tests it |
 | `Modules.Portfolio.UnitTests` | the merge/correct rules, rounding, and the dashboard P&L calculator |
 | `Modules.MarketData.UnitTests` | Finnhub response mapping, the fake's determinism, the Redis stores' encode/decode, the poller and its leases, the trading clock and the three-state feed verdict |
 | `Modules.Alerts.UnitTests` | the sign-agreement rule, the three guards, the cooldown, and the entities behind them |
@@ -768,8 +774,9 @@ the SPA at `dilicidum.github.io/StockPortfolio` renders live market prices again
 `/api/marketdata/health` returns `{"provider":"Finnhub"}` — a real key, not the fake. The API runs at
 `stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` in resource group
 `stockportfolio-rg`. The measured burn was roughly $1.26/day while the API still scaled to zero; it is
-higher now that a replica runs around the clock. [docs/DEPLOYING.md](docs/DEPLOYING.md) holds the
-current figure and the live `deleteAfter` date — read the resource group's tag, not a document.
+higher now that a replica runs around the clock, and nobody has measured how much higher.
+[docs/DEPLOYING.md](docs/DEPLOYING.md) says how to read the real rate and the live `deleteAfter` date —
+both come from Azure, not from a document.
 
 **Deploying is `git push origin main` and nothing else.** The full runbook is
 [docs/DEPLOYING.md](docs/DEPLOYING.md) and the reasoning behind the cost model is in
@@ -881,8 +888,12 @@ Stated plainly rather than left for you to find.
   and a fall back to the last known price with its age. Over budget, tickers degrade rather than fail.
   A user who supplies their own key gets a separate outbound client, so a revoked key of theirs cannot
   open the breaker for everybody.
-- **`TokenPolicy` carries provisional values** (15 min / 14 days / rotate on / 30 s grace) marked
-  `TODO`. They work and are exercised by tests; they have not been signed off.
+- **Signing out leaves a window of up to 15 minutes.** A session is an ASP.NET Core Identity bearer
+  token — sealed and self-contained, with no row behind it — so there is nothing to delete and no way
+  to retire one early. Logging out rolls the user's security stamp, which kills the *refresh* token
+  immediately, but an access token already in a browser stays valid until it expires. Fifteen minutes
+  is the host's setting and is the whole of that residual window; the refresh token's 14 days is the
+  framework's default and nothing in the repo changes it.
 - **A cache outage is degraded, not unready.** All four database logins are probed under their own
   names, which is what closed **C7**. Redis is probed beside them but registered as *degraded*, so
   `/health/ready` still answers 200 and the platform keeps the replica serving; only a database that

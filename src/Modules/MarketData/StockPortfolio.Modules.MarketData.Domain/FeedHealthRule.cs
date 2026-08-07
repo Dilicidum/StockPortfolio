@@ -19,26 +19,29 @@ public static class FeedHealthRule
             return FeedVerdict.Unhealthy;
         }
 
+        var age = now - finishedAt;
+
+        // Staleness is judged first: an idle poller still writes a heartbeat every cycle, so one that stopped
+        // arriving says the poller stopped, whatever the cycle it describes happened to contain.
+        if (age > interval * DegradedIntervals)
+        {
+            return FeedVerdict.Unhealthy;
+        }
+
+        var punctual = age <= interval * HealthyIntervals;
+
         // A cycle with nothing to poll is a working poller that nobody has set an alert on, not a broken feed.
         if (tickersTargeted == 0)
         {
-            return FeedVerdict.Healthy;
+            return punctual ? FeedVerdict.Healthy : FeedVerdict.Degraded;
         }
 
-        // A cycle that asked for prices and stored none is a dead feed however punctual it is; timing alone
-        // reports a provider outage as healthy, because the poller keeps finishing cycles that fetch nothing.
+        // Punctual and storing nothing is a dead feed; timing alone would show a green light on it.
         if (tickersStored == 0)
         {
             return FeedVerdict.Degraded;
         }
 
-        var age = now - finishedAt;
-
-        if (age <= interval * HealthyIntervals)
-        {
-            return FeedVerdict.Healthy;
-        }
-
-        return age <= interval * DegradedIntervals ? FeedVerdict.Degraded : FeedVerdict.Unhealthy;
+        return punctual ? FeedVerdict.Healthy : FeedVerdict.Degraded;
     }
 }

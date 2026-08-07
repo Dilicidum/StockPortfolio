@@ -22,9 +22,11 @@ public sealed class FeedHealthRuleTests
     public void Verdict_LastCycleHadNothingToPoll_IsHealthyNotBroken() =>
         Verdict(Now - TimeSpan.FromSeconds(30), 0).ShouldBe(FeedVerdict.Healthy);
 
+    // An idle poller still writes a heartbeat every cycle, so a stale one means the poller stopped, not that
+    // it had nothing to do. Reading "no targets" as healthy at any age hides a dead poller for ever.
     [Fact]
-    public void Verdict_NothingToPollAndTheCycleIsOld_IsStillHealthy() =>
-        Verdict(Now - TimeSpan.FromHours(6), 0).ShouldBe(FeedVerdict.Healthy);
+    public void Verdict_NothingToPollAndTheHeartbeatStopped_IsUnhealthy() =>
+        Verdict(Now - TimeSpan.FromHours(6), 0).ShouldBe(FeedVerdict.Unhealthy);
 
     [Theory]
     [InlineData(1, FeedVerdict.Healthy)]

@@ -7,18 +7,21 @@ public static class TradingClock
 
     private static readonly TimeSpan SessionClose = new(16, 0, 0);
 
-    private static readonly TimeZoneInfo NewYork = ResolveNewYork();
+    private static readonly TimeZoneInfo? NewYork = ResolveNewYork();
 
     /// <summary>Minutes of open market between the two instants, ignoring holidays.</summary>
     public static double OpenMinutesBetween(DateTimeOffset from, DateTimeOffset to)
     {
-        if (to <= from)
+        // No time-zone database means no session to measure. Answering zero keeps showing the last price,
+        // which is the failing-open half of this phase; throwing would blank the dashboard instead.
+        if (NewYork is null || to <= from)
         {
             return 0d;
         }
 
-        var firstDay = TimeZoneInfo.ConvertTime(from, NewYork).Date;
-        var lastDay = TimeZoneInfo.ConvertTime(to, NewYork).Date;
+        var newYork = NewYork;
+        var firstDay = TimeZoneInfo.ConvertTime(from, newYork).Date;
+        var lastDay = TimeZoneInfo.ConvertTime(to, newYork).Date;
         var minutes = 0d;
 
         for (var day = firstDay; day <= lastDay; day = day.AddDays(1))
@@ -28,8 +31,8 @@ public static class TradingClock
                 continue;
             }
 
-            var opened = Instant(day + SessionOpen);
-            var closed = Instant(day + SessionClose);
+            var opened = Instant(newYork, day + SessionOpen);
+            var closed = Instant(newYork, day + SessionClose);
 
             var start = from > opened ? from : opened;
             var end = to < closed ? to : closed;
@@ -44,19 +47,24 @@ public static class TradingClock
     }
 
     // 09:30 and 16:00 never fall in a daylight-saving gap, so the offset for that wall time is always real.
-    private static DateTimeOffset Instant(DateTime newYorkLocal) =>
-        new(newYorkLocal, NewYork.GetUtcOffset(newYorkLocal));
+    private static DateTimeOffset Instant(TimeZoneInfo newYork, DateTime newYorkLocal) =>
+        new(newYorkLocal, newYork.GetUtcOffset(newYorkLocal));
 
     // Invariant globalization removes ICU, and which of these two ids resolves then depends on the operating system.
-    private static TimeZoneInfo ResolveNewYork()
+    private static TimeZoneInfo? ResolveNewYork()
     {
-        try
+        foreach (var id in new[] { "America/New_York", "Eastern Standard Time" })
         {
-            return TimeZoneInfo.FindSystemTimeZoneById("America/New_York");
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+                // An image without this id; try the other spelling before giving up.
+            }
         }
-        catch (TimeZoneNotFoundException)
-        {
-            return TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
-        }
+
+        return null;
     }
 }

@@ -153,6 +153,11 @@ internal sealed partial class FinnhubQuoteProvider(
 
         response.EnsureSuccessStatusCode();
 
+        if (apiKeyOverride is null)
+        {
+            rejection.Clear();
+        }
+
         return await ReadJsonAsync<FinnhubQuoteResponse>(response, ticker.Value, ct);
     }
 

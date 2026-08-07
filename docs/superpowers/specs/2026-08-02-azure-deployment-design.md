@@ -7,7 +7,7 @@
 |---|---|
 | API | `https://stockp-api-qdgz3wugqbihs.icysea-481b5825.polandcentral.azurecontainerapps.io` |
 | SPA | `https://dilicidum.github.io/StockPortfolio/` |
-| Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-19` |
+| Resource group | `stockportfolio-rg`, `polandcentral`, `deleteAfter: 2026-08-20` (the 2026-08-06 deploy plus 14 days) |
 
 The `deleteAfter` date decides when `teardown.yml` destroys the resource group. Read it from the
 resource group's own tag before relying on it; every deploy moves it.
@@ -53,22 +53,27 @@ The Container Apps Consumption free grant is 180,000 vCPU-seconds + 360,000 GiB-
 subscription per month. At the configured 0.5 vCPU that covers roughly 100 hours of runtime, so with
 `minReplicas: 0` and demo traffic the compute line rounds to zero.
 
-**Predicted: ~$33/month, ~$1.08/day. Measured once running: ~$1.26/day.** The prediction is this
-model's; the measured figure is what the running deployment costs, and it is the one quoted in
-`DEPLOYING.md` and `CLAUDE.md`.
+**Predicted: ~$33/month, ~$1.08/day. Measured while the API still scaled to zero: ~$1.26/day.** Both
+figures belong to that configuration. `minReplicas` went back to 1 in Phase 4 (D1 below), so the
+compute line no longer rounds to zero and the real rate is higher. Nobody has measured how much
+higher — [DEPLOYING.md](../../DEPLOYING.md) says how to read it rather than quoting a number.
 
 ## Decisions
 
-### D1 — `minReplicas: 0`
+### D1 — `minReplicas`: 0 for Phases 1–3, back to 1 from Phase 4
 
-Changed from `1`. Saves the entire $0–34 Container App line; the fixed floor is unaffected.
+Setting it to 0 saved the entire $0–34 Container App line; the fixed floor was unaffected. The cost
+was a cold start on the first request after idle, accepted for a demo.
 
-Cost: a cold start on the first request after idle. Accepted for a demo.
+**It went back to `1` in Phase 4 and must stay there.** `main.bicep` passes 1, matching the default
+in [containerapp-api.bicep](../../../infra/modules/containerapp-api.bicep). The quote poller is what
+ended the saving: a sleeping replica samples no prices, so no alert ever fires and nothing reports a
+fault. The poller and the always-on replica are one decision — reverting either alone leaves a feature
+that silently stops working whenever traffic does. The condition to check is not the phase number but
+whether `src/` still contains a `BackgroundService`, `IHostedService` or `PeriodicTimer`; it does.
 
-**This must go back to `1` when MarketData ships its quote poller.** The parameter keeps its default
-of `1` in [containerapp-api.bicep](../../../infra/modules/containerapp-api.bicep); only the call site
-in `main.bicep` passes `0`, so the change back is one line. That file's comment saying `minReplicas: 1`
-is required because of the poller describes the finished system, not today's.
+The compute line is therefore no longer near zero. An always-on replica is billed at the active rate
+around the clock and a held-open alert stream never qualifies for the reduced idle rate either.
 
 The poller and the Redis price window are alert infrastructure and belong to **Phase 4**. The
 dashboard fetches prices from the provider on demand, so it needs nothing running in the background.
@@ -98,7 +103,7 @@ So the guarantee comes from bounding how long the deployment lives, which we con
 
 | Control | Mechanism | Effect |
 |---|---|---|
-| Burn rate | `minReplicas: 0` | ~$1.26/day |
+| Burn rate | small resources, one small replica | read it, do not quote it — see `DEPLOYING.md` |
 | Deadline recorded | deploy stamps resource-group tag `deleteAfter` = today + 14 days | visible in Azure itself |
 | Enforcement | daily scheduled workflow deletes the group once `deleteAfter` has passed | maximum exposure ~$15 |
 | Tripwire | budget alert at $25 and $50 | email only, explicitly not a cap |

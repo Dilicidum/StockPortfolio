@@ -238,8 +238,10 @@ registration marks a failure as unhealthy, which would answer 503 and pull the r
 at most two copies, a Redis blip would then take the whole API off the air — the exact inverse of what
 degrading gracefully means. So the cache is registered as *degraded* and readiness stays at 200.
 
-**A database blip is retried before anything is answered.** Each context retries three times, two seconds
-apart. Past that the request answers 503 rather than 500, and the difference between the two is a real
+**A database blip is retried before anything is answered.** Each context retries up to three times, and two
+seconds is the longest it will wait between attempts — the delay grows and is randomised, so it is a ceiling
+rather than a fixed interval, and all three retries finish inside six seconds. Past that the request answers
+503 rather than 500, and the difference between the two is a real
 question rather than a formality: a connection failure is transient and worth retrying, while a unique-index
 violation — the create-or-merge race — is the database correctly refusing a write, and must stay a 500.
 
