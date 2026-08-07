@@ -194,7 +194,6 @@ public sealed class QuoteReaderTests
         var prices = await Build(provider, new RecordingStore(), keyReader)
             .GetCurrentPricesAsync(AUser, ["AAPL"], TestContext.Current.CancellationToken);
 
-        // A corrupt key ring or a database blip must cost this user their own key, never the whole dashboard.
         provider.LastApiKeyOverride.ShouldBeNull();
         prices["AAPL"].Price.ShouldBe(187.42m);
     }

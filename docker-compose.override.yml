@@ -1,16 +1,4 @@
-# =============================================================================
-#  Local development overlay - applied automatically by `docker compose up`.
-#
-#  Keep this file free of anything the stack NEEDS to run. `docker compose -f
-#  docker-compose.yml up` must still bring up a working stack on its own; that
-#  is the shape deployed to Azure, and it is what CI builds.
-#
-#  What it adds:
-#    - Postgres and Redis published on the host, so psql / redis-cli / a local
-#      `dotnet run` can reach them.
-#    - Development environment for the API: /openapi is mapped and exceptions
-#      come back with detail.
-# =============================================================================
+# Applied automatically. Keep it free of anything the stack needs: `-f docker-compose.yml` alone must still work.
 services:
 
   postgres:

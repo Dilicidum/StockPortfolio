@@ -46,7 +46,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
             .Registrations
             .ToDictionary(registration => registration.Name, StringComparer.Ordinal);
 
-        // One entry per database login, not one for "postgres": readiness once probed the Identity role alone and reported healthy regardless.
         var expected = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
             ["postgres-identity"] = ["ready", "detail"],
@@ -55,10 +54,8 @@ public sealed class HealthCheckTests(ApiFixture fixture)
             ["postgres-marketdata"] = ["ready", "detail"],
             [RedisCheck] = ["ready", "detail"],
 
-            // Not "ready": a rejected provider key reports Unhealthy, and readiness answering 503 for that would withdraw the replica.
             [FeedCheck] = ["detail"],
 
-            // Not "ready" either: it is a database round trip that only has to pass once, at start.
             [MigrationsCheck] = ["startup"],
         };
 
@@ -69,7 +66,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
                 .ShouldBe(tags.Order(StringComparer.Ordinal), ignoreOrder: false);
         }
 
-        // Pins the count as well as the names: a check registered nowhere contributes nothing, and a per-name loop would never notice.
         registrations.Count.ShouldBe(
             expected.Count,
             "Every module registers its own Postgres check in its Add<M>Module, MarketData adds the feed "
@@ -97,7 +93,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         report.StatusOf(RedisCheck).ShouldBe(nameof(HealthStatus.Healthy));
 
-        // Readiness selects on the "ready" tag, so the feed and migration checks must be absent from this body.
         report.Names().ShouldBe(ReadyComponentNames, ignoreOrder: true);
     }
 
@@ -118,7 +113,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         var report = await ReadReportAsync(response);
 
-        // The three-state value explicitly: two states would let Degraded be reported as Unhealthy and this test would still see 200.
         report.StatusOf(RedisCheck).ShouldBe(nameof(HealthStatus.Degraded));
         report.Status.ShouldBe(nameof(HealthStatus.Degraded));
 
@@ -141,7 +135,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         report.Status.ShouldBe(nameof(HealthStatus.Healthy));
 
-        // The fixture migrates before the host boots, so pending is empty; the name list is what catches a startup probe that has quietly become a second readiness probe.
         report.Names().ShouldBe(StartupComponentNames, ignoreOrder: true);
     }
 
@@ -159,7 +152,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         using var ready = await client.GetAsync(ReadinessPath, TestContext.Current.CancellationToken);
 
-        // Unhealthy still means 503 on readiness; that is what takes a genuinely broken replica out of rotation.
         ready.StatusCode.ShouldBe(HttpStatusCode.ServiceUnavailable, await Wire.Describe(ready));
     }
 
@@ -221,7 +213,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         var report = await ReadReportAsync(response);
 
-        // Unhealthy overall — the heartbeat is unreadable with the cache down — and still a 200.
         report.Status.ShouldBe(nameof(HealthStatus.Unhealthy));
         report.StatusOf(RedisCheck).ShouldBe(nameof(HealthStatus.Degraded));
         report.StatusOf(FeedCheck).ShouldBe(nameof(HealthStatus.Unhealthy));
@@ -238,7 +229,6 @@ public sealed class HealthCheckTests(ApiFixture fixture)
 
         using var document = JsonDocument.Parse(json);
 
-        // Cloned, so the body outlives the document rather than making this helper disposable.
         return new HealthBody(document.RootElement.Clone());
     }
 

@@ -35,7 +35,6 @@ internal sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsS
             ProblemDetails =
             {
                 Status = statusCode,
-                // No Title and no Type: ProblemDetailsDefaults fills both, so this handler and the framework use one namespace.
                 // Deliberately no Detail: never surface exception text to a caller.
             },
         });
@@ -44,7 +43,7 @@ internal sealed class ApiExceptionHandler(IProblemDetailsService problemDetailsS
     /// <summary>True when the database could not be reached, false for a write the database rejected — a unique-index violation must stay a 500.</summary>
     private static bool IsDatabaseUnavailable(Exception exception)
     {
-        // The thrown exception itself first: a failed SELECT throws NpgsqlException with nothing wrapping it, while a failed save is inside DbUpdateException and an exhausted retry inside RetryLimitExceededException.
+        // The thrown exception itself first: a failed SELECT arrives unwrapped, a failed save does not.
         for (var current = exception; current is not null; current = current.InnerException)
         {
             if (current is DbException database

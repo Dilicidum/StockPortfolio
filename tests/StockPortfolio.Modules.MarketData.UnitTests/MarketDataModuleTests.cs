@@ -101,7 +101,6 @@ public sealed class MarketDataModuleTests
             services.AddSingleton(TimeProvider.System);
             services.AddMarketDataModule(config);
 
-            // The health report asks about the rejected-key flag whichever provider is in play, so both branches must carry it.
             Lifetime<IFeedHealth>(services).ShouldBe(ServiceLifetime.Scoped);
             Lifetime<IPollHeartbeatStore>(services).ShouldBe(ServiceLifetime.Singleton);
 

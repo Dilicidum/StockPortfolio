@@ -45,7 +45,6 @@ internal static class HealthCheckExtensions
 
         services.AddHealthChecks()
 
-            // Degraded, not the default Unhealthy: a cache outage answering 503 on readiness pulls every replica out of rotation, and the framework already maps Degraded to 200.
             .AddRedis(
                 sp => sp.GetRequiredService<IConnectionMultiplexer>(),
                 name: RedisCheckName,
@@ -68,7 +67,6 @@ internal static class HealthCheckExtensions
             .AllowAnonymous()
             .WithName("Liveness");
 
-        // Unhealthy keeps its 503 here, which is what takes a genuinely broken replica out of rotation.
         app.MapHealthChecks(ReadinessPath, new HealthCheckOptions
             {
                 Predicate = check => check.Tags.Contains(ReadyTag),
@@ -77,7 +75,6 @@ internal static class HealthCheckExtensions
             .AllowAnonymous()
             .WithName("Readiness");
 
-        // The same writer again, so a test can assert this probe runs the migrations check and nothing else.
         app.MapHealthChecks(StartupPath, new HealthCheckOptions
             {
                 Predicate = check => check.Tags.Contains(StartupTag),
@@ -86,7 +83,6 @@ internal static class HealthCheckExtensions
             .AllowAnonymous()
             .WithName("Startup");
 
-        // Every status maps to 200: a route whose job is to report that Postgres is down cannot use that failure as its own answer.
         app.MapHealthChecks(DetailPath, new HealthCheckOptions
             {
                 Predicate = check => check.Tags.Contains(DetailTag),

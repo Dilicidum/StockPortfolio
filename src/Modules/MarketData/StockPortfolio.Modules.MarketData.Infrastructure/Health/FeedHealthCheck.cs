@@ -30,7 +30,6 @@ internal sealed class FeedHealthCheck(IFeedHealth feed, PollingOptions polling, 
             data["lastCycleAt"] = lastCycleAt.ToString("O", CultureInfo.InvariantCulture);
         }
 
-        // FeedHealthRule takes timing facts only, so this arm is the whole of how a rejected key reaches Unhealthy.
         if (health.ProviderKeyRejected)
         {
             return HealthCheckResult.Unhealthy(

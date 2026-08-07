@@ -17,13 +17,10 @@ public sealed class FeedHealthRuleTests
     public void Verdict_NoCycleHasEverFinished_IsUnhealthy() =>
         Verdict(null, 0).ShouldBe(FeedVerdict.Unhealthy);
 
-    // The case a rule built on "did we store any prices" gets wrong, and nothing in the app would ever say so.
     [Fact]
     public void Verdict_LastCycleHadNothingToPoll_IsHealthyNotBroken() =>
         Verdict(Now - TimeSpan.FromSeconds(30), 0).ShouldBe(FeedVerdict.Healthy);
 
-    // An idle poller still writes a heartbeat every cycle, so a stale one means the poller stopped, not that
-    // it had nothing to do. Reading "no targets" as healthy at any age hides a dead poller for ever.
     [Fact]
     public void Verdict_NothingToPollAndTheHeartbeatStopped_IsUnhealthy() =>
         Verdict(Now - TimeSpan.FromHours(6), 0).ShouldBe(FeedVerdict.Unhealthy);
@@ -39,7 +36,6 @@ public sealed class FeedHealthRuleTests
     public void Verdict_WithTargets_FallsThroughThreeThenTenIntervals(int ageSeconds, FeedVerdict expected) =>
         Verdict(Now - TimeSpan.FromSeconds(ageSeconds), 5).ShouldBe(expected);
 
-    // The bands are multiples of the configured interval, so a 10-second setting must not read as 10 minutes of slack.
     [Fact]
     public void Verdict_BandsFollowTheConfiguredInterval_NotAFixedNumberOfMinutes()
     {
@@ -53,12 +49,10 @@ public sealed class FeedHealthRuleTests
     public void Verdict_ACycleStampedInTheFuture_IsHealthyNotUnhealthy() =>
         Verdict(Now + TimeSpan.FromSeconds(30), 5).ShouldBe(FeedVerdict.Healthy);
 
-    // Timing alone calls a dead provider healthy: the poller keeps finishing punctual cycles that fetch nothing.
     [Fact]
     public void Verdict_APunctualCycleThatStoredNothing_IsDegradedNotHealthy() =>
         Verdict(Now - TimeSpan.FromSeconds(30), 5, stored: 0).ShouldBe(FeedVerdict.Degraded);
 
-    // Partial provider failure is not a dead feed; only storing nothing at all is.
     [Fact]
     public void Verdict_APunctualCycleThatStoredSome_IsHealthy() =>
         Verdict(Now - TimeSpan.FromSeconds(30), 5, stored: 1).ShouldBe(FeedVerdict.Healthy);

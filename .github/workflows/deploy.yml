@@ -1,29 +1,6 @@
 name: Deploy
 
-# Push to main deploys the API to Azure Container Apps and the SPA to GitHub Pages.
-#
-# Authentication is OIDC federated credentials — azure/login with client-id / tenant-id /
-# subscription-id and NO stored client secret. Give the service principal Contributor plus User
-# Access Administrator on the resource group (the second is required because main.bicep creates an
-# AcrPull role assignment).
-#
-# THE SUBJECT IS NOT `repo:<owner>/<repo>:ref:refs/heads/main`, whatever every guide says. GitHub
-# now issues immutable subject claims carrying the numeric owner and repository IDs:
-#
-#     repo:<owner>@<ownerId>/<repo>@<repoId>:ref:refs/heads/main
-#
-# The IDs stop a credential being hijacked by deleting a repo and recreating one with the same
-# name. A credential registered in the old form matches nothing and fails with AADSTS700213 — read
-# the subject out of the failing run's log and register that exact string. Both forms are
-# registered here, so a rollback of the feature does not break the deploy.
-#
-# Required repository secrets:
-#   AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
-#   PG_ADMIN_PASSWORD, MIGRATOR_PW, IDENTITY_PW, PORTFOLIO_PW, MARKETDATA_PW, ALERTS_PW
-#   FINNHUB_API_KEY            (optional — empty means the app runs on FakeQuoteProvider)
-#
-# Required repository variables:
-#   AZURE_RESOURCE_GROUP, AZURE_LOCATION
+# Deploys the API to Azure Container Apps and the SPA to GitHub Pages. Runbook: docs/DEPLOYING.md.
 on:
   push:
     branches: [main]
@@ -31,8 +8,6 @@ on:
 
 permissions:
   contents: read
-  # id-token is required twice over: by azure/login for the OIDC token exchange, and by
-  # actions/deploy-pages. Without it azure/login fails with "Unable to get ACTIONS_ID_TOKEN".
   id-token: write
   pages: write
 
@@ -44,9 +19,6 @@ env:
   NAME_PREFIX: stockp
   API_IMAGE_NAME: stockportfolio-api
   MIGRATOR_IMAGE_NAME: stockportfolio-migrator
-  # Days from each deploy until teardown.yml is allowed to delete the resource group. At roughly
-  # $1.26/day in Poland Central this bounds total spend near $18 -- the only hard guarantee
-  # available, since pay-as-you-go subscriptions cannot have an Azure spending limit.
   TEARDOWN_DAYS: 14
 
 jobs:
@@ -58,9 +30,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # -----------------------------------------------------------------------------------------
-      # 1. Azure login — OIDC federated credentials, no stored secret
-      # -----------------------------------------------------------------------------------------
       - name: Azure login
         uses: azure/login@v2
         with:
@@ -69,21 +38,9 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Install Bicep
-        # Unpinned for the same reason as ci.yml: an older Bicep silently downgrades unknown
-        # resource types to warnings instead of validating them.
         run: az bicep install
 
-      # -----------------------------------------------------------------------------------------
-      # 1b. Stamp the teardown deadline
-      #
-      # This subscription is pay-as-you-go, where Azure offers no spending limit and a budget only
-      # sends email -- it cannot stop anything. The cost ceiling is therefore enforced by bounding
-      # DURATION, and this tag is where the deadline lives. teardown.yml reads it daily.
-      #
-      # Stamped before the deploy, not after, so a run that fails halfway still leaves a resource
-      # group that will be cleaned up. Re-deploying pushes the date out, so the window extends by
-      # using it.
-      # -----------------------------------------------------------------------------------------
+      # Stamped before the deploy, so a run that fails halfway still leaves a bounded resource group.
       - name: Stamp teardown deadline
         run: |
           set -euo pipefail
@@ -94,15 +51,7 @@ jobs:
             --set "tags.deleteAfter=$DELETE_AFTER" \
             --output none
 
-      # -----------------------------------------------------------------------------------------
-      # 2. Bootstrap the registry, then build and push the images
-      #
-      # Chicken and egg: the registry must exist before `docker push`, but main.bicep references
-      # images that only exist after the push. Breaking it by deploying the ACR module on its own
-      # first — same file main.bicep uses, fully idempotent, no duplicated resource definition.
-      # The registry name embeds uniqueString(resourceGroup().id), which only ARM can evaluate,
-      # so it is read back from the deployment outputs rather than recomputed here.
-      # -----------------------------------------------------------------------------------------
+      # main.bicep references images that cannot be pushed until the registry exists, so acr.bicep is deployed alone first.
       - name: Bootstrap container registry
         id: registry
         run: |
@@ -126,10 +75,6 @@ jobs:
       - name: Build and push API image
         uses: docker/build-push-action@v6
         with:
-          # Build context is the repository ROOT, not src/Host. The Dockerfile copies
-          # Directory.Build.props, Directory.Packages.props and global.json before the .csproj
-          # files; without them restore fails inside the container with a Central Package
-          # Management error that does not reproduce on a developer machine.
           context: .
           file: src/Host/Dockerfile
           push: true
@@ -151,42 +96,14 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # -----------------------------------------------------------------------------------------
-      # 3. Deploy the infrastructure
-      #
-      # Parameters are passed inline rather than through infra/main.bicepparam so that every value
-      # comes from GitHub secrets in one obvious place, and so the workflow does not depend on
-      # environment-variable resolution inside a .bicepparam file.
-      #
-      # pagesOrigin is lowercased: GitHub Pages serves from <owner>.github.io in lowercase, and a
-      # browser's Origin header is lowercase, so a mixed-case owner would never match the CORS
-      # policy.
-      # -----------------------------------------------------------------------------------------
+      # Lowercased: a browser's Origin header is lowercase, so a mixed-case owner never matches the CORS policy.
       - name: Compute Pages origin
         id: pages
         run: |
           OWNER=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')
           echo "origin=https://${OWNER}.github.io" >> "$GITHUB_OUTPUT"
 
-      # -----------------------------------------------------------------------------------------
-      # 2b. Build the parameter file
-      #
-      # Secrets reach `az` through a FILE, never through argv.
-      #
-      # Moving them into a step-level `env:` block and then writing
-      # `postgresAdminPassword="$PG_ADMIN_PASSWORD"` looks safer and changes nothing that matters:
-      # the shell expands the variable before exec, so the plaintext still lands in the process
-      # arguments, readable from /proc/<pid>/cmdline by anything running on the runner for as long
-      # as the command lives. The argument list is the exposure; the YAML is not.
-      #
-      # jq reads the values from its OWN environment through the `env` object, so they are not jq
-      # arguments either — there is no point in the chain where a secret sits in a command line.
-      # `umask 077` makes the file owner-only, and it is deleted right after the deploy regardless
-      # of outcome; the runner itself is destroyed when the job ends.
-      #
-      # NAME_PREFIX is not redeclared here: workflow-level `env:` is already in the process
-      # environment, so jq's `env.NAME_PREFIX` resolves without it.
-      # -----------------------------------------------------------------------------------------
+      # Secrets reach `az` through a file, never through argv — see Secrets in docs/DEPLOYING.md.
       - name: Write deployment parameters
         env:
           LOCATION: ${{ vars.AZURE_LOCATION }}
@@ -223,15 +140,11 @@ jobs:
             }
           }' > "$RUNNER_TEMP/deploy-params.json"
 
-          # Shape check only — counts and key names, never values. A parameter silently missing
-          # here would surface as a confusing ARM validation error two steps later.
           echo "parameters written: $(jq -r '.parameters | keys | length' "$RUNNER_TEMP/deploy-params.json")"
           jq -r '.parameters | keys | join(", ")' "$RUNNER_TEMP/deploy-params.json"
 
       - name: What-if
-        # Not a gate — it cannot be, because the deploy is unattended. It is here so the run log
-        # records exactly what changed, which is the difference between a five-minute and a
-        # two-hour post-mortem when a deploy does something surprising.
+        # Not a gate — the deploy is unattended. It is here so the run log records what changed.
         run: |
           az deployment group what-if \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
@@ -255,29 +168,10 @@ jobs:
           echo "postgresFqdn=$(echo "$OUT"     | jq -r '.postgresFqdn.value')"     >> "$GITHUB_OUTPUT"
 
       - name: Remove deployment parameters
-        # always(): a failed deploy must not leave a plaintext parameter file behind for the
-        # remaining steps to trip over. The runner is torn down at the end of the job anyway, so
-        # this guards the middle of the job rather than the end of it.
         if: always()
         run: rm -f "$RUNNER_TEMP/deploy-params.json"
 
-      # -----------------------------------------------------------------------------------------
-      # 3b. Create the Postgres roles, schemas and grants
-      #
-      # The migration job connects as `migrator`. On a fresh Flexible Server that role does not
-      # exist, so without this step the deploy dies one step below with an authentication failure.
-      #
-      # Compose and Testcontainers both get the roles from `docker-entrypoint-initdb.d`, which is a
-      # feature of the postgres *container image*. Azure Flexible Server is a managed service and
-      # has no equivalent hook, so this is the one environment that needs the step spelled out --
-      # and the one that cannot be rehearsed locally.
-      #
-      # This runs db/init/00-roles.sh unmodified: the same wrapper, feeding the same 01-roles.sql,
-      # that the other two environments run. That is the point. Reimplementing the role model in
-      # Bicep or inline SQL would create a fourth copy free to drift from the other three.
-      # 01-roles.sql is guarded throughout (\gexec over NOT EXISTS, CREATE SCHEMA IF NOT EXISTS),
-      # so running it on every deploy is safe and idempotent.
-      # -----------------------------------------------------------------------------------------
+      # Flexible Server has no docker-entrypoint-initdb.d, so the roles are applied by running the same db/init/00-roles.sh unmodified.
       - name: Open Postgres firewall for this runner
         id: pgfirewall
         run: |
@@ -286,10 +180,6 @@ jobs:
           echo "Runner IP: $RUNNER_IP"
           RULE="gh-runner-${{ github.run_id }}"
           echo "rule=$RULE" >> "$GITHUB_OUTPUT"
-          # The server goes in --server-name and the rule in --name. There is no --rule-name on
-          # this command, despite `az containerapp job` and friends using that spelling; getting it
-          # wrong reports "unrecognized arguments: --rule-name" only after the earlier flag is
-          # already right, so the two mistakes surface one at a time.
           az postgres flexible-server firewall-rule create \
             --resource-group '${{ vars.AZURE_RESOURCE_GROUP }}' \
             --server-name "$(echo '${{ steps.deploy.outputs.postgresFqdn }}' | cut -d. -f1)" \
@@ -313,8 +203,7 @@ jobs:
         run: bash db/init/00-roles.sh
 
       - name: Close Postgres firewall for this runner
-        # always(): the rule must not outlive the job even when the step above fails, or every
-        # failed deploy leaves a permanent hole for a since-recycled runner address.
+        # always(): otherwise every failed deploy leaves a permanent hole for a recycled runner address.
         if: always() && steps.pgfirewall.outputs.rule != ''
         run: |
           az postgres flexible-server firewall-rule delete \
@@ -323,9 +212,7 @@ jobs:
             --name '${{ steps.pgfirewall.outputs.rule }}' \
             --yes --output none || true
 
-      # -----------------------------------------------------------------------------------------
-      # 4. Apply migrations and WAIT. Nothing goes live until this succeeds.
-      # -----------------------------------------------------------------------------------------
+      # Nothing goes live until this succeeds.
       - name: Run migration job
         run: |
           set -euo pipefail
@@ -335,10 +222,7 @@ jobs:
           EXECUTION=$(az containerapp job start --name "$JOB" --resource-group "$RG" --query name -o tsv)
           echo "Started execution: $EXECUTION"
 
-          # `az containerapp job start` returns as soon as the execution is queued, so polling is
-          # the only way to gate the release on migrations actually having finished. The job's own
-          # replicaTimeout is 600s; this deadline sits above it so a timeout here means the poll
-          # loop is wrong, not the job.
+          # `az containerapp job start` returns as soon as the execution is queued, so only polling gates the release.
           DEADLINE=$(( SECONDS + 900 ))
           while true; do
             STATUS=$(az containerapp job execution show \
@@ -364,13 +248,7 @@ jobs:
           done
           echo "Migrations applied."
 
-      # -----------------------------------------------------------------------------------------
-      # 5. Release the new image
-      #
-      # Step 3 already deployed this exact tag, so on a normal run this is close to a no-op. It
-      # earns its place when ARM short-circuits the deployment as unchanged while the digest
-      # behind a tag moved, and as the single explicit "now it is live" moment in the log.
-      # -----------------------------------------------------------------------------------------
+      # Near a no-op normally; it earns its place when ARM skips the deployment as unchanged while the digest behind the tag moved.
       - name: Update container app image
         run: |
           az containerapp update \
@@ -379,23 +257,7 @@ jobs:
             --image '${{ steps.registry.outputs.loginServer }}/${{ env.API_IMAGE_NAME }}:${{ github.sha }}' \
             --output none
 
-      # -----------------------------------------------------------------------------------------
-      # 5b. Smoke test — the API answers, and each of the four databases is Healthy BY NAME
-      #
-      # A 200 on its own is not enough. Readiness maps Degraded to 200, so the endpoint can answer
-      # 200 while a component underneath it is not healthy. Since Phase 6 the route carries a JSON
-      # body -- the same shape /api/health/detail writes -- so the four database checks can be
-      # asserted by name here, anonymously, with no credential involved.
-      #
-      # `redis` is deliberately NOT required to be Healthy. It is registered with a Degraded
-      # failure status precisely so a cache outage keeps the replica in rotation instead of
-      # withdrawing it; demanding Healthy here would re-impose the exact failure that registration
-      # removed. For the same reason the overall `status` is not asserted either -- it legitimately
-      # reads Degraded while all four databases are fine.
-      #
-      # What this does NOT prove: anything about the alert stream end to end. See E3 in
-      # docs/deferred-work.md.
-      # -----------------------------------------------------------------------------------------
+      # Four databases by name, never the overall status — see Verifying in docs/DEPLOYING.md.
       - name: Smoke test readiness
         run: |
           set -euo pipefail
@@ -425,8 +287,7 @@ jobs:
 
           FAILED=0
           for COMPONENT in postgres-identity postgres-portfolio postgres-marketdata postgres-alerts; do
-            # `[...][0] // "missing"` is what makes a component absent from the body a failure
-            # rather than an empty string quietly compared against "Healthy".
+            # `[...][0] // "missing"` makes an absent component a failure rather than an empty string.
             STATUS=$(jq -r --arg name "$COMPONENT" \
               '[.components[]? | select(.name == $name) | .status][0] // "missing"' "$BODY")
             echo "  $COMPONENT -> $STATUS"
@@ -440,12 +301,7 @@ jobs:
 
           echo "All four database components are Healthy."
 
-  # -------------------------------------------------------------------------------------------
-  # 6. Build and publish the SPA to GitHub Pages
-  #
-  # Runs after the API is live so VITE_API_BASE_URL can be the real, just-deployed FQDN rather
-  # than a value pinned in a config file that drifts.
-  # -------------------------------------------------------------------------------------------
+  # Runs after the API is live so VITE_API_BASE_URL can be the just-deployed FQDN.
   pages:
     name: GitHub Pages — build and publish SPA
     runs-on: ubuntu-latest
@@ -472,20 +328,12 @@ jobs:
 
       - name: Build
         env:
-          # Both of these come from the environment and are set ONLY here. nginx serves the
-          # docker-compose SPA at /, so a base baked into vite.config.ts would make the local
-          # stack request /<repo>/assets/*.js and render a blank page — the `docker compose up`
-          # acceptance gate failing on the grader's first command.
           VITE_BASE: /${{ github.event.repository.name }}/
           VITE_API_BASE_URL: ${{ needs.azure.outputs.apiUrl }}
         run: npm run build
         working-directory: src/Web
 
       - name: Create 404.html for SPA history routing
-        # GitHub Pages serves static files only, so a deep link to /login is a 404 — there is no
-        # such file on disk. Pages serves 404.html for any unmatched path, so an identical copy of
-        # index.html hands control to the client-side router and the deep link resolves. Without
-        # this, every route except the root breaks on a hard refresh or a shared link.
         run: cp src/Web/dist/index.html src/Web/dist/404.html
 
       - name: Upload artifact

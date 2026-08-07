@@ -1,6 +1,6 @@
 namespace StockPortfolio.Modules.MarketData.Domain;
 
-/// <summary>Counts the minutes the US equity market was open between two instants.</summary>
+/// <summary>Counts the minutes the US equity market was open between two instants, ignoring holidays.</summary>
 public static class TradingClock
 {
     private static readonly TimeSpan SessionOpen = new(9, 30, 0);
@@ -9,11 +9,8 @@ public static class TradingClock
 
     private static readonly TimeZoneInfo? NewYork = ResolveNewYork();
 
-    /// <summary>Minutes of open market between the two instants, ignoring holidays.</summary>
     public static double OpenMinutesBetween(DateTimeOffset from, DateTimeOffset to)
     {
-        // No time-zone database means no session to measure. Answering zero keeps showing the last price,
-        // which is the failing-open half of this phase; throwing would blank the dashboard instead.
         if (NewYork is null || to <= from)
         {
             return 0d;
@@ -50,7 +47,6 @@ public static class TradingClock
     private static DateTimeOffset Instant(TimeZoneInfo newYork, DateTime newYorkLocal) =>
         new(newYorkLocal, newYork.GetUtcOffset(newYorkLocal));
 
-    // Invariant globalization removes ICU, and which of these two ids resolves then depends on the operating system.
     private static TimeZoneInfo? ResolveNewYork()
     {
         foreach (var id in new[] { "America/New_York", "Eastern Standard Time" })
@@ -61,7 +57,7 @@ public static class TradingClock
             }
             catch (TimeZoneNotFoundException)
             {
-                // An image without this id; try the other spelling before giving up.
+                // Which id resolves depends on the operating system; try both before giving up.
             }
         }
 

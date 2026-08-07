@@ -1,12 +1,4 @@
-// Container Apps Job that applies EF Core migrations, connecting as the `migrator` role.
-//
-// Manual trigger: the deploy workflow starts it explicitly between `az deployment group create`
-// and `az containerapp update`, and waits for it to succeed before the new image goes live.
-//
-// The API itself must NEVER call Database.Migrate() at startup. Two replicas racing the same
-// migration corrupts __EFMigrationsHistory, and each module's history table lives in its own
-// schema (HasDefaultSchema does not move it — efcore#24127), so the corruption is per-module
-// and confusing.
+// Manual trigger: deploy.yml starts it between the infrastructure deploy and the image release, and waits for it.
 
 @description('Name of the container apps job.')
 param name string
@@ -52,13 +44,11 @@ resource job 'Microsoft.App/jobs@2026-01-01' = {
     configuration: {
       triggerType: 'Manual'
       manualTriggerConfig: {
-        // Exactly one replica, exactly one completion. Parallel migrators race the history
-        // table, which is the failure this whole job exists to avoid.
         parallelism: 1
         replicaCompletionCount: 1
       }
       replicaTimeout: replicaTimeout
-      // No retries. A failed migration should fail the deploy loudly, not half-apply twice.
+      // No retries: a failed migration must fail the deploy loudly, not half-apply twice.
       replicaRetryLimit: 0
       registries: [
         {

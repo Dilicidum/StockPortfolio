@@ -1,7 +1,3 @@
-// The API container app. The React SPA is NOT here — it is static on GitHub Pages, which is
-// why cross-origin is permanent and why the SSE endpoint uses a single-use ticket instead of
-// an Authorization header.
-
 @description('Name of the container app.')
 param name string
 
@@ -50,10 +46,10 @@ param finnhubApiKey string = ''
 @description('Whether a signed-in user may bring their own provider key. Not a secret — a plain feature switch.')
 param byokEnabled bool = true
 
-@description('Minimum replicas. Must stay at 1 — see comment below.')
+@description('Minimum replicas. Must stay at 1 while a BackgroundService exists in src/.')
 param minReplicas int = 1
 
-@description('Maximum replicas. Must stay at 2 — see comment below.')
+@description('Maximum replicas. Must stay at 2: the database connection budget allows no more.')
 param maxReplicas int = 2
 
 @description('Tags applied to the container app.')
@@ -82,9 +78,7 @@ var baseSecrets = [
   }
 ]
 
-// An ACA secret with an empty value is rejected, and with no Finnhub key configured the app is
-// supposed to fall back to FakeQuoteProvider and log a warning. So the secret and the env var
-// are both omitted entirely rather than set to ''.
+// An ACA secret with an empty value is rejected, so the secret and its env var are omitted rather than set to ''.
 var finnhubSecrets = empty(finnhubApiKey)
   ? []
   : [
@@ -119,21 +113,16 @@ var baseEnv = [
     name: 'ConnectionStrings__Redis'
     secretRef: 'redis-connection'
   }
-  // CORS runs in ASP.NET Core (AddCors/UseCors reading Cors:Origins), NOT at the ingress.
-  // See the ingress block below for why there is exactly one layer.
   {
     name: 'Cors__Origins__0'
     value: corsOrigin
   }
-  // Not a secret and not a placeholder: the real value. string() because ACA env values are strings.
   {
     name: 'MarketData__Byok__Enabled'
     value: string(byokEnabled)
   }
 ]
 
-// Polling and alerting. RetentionMinutes must stay ABOVE Alerts__MaxWindowMinutes: the host refuses
-// to start otherwise, because a window longer than the history kept stops alerts firing in silence.
 var pollingEnv = [
   {
     name: 'MarketData__Polling__IntervalSeconds'
@@ -191,13 +180,8 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
       activeRevisionsMode: 'Single'
       ingress: {
         external: true
-        // ASP.NET Core has listened on 8080 since .NET 8. It is NOT 80. Getting this wrong
-        // produces a container that starts, passes nothing, and 502s at the ingress.
         targetPort: 8080
-        // 'auto' is what carries the alert hub's WebSocket upgrade. There is deliberately no
-        // stickySessions block: the browser is pinned to WebSockets and skips negotiation, which
-        // is the documented exemption from session affinity with a Redis backplane. Let the client
-        // fall back to another transport and this file becomes wrong without anything failing here.
+        // 'auto' carries the hub's WebSocket upgrade; no stickySessions block, because the browser skips negotiation.
         transport: 'auto'
         allowInsecure: false
         traffic: [
@@ -206,19 +190,7 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
             weight: 100
           }
         ]
-
-        // DELIBERATELY NOT SET: corsPolicy.
-        //
-        // CORS is handled in ASP.NET Core (a "spa" policy bound to Cors:Origins, injected above
-        // as Cors__Origins__0). Enabling the ingress corsPolicy as well would put two layers on
-        // the same response and risk emitting Access-Control-Allow-Origin twice, which browsers
-        // reject outright — the request fails with a CORS error even though both layers are
-        // individually correct.
-        //
-        // The ASP.NET Core layer wins because it is identical under docker compose, so it is
-        // exercised by local runs and integration tests instead of only in production.
-        // If you ever move CORS to the ingress, delete the AddCors/UseCors calls in the same
-        // commit. Never both.
+        // Never add corsPolicy here: ASP.NET Core owns CORS, and two layers emit Access-Control-Allow-Origin twice, which browsers reject.
       }
       registries: [
         {
@@ -239,12 +211,6 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
           }
           env: concat(baseEnv, pollingEnv, finnhubEnv)
 
-          // EXPLICIT HTTP PROBES ARE LOAD-BEARING.
-          //
-          // When ingress is enabled, Container Apps injects default TCP probes and never calls
-          // /health/live or /health/ready. The liveness/readiness split in the host is then
-          // decorative: an app with a dead database still reports healthy to the platform, and
-          // an app still warming up receives traffic.
           probes: [
             {
               type: 'Liveness'
@@ -271,10 +237,6 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
               failureThreshold: 3
             }
             {
-              // /health/startup asks every DbContext for pending migrations, so it answers only once the
-              // migration job has finished. Five minutes of budget, spent as 10 x 30s rather than 30 x 10s:
-              // Container Apps caps failureThreshold at 10 and initialDelaySeconds at 60, and rejects
-              // anything above at deployment validation. successThreshold must be 1 for a startup probe.
               type: 'Startup'
               httpGet: {
                 path: '/health/startup'
@@ -288,29 +250,16 @@ resource api 'Microsoft.App/containerApps@2026-01-01' = {
               successThreshold: 1
             }
           ]
-          // /health/live checks NOTHING and must stay that way. Container Apps restarts a
-          // container that fails liveness, so pointing liveness at a Postgres or Redis check
-          // turns a dependency blip into a restart loop — a degraded app becomes a down app.
-          // /health/ready is where Postgres and Redis are checked: a failing readiness probe
-          // pulls the replica out of rotation without killing it.
         }
       ]
       scale: {
-        // minReplicas: 1 is load-bearing. Scale-to-zero stops the background quote poller, and
-        // with it price ingestion and threshold alerts — the app looks alive and silently
-        // serves stale data.
         minReplicas: minReplicas
-        // maxReplicas: 2 is what the Postgres connection budget allows. See modules/postgres.bicep.
         maxReplicas: maxReplicas
         rules: [
           {
             name: 'http-concurrency'
             http: {
               metadata: {
-                // 400, not the default 100. A held-open alert connection may count as one in-flight
-                // request for its whole life, so at 100 a few dozen connected browsers would
-                // scale on USER COUNT rather than on load - and maxReplicas is 2 regardless,
-                // because that is what the Postgres connection budget allows.
                 concurrentRequests: '400'
               }
             }

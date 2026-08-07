@@ -36,7 +36,6 @@ public sealed class QuotePollerTests
         // Still released: an early return holding the in-flight flag stops polling for several intervals, silently.
         harness.Lease.Releases.ShouldBe(1);
 
-        // Without this the idle case leaves no heartbeat at all, and health reports a working deployment as dead for ever.
         var heartbeat = harness.Heartbeats.Written.ShouldHaveSingleItem();
         heartbeat.At.ShouldBe(Now);
         heartbeat.TickersTargeted.ShouldBe(0);
@@ -58,7 +57,6 @@ public sealed class QuotePollerTests
         // Releasing after a refused claim deletes the winner's in-flight key — the overlap the second lock prevents.
         harness.Lease.Releases.ShouldBe(0);
 
-        // A cycle this replica never ran must not stamp a heartbeat over the winner's.
         harness.Heartbeats.Written.ShouldBeEmpty();
     }
 
@@ -91,7 +89,6 @@ public sealed class QuotePollerTests
 
         await harness.Poller.RunCycleAsync(Ct);
 
-        // Two targeted and none stored is the shape that separates a dead provider from an idle poller.
         var heartbeat = harness.Heartbeats.Written.ShouldHaveSingleItem();
         heartbeat.TickersTargeted.ShouldBe(2);
         heartbeat.TickersStored.ShouldBe(0);
@@ -132,7 +129,6 @@ public sealed class QuotePollerTests
         // The release is in a finally: without it a crashed cycle blocks polling until the key expires.
         harness.Lease.Releases.ShouldBe(1);
 
-        // Only a cycle that finished writes one; a heartbeat after a crash would report the feed as healthy.
         harness.Heartbeats.Written.ShouldBeEmpty();
     }
 

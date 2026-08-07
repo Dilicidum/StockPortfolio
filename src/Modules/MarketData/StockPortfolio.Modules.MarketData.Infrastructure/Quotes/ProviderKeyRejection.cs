@@ -9,7 +9,6 @@ internal sealed class ProviderKeyRejection
 
     public void Raise() => Volatile.Write(ref raised, 1);
 
-    // A 403 can come from a proxy in front of the provider rather than from the provider, so this must be
-    // clearable: without it one such response pins the feed unhealthy until the process restarts.
+    // Clearable because a 403 can come from a proxy rather than the provider, which would otherwise pin the feed unhealthy until restart.
     public void Clear() => Volatile.Write(ref raised, 0);
 }

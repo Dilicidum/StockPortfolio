@@ -25,7 +25,6 @@ public sealed class RedisPollHeartbeatStoreTests
         heartbeat.TickersStored.ShouldBe(5);
     }
 
-    // Zero targets is the state the three-state rule reads as healthy, so it must survive the round trip as zero.
     [Fact]
     public void Encode_AnEmptyCycle_RoundTripsAsZeroTargetsNotAsAbsent()
     {
@@ -62,7 +61,6 @@ public sealed class RedisPollHeartbeatStoreTests
 
         var store = new RedisPollHeartbeatStore(multiplexer, NullLogger<RedisPollHeartbeatStore>.Instance);
 
-        // A heartbeat that throws would end a cycle that had already done all its real work.
         await Should.NotThrowAsync(() => store.WriteAsync(
             new PollHeartbeat(Finished, 7, 5),
             TestContext.Current.CancellationToken));

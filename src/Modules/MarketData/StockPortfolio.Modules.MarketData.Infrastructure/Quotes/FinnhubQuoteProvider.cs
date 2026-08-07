@@ -54,7 +54,6 @@ internal sealed partial class FinnhubQuoteProvider(
                 }
             });
 
-        // One line for the whole fetch: a 429 fails every symbol at once, and twenty identical warnings say nothing extra.
         if (!failed.IsEmpty)
         {
             LogFetchIncomplete(logger, failed.Count, tickers.Count, string.Join(", ", failed.Order(StringComparer.Ordinal)));

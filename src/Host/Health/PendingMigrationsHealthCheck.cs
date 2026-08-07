@@ -27,7 +27,6 @@ internal sealed class PendingMigrationsHealthCheck(
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                // A database that cannot be asked is not a database that is up to date.
                 return HealthCheckResult.Unhealthy(
                     $"{contextType.Name} could not be asked which migrations are pending.",
                     ex,

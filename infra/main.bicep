@@ -1,26 +1,6 @@
-// StockPortfolio — Azure infrastructure.
-//
-// TOPOLOGY. The API runs on Azure Container Apps. The React SPA does NOT run here: it is built
-// as static assets and published to GitHub Pages. Cross-origin between the SPA and the API is
-// therefore permanent and by design — it is why CORS is configured, why the SSE endpoint uses a
-// single-use ticket rather than an Authorization header, and why the refresh token cannot live
-// in a same-site httpOnly cookie in the Pages deployment.
-//
-//   GitHub Pages (SPA, static)  ──REST + SSE, cross-origin──▶  Container App (API)
-//   GitHub Actions ──push image──▶ ACR ──managed-identity pull──▶ Container App + migration Job
-//   Container App ──▶ Postgres Flexible B1ms · Azure Managed Redis Balanced B0
-//
-// Deploy with:
-//   az deployment group what-if -g <rg> -f infra/main.bicep -p infra/main.bicepparam
-//   az deployment group create   -g <rg> -f infra/main.bicep -p infra/main.bicepparam
-//
-// Always run what-if first.
+// The API only. The SPA is static on GitHub Pages, so cross-origin between the two is permanent and by design.
 
 targetScope = 'resourceGroup'
-
-// ---------------------------------------------------------------------------------------------
-// Parameters
-// ---------------------------------------------------------------------------------------------
 
 @description('Short alphanumeric prefix for every resource name. Lowercase.')
 @minLength(3)
@@ -90,13 +70,7 @@ param tags object = {
   managedBy: 'bicep'
 }
 
-// ---------------------------------------------------------------------------------------------
-// Names
-// ---------------------------------------------------------------------------------------------
-
-// uniqueString over the resource group id: stable across redeploys into the same group, distinct
-// across groups and subscriptions. ACR and Postgres server names are globally unique, so this is
-// not cosmetic.
+// Stable across redeploys into the same group, distinct across groups: ACR and Postgres names are globally unique.
 var suffix = uniqueString(resourceGroup().id)
 
 var identityName = '${namePrefix}-id-${suffix}'
@@ -105,10 +79,6 @@ var redisName = '${namePrefix}-redis-${suffix}'
 var environmentName = '${namePrefix}-env-${suffix}'
 var apiAppName = '${namePrefix}-api-${suffix}'
 var migrateJobName = '${namePrefix}-job-migrate-${suffix}'
-
-// ---------------------------------------------------------------------------------------------
-// Identity, registry and the AcrPull grant
-// ---------------------------------------------------------------------------------------------
 
 module uami 'modules/identity.bicep' = {
   name: 'identity'
@@ -119,8 +89,6 @@ module uami 'modules/identity.bicep' = {
   }
 }
 
-// acr.bicep derives its own name from namePrefix + uniqueString(resourceGroup().id) so that the
-// deploy workflow can deploy it standalone as a bootstrap step and get the same name back.
 module registry 'modules/acr.bicep' = {
   name: 'acr'
   params: {
@@ -130,8 +98,6 @@ module registry 'modules/acr.bicep' = {
   }
 }
 
-// Its own module purely so the container app and job can dependsOn it. See the comment at the
-// top of modules/roleassignment.bicep — without this barrier the image pull races the grant.
 module acrPull 'modules/roleassignment.bicep' = {
   name: 'acr-pull-grant'
   params: {
@@ -139,10 +105,6 @@ module acrPull 'modules/roleassignment.bicep' = {
     principalId: uami.outputs.principalId
   }
 }
-
-// ---------------------------------------------------------------------------------------------
-// Data
-// ---------------------------------------------------------------------------------------------
 
 module postgres 'modules/postgres.bicep' = {
   name: 'postgres'
@@ -166,18 +128,6 @@ module redis 'modules/redis.bicep' = {
   }
 }
 
-// ---------------------------------------------------------------------------------------------
-// Connection strings
-// ---------------------------------------------------------------------------------------------
-
-// `Maximum Pool Size=2` on EVERY string, and it is not tuning — it is a correctness constraint.
-// B1ms allows 35 user connections; a different Username is a different Npgsql pool; Npgsql
-// defaults to 100. 100 x 4 roles x 2 replicas = 800 requested against a budget of 35.
-// 2 x 4 x 2 = 16 leaves room for the migration job and a psql session.
-//
-// No `SearchPath=` — two open Npgsql issues make it fail migrations with
-// 42P07 relation "__EFMigrationsHistory" already exists. Each DbContext pins its own
-// MigrationsHistoryTable instead.
 var postgresHost = postgres.outputs.fullyQualifiedDomainName
 var pgPrefix = 'Host=${postgresHost};Port=5432;Database=${postgresDatabaseName}'
 var pgSuffix = 'SSL Mode=Require;Trust Server Certificate=true;Maximum Pool Size=2'
@@ -188,23 +138,9 @@ var portfolioConnectionString = '${pgPrefix};Username=portfolio_svc;Password=${p
 var marketDataConnectionString = '${pgPrefix};Username=marketdata_svc;Password=${marketDataPassword};${pgSuffix}'
 var alertsConnectionString = '${pgPrefix};Username=alerts_svc;Password=${alertsPassword};${pgSuffix}'
 
-// Trust Server Certificate=true is a deliberate simplification: Npgsql 8+ validates the chain
-// under SSL Mode=Require, and while Azure's certificate is publicly trusted, the root set inside
-// the aspnet base image has bitten enough people that a first deploy failing on a TLS handshake
-// is not worth the purity. Tighten it (drop the flag, or ship the DigiCert root) before this
-// carries anything real.
+// Trust Server Certificate=true is a deliberate simplification; tighten it before this carries anything real.
 
-// Azure Managed Redis: TLS-only on port 10000, NOT 6379. abortConnect=false so the multiplexer
-// reconnects rather than staying permanently poisoned after one startup blip.
-//
-// Built inside modules/redis.bicep rather than here. Assembling it here required declaring the
-// cluster and database as `existing` and calling listKeys() on them, which creates no dependency
-// on the module that builds them -- see the comment on that module's connectionString output.
 var redisConnectionString = redis.outputs.connectionString
-
-// ---------------------------------------------------------------------------------------------
-// Compute
-// ---------------------------------------------------------------------------------------------
 
 module containerAppEnv 'modules/containerapp-env.bicep' = {
   name: 'containerapp-env'
@@ -232,18 +168,11 @@ module api 'modules/containerapp-api.bicep' = {
     redisConnectionString: redisConnectionString
     finnhubApiKey: finnhubApiKey
     byokEnabled: byokEnabled
-    // Back to 1 with Phase 4, and the expiry date on the old cost decision has passed.
-    // QuotePoller is a BackgroundService, so a sleeping replica evaluates no thresholds: the app
-    // would look alive and quietly never alert. The two go together and one without the other is
-    // a feature that stops working whenever traffic does.
-    // The honest cost is roughly one small always-on container on top of the previous ~$1.26/day.
     minReplicas: 1
     maxReplicas: 2
     tags: tags
   }
   dependsOn: [
-    // Explicit: nothing in the container app references the role assignment, so without this
-    // ARM starts both at once and the first image pull fails.
     acrPull
   ]
 }
@@ -265,10 +194,7 @@ module migrateJob 'modules/job-migrate.bicep' = {
   ]
 }
 
-// ---------------------------------------------------------------------------------------------
-// Outputs — consumed by .github/workflows/deploy.yml
-// ---------------------------------------------------------------------------------------------
-
+// Consumed by .github/workflows/deploy.yml.
 output acrName string = registry.outputs.name
 output acrLoginServer string = registry.outputs.loginServer
 output containerAppName string = api.outputs.name

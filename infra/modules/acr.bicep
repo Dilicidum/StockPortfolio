@@ -1,16 +1,4 @@
-// Azure Container Registry, Basic SKU. Images are pulled with the user-assigned managed
-// identity, never with the admin user.
-//
-// THIS MODULE COMPUTES ITS OWN NAME. Every other module takes a fully resolved name from
-// main.bicep; this one does not, because it has to be deployable on its own:
-//
-//   az deployment group create -g <rg> -f infra/modules/acr.bicep -p namePrefix=stockp
-//
-// .github/workflows/deploy.yml runs exactly that as a bootstrap step. You cannot `docker push`
-// to a registry that does not exist, and the full deployment references images that only exist
-// after the push — so the registry has to be created first. Since the name embeds
-// uniqueString(resourceGroup().id), which only ARM can evaluate, the workflow cannot compute it
-// and must read it back from this deployment's outputs.
+// The only module that computes its own name, because deploy.yml deploys it standalone as a bootstrap step before `docker push`.
 
 @description('Short alphanumeric prefix. Must match the value passed to main.bicep or the bootstrap will create a second registry.')
 @minLength(3)
@@ -34,17 +22,9 @@ resource registry 'Microsoft.ContainerRegistry/registries@2025-11-01' = {
     name: 'Basic'
   }
   properties: {
-    // Managed-identity pull only. The admin account is a shared static password and nothing here
-    // needs it.
     adminUserEnabled: false
     anonymousPullEnabled: false
     publicNetworkAccess: 'Enabled'
-    // Pinned deliberately. Microsoft has stated that 'AbacRepositoryPermissions' will become the
-    // default for new registries, and the legacy roles (AcrPull / AcrPush / AcrDelete) are NOT
-    // honoured on an ABAC-enabled registry. Pinning to Legacy keeps the AcrPull assignment in
-    // modules/roleassignment.bicep valid instead of silently ineffective. If this is ever flipped
-    // to ABAC, that assignment must become 'Container Registry Repository Reader' plus
-    // 'Container Registry Repository Catalog Lister', in the same commit.
     roleAssignmentMode: 'LegacyRegistryPermissions'
   }
 }

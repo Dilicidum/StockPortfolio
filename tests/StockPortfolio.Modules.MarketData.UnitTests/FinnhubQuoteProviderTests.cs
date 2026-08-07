@@ -382,7 +382,6 @@ public sealed class FinnhubQuoteProviderTests
             apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
-        // Without the flag a mistyped key is indistinguishable from an outage, and the health panel says nothing.
         rejection.IsRejected.ShouldBeTrue();
     }
 
@@ -399,7 +398,6 @@ public sealed class FinnhubQuoteProviderTests
             "a-users-own-key",
             TestContext.Current.CancellationToken);
 
-        // One user's bad key is that user's problem; raising it here would report the whole feed broken for everybody.
         rejection.IsRejected.ShouldBeFalse();
     }
 
@@ -437,12 +435,10 @@ public sealed class FinnhubQuoteProviderTests
             apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
-        // A 429 fails every symbol at once; twenty holdings used to write twenty identical lines.
         var warnings = logger.Entries.Where(entry => entry.Level == LogLevel.Warning).ToList();
 
         warnings.ShouldHaveSingleItem().Message.ShouldContain("3 of 3");
 
-        // The detail is kept, but where it cannot drown the one line that matters.
         logger.Entries.Count(entry => entry.Level == LogLevel.Debug).ShouldBe(3);
     }
 
@@ -466,12 +462,10 @@ public sealed class FinnhubQuoteProviderTests
             apiKeyOverride: null,
             TestContext.Current.CancellationToken);
 
-        // An HTML error page from a proxy is undiagnosable unless somebody can see it.
         logger.Entries
             .Where(entry => entry.Level == LogLevel.Debug)
             .ShouldContain(entry => entry.Message.Contains("Access denied by the firewall", StringComparison.Ordinal));
 
-        // A body can be large and can echo the key back inside a URL, so it must never reach information level.
         logger.Entries
             .Where(entry => entry.Level >= LogLevel.Information)
             .ShouldAllBe(entry => !entry.Message.Contains("Access denied by the firewall", StringComparison.Ordinal));

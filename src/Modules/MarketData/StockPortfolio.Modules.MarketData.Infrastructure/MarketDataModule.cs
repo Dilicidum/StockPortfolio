@@ -51,11 +51,9 @@ public static class MarketDataModule
                     MarketDataDbContext.MigrationsHistoryTableName,
                     MarketDataDbContext.SchemaName);
 
-                // Three attempts two seconds apart, not the six-attempt default: a stopped database must answer before the readiness probe times out. The cost is that EF now buffers every result set.
                 npg.EnableRetryOnFailure(maxRetryCount: 3, maxRetryDelay: TimeSpan.FromSeconds(2), errorCodesToAdd: null);
             }));
 
-        // Tagged, not bare: an untagged check joins no probe at all now that every MapHealthChecks filters on a tag.
         services.AddHealthChecks().AddDbContextCheck<MarketDataDbContext>("postgres-marketdata", tags: ["ready", "detail"]);
 
         services.AddSingleton<IKeyRingStore, KeyRingStore>();
@@ -74,7 +72,6 @@ public static class MarketDataModule
 
         services.AddSingleton(options);
 
-        // Registered on both branches: the health report asks about it whichever provider is in play.
         services.AddSingleton<ProviderKeyRejection>();
 
         if (options.HasApiKey)
@@ -112,7 +109,6 @@ public static class MarketDataModule
         services.AddScoped<ICompanyNameReader, CompanyNameReader>();
         services.AddScoped<IFeedHealth, FeedHealthReader>();
 
-        // "detail" and not "ready": a rejected key reports Unhealthy, and readiness answering 503 for that would withdraw every replica.
         services.AddHealthChecks().AddCheck<FeedHealthCheck>(FeedCheckName, tags: ["detail"]);
 
         services.AddMarketDataHandlers();

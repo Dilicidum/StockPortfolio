@@ -1,16 +1,3 @@
-// Azure Database for PostgreSQL Flexible Server, Burstable B1ms.
-//
-// Public access plus the AllowAllAzureServicesAndResourcesWithinAzureIps rule. Container Apps
-// on the Consumption workload profile has no VNet of its own, so there is no subnet to
-// allow-list; the 0.0.0.0 sentinel rule is the documented way to let Azure-internal callers in.
-//
-// CONNECTION BUDGET. B1ms allows 35 user connections. A different Username is a different
-// Npgsql pool, so the app opens four pools (identity_svc, portfolio_svc, marketdata_svc,
-// alerts_svc). Every connection string therefore carries `Maximum Pool Size=2`:
-// 2 replicas x 4 roles x 2 = 16, leaving headroom for the migration job and psql. Npgsql's
-// default of 100 would ask for 800. PgBouncer is not available on Burstable, so there is no
-// escape hatch below this.
-
 @description('Name of the flexible server. Lowercase alphanumeric and hyphens, globally unique.')
 @minLength(3)
 @maxLength(63)
@@ -57,8 +44,7 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' = {
     administratorLoginPassword: administratorLoginPassword
     authConfig: {
       passwordAuth: 'Enabled'
-      // The migration job and the four service roles are plain PostgreSQL roles created by
-      // db/init/01-roles.sql, not Entra principals. Entra auth would not reach them.
+      // The migrator and the four service roles are plain PostgreSQL roles, which Entra auth would not reach.
       activeDirectoryAuth: 'Disabled'
     }
     storage: {
@@ -70,7 +56,6 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' = {
       geoRedundantBackup: 'Disabled'
     }
     highAvailability: {
-      // Burstable does not support HA, and this is a demo topology.
       mode: 'Disabled'
     }
     network: {
@@ -79,9 +64,7 @@ resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2025-08-01' = {
   }
 }
 
-// The 0.0.0.0-0.0.0.0 sentinel is not "the whole internet": ARM interprets it as
-// "allow Azure services and resources within Azure IPs". ACA Consumption egresses from
-// Azure-owned addresses, so this is what lets the API and the migration job connect.
+// The 0.0.0.0-0.0.0.0 sentinel is not the whole internet: ARM reads it as "allow Azure services", which is how ACA Consumption connects.
 resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2025-08-01' = {
   parent: server
   name: 'AllowAllAzureServicesAndResourcesWithinAzureIps'
@@ -94,7 +77,6 @@ resource allowAzureServices 'Microsoft.DBforPostgreSQL/flexibleServers/firewallR
 resource database 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2025-08-01' = {
   parent: server
   name: databaseName
-  // Schemas and roles are created by the migration job, not here.
   dependsOn: [
     allowAzureServices
   ]

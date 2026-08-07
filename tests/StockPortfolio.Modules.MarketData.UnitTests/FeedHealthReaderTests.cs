@@ -30,7 +30,6 @@ public sealed class FeedHealthReaderTests
     {
         var health = await Build(heartbeat: null).GetFeedHealthAsync(Ct);
 
-        // Null, not "now": a stamped default would read as a cycle that just finished.
         health.LastCycleAt.ShouldBeNull();
         health.TickersTargeted.ShouldBe(0);
     }
